@@ -1,0 +1,56 @@
+name: Docker Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - development
+      - release
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  docker-build:
+    runs-on: docker-build
+
+    steps:
+      - name: Install checkout runtime dependencies
+        run: |
+          apk add --no-cache git nodejs bash curl
+
+      - name: Verify package registry access
+        run: |
+          curl --silent --show-error --fail --max-time 20 https://registry.npmjs.org/
+          curl --silent --show-error --fail --max-time 20 https://pypi.org/simple/
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx builder
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if docker buildx inspect forgejo-builder >/dev/null 2>&1; then
+            docker buildx use forgejo-builder
+          else
+            docker buildx create \
+              --name forgejo-builder \
+              --driver docker-container \
+              --driver-opt network=host \
+              --use
+          fi
+
+          docker buildx inspect --bootstrap
+
+      - name: Validate amd64 build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export REVISION="${GITHUB_SHA}"
+          export VERSION="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
+
+          docker buildx bake validate-amd64

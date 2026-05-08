@@ -1304,9 +1304,9 @@ def admin_dashboard(
             repo_rows.append({"name": repository_name, "tag_count": len(tags)})
         repo_truncation["truncated"] = repo_truncation["truncated"] or len(repositories) > settings.dashboard_max_repositories
         repo_truncation["returned"] = len(repo_rows)
-    except Exception as e:
+    except Exception:
         # Handle registry connectivity issues gracefully
-        print(f"Warning: Could not connect to registry: {e}")
+        print("Warning: Registry summary unavailable.")
         # Return empty repo data instead of failing completely
         repo_rows = []
         total_tags = 0

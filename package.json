@@ -5,9 +5,9 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "./scripts/dev-api.sh",
-    "dev:web": "INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next dev --hostname 0.0.0.0 --port 3000",
-    "build": "INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next build",
-    "start": "INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next start --hostname 0.0.0.0 --port 3000",
+    "dev:web": "NEXT_TELEMETRY_DISABLED=1 INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next dev --hostname 0.0.0.0 --port 3000",
+    "build": "NEXT_TELEMETRY_DISABLED=1 INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next start --hostname 0.0.0.0 --port 3000",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {

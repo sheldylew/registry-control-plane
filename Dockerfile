@@ -59,6 +59,8 @@ CMD ["./scripts/auth-init.py"]
 
 FROM node:20.18.3-alpine3.20 AS web-builder
 
+ENV NEXT_TELEMETRY_DISABLED=1
+
 WORKDIR /web
 
 COPY package.json package-lock.json ./
@@ -74,7 +76,8 @@ RUN npm run build
 
 FROM node:20.18.3-alpine3.20 AS web
 
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
 WORKDIR /web
 
 RUN addgroup -g 10001 -S app && adduser -S -D -H -u 10001 -G app app
