@@ -1493,8 +1493,43 @@ def test_repo_tags_return_summary_rows(settings) -> None:
         response = client.get("/api/repos/sheldylew/app/tags")
 
     assert response.status_code == 200
+    assert response.json()["visibility"] == "private"
+    assert response.json()["can_manage_visibility"] is False
     assert response.json()["tags"][0]["tag"] == "release"
     assert response.json()["tags"][0]["architectures"] == ["linux/amd64", "linux/arm64"]
+
+
+def test_admin_repo_tags_include_repository_visibility(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        tags={
+            "public/app": [
+                TagSummary(
+                    tag="latest",
+                    digest="sha256:public",
+                    media_type="application/vnd.oci.image.manifest.v1+json",
+                    total_size=42,
+                    architectures=["linux/amd64"],
+                    created_at="2026-05-04T10:20:30Z",
+                    history_count=1,
+                )
+            ]
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(Repository(name="public/app", visibility="public"))
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/repos/public/app/tags")
+
+    assert response.status_code == 200
+    assert response.json()["visibility"] == "public"
+    assert response.json()["can_manage_visibility"] is True
 
 
 def test_repo_tags_return_truncation_metadata(settings) -> None:

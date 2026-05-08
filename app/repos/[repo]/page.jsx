@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
+import RepositoryVisibilityPanel from "@/app/components/repository-visibility-panel";
 import { apiFetch } from "@/app/lib/server-api";
 
 function formatBytes(size) {
@@ -86,14 +87,22 @@ export default async function RepoDetailPage({ params }) {
               Browse published tags and inspect manifest details without direct browser-to-registry calls.
             </p>
           </div>
-          {payload.can_delete_tag || payload.can_prune_repository ? (
-            <Link
-              href="/admin/maintenance"
-              className="inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
-            >
-              Garbage collection
-            </Link>
-          ) : null}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            {payload.can_manage_visibility ? (
+              <RepositoryVisibilityPanel
+                repositoryName={payload.repo}
+                initialVisibility={payload.visibility}
+              />
+            ) : null}
+            {payload.can_delete_tag || payload.can_prune_repository ? (
+              <Link
+                href="/admin/maintenance"
+                className="inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
+              >
+                Garbage collection
+              </Link>
+            ) : null}
+          </div>
         </div>
       </div>
 

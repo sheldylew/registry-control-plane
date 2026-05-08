@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Label, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
+import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/20/solid";
 
 import { FORM_NAME_MAX_LENGTH, hasNonEmptyValue, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
 
@@ -14,6 +16,86 @@ function readCookie(name) {
 
 function subjectLabel(permission) {
   return permission.subject_type === "user" ? `User: ${permission.subject_name}` : `Robot: ${permission.subject_name}`;
+}
+
+function CustomListbox({ label, value, options, onChange, disabled = false }) {
+  const selected = value || options[0] || { label: "None available", value: "" };
+
+  return (
+    <div className="space-y-2">
+      <Listbox value={selected} by="value" onChange={onChange} disabled={disabled || options.length === 0}>
+        <Label className="block text-sm text-slate-300">{label}</Label>
+        <div className="relative">
+          <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-60">
+            <span className="col-start-1 row-start-1 truncate pr-7 text-sm font-medium">{selected.label}</span>
+            <ChevronUpDownIcon
+              aria-hidden="true"
+              className="col-start-1 row-start-1 size-5 self-center justify-self-end text-slate-400"
+            />
+          </ListboxButton>
+          <ListboxOptions
+            transition
+            className="absolute z-10 mt-2 max-h-60 w-full overflow-auto rounded-2xl border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/40 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
+          >
+            {options.map((option) => (
+              <ListboxOption
+                key={option.value}
+                value={option}
+                className="group relative cursor-default select-none py-2.5 pl-9 pr-4 text-white data-[focus]:bg-cyan-400 data-[focus]:text-slate-950 data-[focus]:outline-none"
+              >
+                <span className="block truncate font-normal group-data-[selected]:font-semibold">{option.label}</span>
+                <span className="absolute inset-y-0 left-0 hidden items-center pl-2 text-cyan-300 group-data-[focus]:text-slate-950 group-data-[selected]:flex">
+                  <CheckIcon aria-hidden="true" className="size-5" />
+                </span>
+              </ListboxOption>
+            ))}
+          </ListboxOptions>
+        </div>
+      </Listbox>
+    </div>
+  );
+}
+
+function PermissionCheckbox({ id, label, description, checked, onChange }) {
+  return (
+    <div className="flex gap-3 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
+      <div className="flex h-6 shrink-0 items-center">
+        <div className="group grid size-4 grid-cols-1">
+          <input
+            id={id}
+            name={id}
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => onChange(event.target.checked)}
+            aria-describedby={`${id}-description`}
+            className="col-start-1 row-start-1 appearance-none rounded-sm border border-white/10 bg-white/5 checked:border-cyan-400 checked:bg-cyan-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400 disabled:border-white/5 disabled:bg-white/10 disabled:checked:bg-white/10 forced-colors:appearance-auto"
+          />
+          <svg
+            fill="none"
+            viewBox="0 0 14 14"
+            className="pointer-events-none col-start-1 row-start-1 size-3.5 self-center justify-self-center stroke-slate-950 group-has-disabled:stroke-white/25"
+          >
+            <path
+              d="M3 8L6 11L11 3.5"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="opacity-0 group-has-checked:opacity-100"
+            />
+          </svg>
+        </div>
+      </div>
+      <div className="text-sm leading-6">
+        <label htmlFor={id} className="font-medium text-white">
+          {label}
+        </label>{" "}
+        <span id={`${id}-description`} className="text-slate-400">
+          <span className="sr-only">{label} </span>
+          {description}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 export default function PermissionsPanel({ initialUsers, initialRobots, initialPermissions }) {
@@ -36,6 +118,16 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
     () => (subjectType === "user" ? initialUsers : initialRobots),
     [initialRobots, initialUsers, subjectType],
   );
+  const subjectTypeOptions = [
+    { value: "user", label: "User" },
+    { value: "robot", label: "Robot" },
+  ];
+  const selectedSubjectType = subjectTypeOptions.find((option) => option.value === subjectType) || subjectTypeOptions[0];
+  const subjectListboxOptions = subjectOptions.map((subject) => ({
+    value: String(subject.id),
+    label: subjectType === "user" ? subject.username : subject.name,
+  }));
+  const selectedSubject = subjectListboxOptions.find((option) => option.value === subjectId) || subjectListboxOptions[0];
 
   function resetForm(nextType = subjectType) {
     const nextOptions = nextType === "user" ? initialUsers : initialRobots;
@@ -139,33 +231,18 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <label className="space-y-2">
-            <span className="text-sm text-slate-300">Subject type</span>
-            <select
-              value={subjectType}
-              onChange={(event) => resetForm(event.target.value)}
-              required
-              className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white"
-            >
-              <option value="user">User</option>
-              <option value="robot">Robot</option>
-            </select>
-          </label>
-          <label className="space-y-2">
-            <span className="text-sm text-slate-300">Subject</span>
-            <select
-              value={subjectId}
-              onChange={(event) => setSubjectId(event.target.value)}
-              required
-              className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white"
-            >
-              {subjectOptions.map((subject) => (
-                <option key={subject.id} value={subject.id}>
-                  {subjectType === "user" ? subject.username : subject.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <CustomListbox
+            label="Subject type"
+            value={selectedSubjectType}
+            options={subjectTypeOptions}
+            onChange={(option) => resetForm(option.value)}
+          />
+          <CustomListbox
+            label="Subject"
+            value={selectedSubject}
+            options={subjectListboxOptions}
+            onChange={(option) => setSubjectId(option.value)}
+          />
           <label className="space-y-2 md:col-span-2">
             <span className="text-sm text-slate-300">Repository pattern</span>
             <input
@@ -179,25 +256,25 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
           </label>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {[
-            ["Pull", canPull, setCanPull],
-            ["Push", canPush, setCanPush],
-            ["Delete tag", canDelete, setCanDelete],
-          ].map(([label, value, setter]) => (
-            <label
-              key={label}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-slate-200"
-            >
-              <input
-                type="checkbox"
+        <fieldset className="mt-4">
+          <legend className="sr-only">Repository access</legend>
+          <div className="grid gap-3 md:grid-cols-3">
+            {[
+              ["permission-pull", "Pull", "read images from matches.", canPull, setCanPull],
+              ["permission-push", "Push", "write images to matches.", canPush, setCanPush],
+              ["permission-delete", "Delete tag", "remove matching tags.", canDelete, setCanDelete],
+            ].map(([id, label, description, value, setter]) => (
+              <PermissionCheckbox
+                id={id}
+                key={label}
+                label={label}
+                description={description}
                 checked={value}
-                onChange={(event) => setter(event.target.checked)}
+                onChange={setter}
               />
-              {label}
-            </label>
-          ))}
-        </div>
+            ))}
+          </div>
+        </fieldset>
 
         {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
 

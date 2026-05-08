@@ -1501,6 +1501,8 @@ def list_repository_tags(
 
     can_delete_tag = can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user))
     can_prune_repository = user.is_admin
+    repository = db.scalar(select(Repository).where(Repository.name == repo_name))
+    visibility = repository.visibility if repository is not None else "private"
 
     try:
         tags, truncation = registry.list_tag_summaries_bounded(
@@ -1516,6 +1518,8 @@ def list_repository_tags(
 
     return {
         "repo": repo_name,
+        "visibility": visibility,
+        "can_manage_visibility": user.is_admin,
         "can_delete_tag": can_delete_tag,
         "can_prune_repository": can_prune_repository,
         "tags": [_serialize_tag_summary(tag) for tag in tags],
