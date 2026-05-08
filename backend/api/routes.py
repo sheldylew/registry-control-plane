@@ -19,7 +19,7 @@ from backend.auth.permissions import (
     validate_repository_name,
     validate_repository_pattern,
 )
-from backend.auth.sessions import create_session, revoke_session
+from backend.auth.sessions import create_session, revoke_session, revoke_user_sessions
 from backend.config import Settings
 from backend.maintenance import MaintenanceService
 from backend.metrics import increment as increment_metric
@@ -442,6 +442,16 @@ class CreateUserPayload(BaseModel):
         return _validate_password(value)
 
 
+class ResetUserPasswordPayload(BaseModel):
+    password: str = Field(min_length=8, max_length=MAX_PASSWORD_LENGTH)
+    current_password: Optional[str] = Field(default=None, max_length=MAX_PASSWORD_LENGTH)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        return _validate_password(value)
+
+
 class CreatePatPayload(BaseModel):
     name: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LENGTH)
     expires_at: Optional[datetime] = None
@@ -816,6 +826,57 @@ def disable_user(
     user.is_active = False
     db.commit()
     return {"user": _serialize_user(user)}
+
+
+@router.post("/admin/users/{user_id}/enable")
+def enable_user(
+    user_id: int,
+    csrf_user: User = Depends(require_csrf),
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    user.is_active = True
+    db.commit()
+    record_audit_event(
+        db,
+        actor=csrf_user,
+        action="user_enabled",
+        target_type="user",
+        target_id=user.id,
+        metadata_json={"username": user.username},
+    )
+    return {"user": _serialize_user(user)}
+
+
+@router.post("/admin/users/{user_id}/password")
+def reset_user_password(
+    user_id: int,
+    payload: ResetUserPasswordPayload,
+    csrf_user: User = Depends(require_csrf),
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    if user.id == csrf_user.id:
+        if payload.current_password is None or not verify_password(payload.current_password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect.")
+    user.password_hash = hash_password(payload.password)
+    db.commit()
+    revoked_sessions = revoke_user_sessions(db, user_id=user.id)
+    record_audit_event(
+        db,
+        actor=csrf_user,
+        action="user_password_reset",
+        target_type="user",
+        target_id=user.id,
+        metadata_json={"username": user.username, "revoked_sessions": revoked_sessions},
+    )
+    return {"user": _serialize_user(user), "revoked_sessions": revoked_sessions}
 
 
 @router.get("/admin/tokens")

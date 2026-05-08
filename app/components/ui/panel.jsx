@@ -1,7 +1,8 @@
-export function Panel({ as: Component = "section", className = "", children }) {
+export function Panel({ as: Component = "section", className = "", children, ...props }) {
   return (
     <Component
       className={`rounded-lg border border-white/10 bg-slate-900/80 shadow-sm shadow-slate-950/20 ${className}`}
+      {...props}
     >
       {children}
     </Component>

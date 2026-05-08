@@ -11,7 +11,7 @@ from backend.auth.passwords import hash_password
 from backend.config import Settings
 from backend.main import create_app
 from backend.metrics import snapshot as metrics_snapshot
-from backend.models import AppSetting, AuditEvent, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User
+from backend.models import AppSetting, AuditEvent, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, TagSummary
 from backend.setup import PUBLIC_REGISTRY_ORIGIN_KEY, ensure_setup_token
@@ -528,6 +528,45 @@ def test_admin_cannot_disable_own_account(settings) -> None:
     assert admin.is_active is True
 
 
+def test_admin_can_enable_disabled_user(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="disabled-user",
+                email="disabled-user@example.com",
+                password_hash=hash_password("disabled-user-pass"),
+                is_admin=False,
+                is_active=False,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+
+        login = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": settings.admin_password},
+        )
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            f"/api/admin/users/{user_id}/enable",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            user = session.get(User, user_id)
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert response.json()["user"]["is_active"] is True
+    assert user is not None
+    assert user.is_active is True
+    assert events[-1].action == "user_enabled"
+
+
 def test_admin_write_requires_same_origin_csrf_request(settings) -> None:
     app = create_app(settings)
     with TestClient(app) as client:
@@ -737,6 +776,143 @@ def test_create_user_trims_username_and_email_before_persisting(settings) -> Non
     assert user is not None
     assert user.username == "trimmed-user"
     assert user.email == "trimmed-user@example.com"
+
+
+def test_admin_can_reset_user_password_and_revoke_sessions(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as admin_client, TestClient(app) as user_client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="reset-user",
+                email="reset-user@example.com",
+                password_hash=hash_password("old-password-123"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+
+        user_login = _login(user_client, "reset-user", "old-password-123")
+        assert user_login.status_code == 200
+        admin_login = _login(admin_client, settings.admin_username, settings.admin_password)
+        assert admin_login.status_code == 200
+        csrf = admin_login.cookies.get("rcr_csrf")
+
+        response = admin_client.post(
+            f"/api/admin/users/{user_id}/password",
+            json={"password": "new-password-123"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        revoked_session_response = user_client.get("/api/session/me")
+        old_password_login = _login(user_client, "reset-user", "old-password-123")
+        new_password_login = _login(user_client, "reset-user", "new-password-123")
+
+        with app.state.session_factory() as session:
+            user = session.get(User, user_id)
+            active_sessions = session.scalars(
+                select(WebSession).where(
+                    WebSession.user_id == user_id,
+                    WebSession.revoked_at.is_(None),
+                )
+            ).all()
+            revoked_sessions = session.scalars(
+                select(WebSession).where(
+                    WebSession.user_id == user_id,
+                    WebSession.revoked_at.is_not(None),
+                )
+            ).all()
+            audit_event = session.scalar(
+                select(AuditEvent).where(
+                    AuditEvent.action == "user_password_reset",
+                    AuditEvent.target_type == "user",
+                    AuditEvent.target_id == user_id,
+                )
+            )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["username"] == "reset-user"
+    assert response.json()["revoked_sessions"] == 1
+    assert revoked_session_response.status_code == 401
+    assert old_password_login.status_code == 401
+    assert new_password_login.status_code == 200
+    assert user is not None
+    assert len(active_sessions) == 1
+    assert len(revoked_sessions) == 1
+    assert audit_event is not None
+    assert audit_event.metadata_json == {"username": "reset-user", "revoked_sessions": 1}
+
+
+def test_admin_reset_user_password_rejects_invalid_password(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="short-reset-user",
+                email="short-reset-user@example.com",
+                password_hash=hash_password("old-password-123"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/users/{user_id}/password",
+            json={"password": "short"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 422
+
+
+def test_admin_reset_own_password_requires_current_password(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+            assert admin is not None
+            admin_id = admin.id
+
+        missing_current = client.post(
+            f"/api/admin/users/{admin_id}/password",
+            json={"password": "new-admin-password-123"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        wrong_current = client.post(
+            f"/api/admin/users/{admin_id}/password",
+            json={"password": "new-admin-password-123", "current_password": "wrong-password"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        valid_current = client.post(
+            f"/api/admin/users/{admin_id}/password",
+            json={"password": "new-admin-password-123", "current_password": settings.admin_password},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        revoked_session_response = client.get("/api/session/me")
+        old_password_login = _login(client, settings.admin_username, settings.admin_password)
+        new_password_login = _login(client, settings.admin_username, "new-admin-password-123")
+
+    assert missing_current.status_code == 401
+    assert missing_current.json()["detail"] == "Current password is incorrect."
+    assert wrong_current.status_code == 401
+    assert wrong_current.json()["detail"] == "Current password is incorrect."
+    assert valid_current.status_code == 200
+    assert valid_current.json()["revoked_sessions"] == 1
+    assert revoked_session_response.status_code == 401
+    assert old_password_login.status_code == 401
+    assert new_password_login.status_code == 200
 
 
 def test_admin_can_create_or_update_repository_permission(settings) -> None:

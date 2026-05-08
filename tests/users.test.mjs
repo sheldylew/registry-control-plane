@@ -17,6 +17,27 @@ test("users panel omits disable control for the signed-in admin row", async () =
   assert.match(panel, /function buildPageHref\(page\)/);
 });
 
+test("users panel exposes admin password reset controls", async () => {
+  const panel = await readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8");
+
+  assert.match(panel, /openPasswordReset\(user\)/);
+  assert.match(panel, /\/api\/admin\/users\/\$\{passwordResetUser\.id\}\/password/);
+  assert.match(panel, /Current password/);
+  assert.match(panel, /current_password: resettingOwnPassword \? currentPassword : undefined/);
+  assert.match(panel, /Reset password/);
+  assert.match(panel, /Passwords must match\./);
+  assert.match(panel, /router\.push\("\/login"\)/);
+});
+
+test("users panel exposes enable action for disabled users", async () => {
+  const panel = await readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8");
+
+  assert.match(panel, /function enableUser\(userId\)/);
+  assert.match(panel, /\/api\/admin\/users\/\$\{userId\}\/enable/);
+  assert.match(panel, /!user\.is_active/);
+  assert.match(panel, /Enable/);
+});
+
 test("admin users page builds pagination links", async () => {
   const page = await readFile(new URL("../app/admin/users/page.jsx", import.meta.url), "utf8");
 

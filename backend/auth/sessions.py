@@ -79,3 +79,17 @@ def revoke_session(session: Session, raw_token: str) -> None:
     if candidate is not None:
         candidate.revoked_at = utcnow()
         session.commit()
+
+
+def revoke_user_sessions(session: Session, *, user_id: int) -> int:
+    sessions = session.scalars(
+        select(WebSession).where(
+            WebSession.user_id == user_id,
+            WebSession.revoked_at.is_(None),
+        )
+    ).all()
+    revoked_at = utcnow()
+    for web_session in sessions:
+        web_session.revoked_at = revoked_at
+    session.commit()
+    return len(sessions)

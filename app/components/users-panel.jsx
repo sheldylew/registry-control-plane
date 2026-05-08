@@ -39,9 +39,21 @@ export default function UsersPanel({
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [passwordResetUser, setPasswordResetUser] = useState(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [resetPending, setResetPending] = useState(false);
+  const [resetError, setResetError] = useState("");
   const hasValidUsername = hasNonEmptyValue(username);
   const hasValidEmail = isValidUserEmail(email);
   const canCreateUser = hasValidUsername && hasValidEmail && isValidPassword(password);
+  const resettingOwnPassword = passwordResetUser?.id === currentUserId;
+  const canResetPassword = (
+    (!resettingOwnPassword || isValidPassword(currentPassword, 1))
+    && isValidPassword(newPassword)
+    && newPassword === confirmPassword
+  );
 
   function openDialog() {
     setError("");
@@ -61,6 +73,25 @@ export default function UsersPanel({
     setEmail("");
     setPassword("");
     setIsAdmin(false);
+  }
+
+  function openPasswordReset(user) {
+    setPasswordResetUser(user);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setResetError("");
+  }
+
+  function closePasswordReset() {
+    if (resetPending) {
+      return;
+    }
+    setPasswordResetUser(null);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setResetError("");
   }
 
   async function createUser(event) {
@@ -120,6 +151,71 @@ export default function UsersPanel({
     router.refresh();
   }
 
+  async function enableUser(userId) {
+    const response = await fetch(`/api/admin/users/${userId}/enable`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      setError(payload.detail || "Could not enable user.");
+      return;
+    }
+    router.refresh();
+  }
+
+  async function resetUserPassword(event) {
+    event.preventDefault();
+    if (!passwordResetUser) {
+      return;
+    }
+    if (resettingOwnPassword && !isValidPassword(currentPassword, 1)) {
+      setResetError("Current password is required.");
+      return;
+    }
+    if (!isValidPassword(newPassword)) {
+      setResetError("Password must be at least 8 characters and not only whitespace.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setResetError("Passwords must match.");
+      return;
+    }
+
+    setResetPending(true);
+    setResetError("");
+    const response = await fetch(`/api/admin/users/${passwordResetUser.id}/password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": readCookie("rcr_csrf"),
+      },
+      body: JSON.stringify({
+        password: newPassword,
+        current_password: resettingOwnPassword ? currentPassword : undefined,
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      setResetError(readApiErrorDetail(payload, "Could not reset password."));
+      setResetPending(false);
+      return;
+    }
+
+    const resetOwnPassword = passwordResetUser.id === currentUserId;
+    setResetPending(false);
+    setPasswordResetUser(null);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setResetError("");
+    if (resetOwnPassword) {
+      router.push("/login");
+      return;
+    }
+    router.refresh();
+  }
+
   function buildPageHref(page) {
     if (page <= 1) {
       return "/admin/users";
@@ -172,16 +268,36 @@ export default function UsersPanel({
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
-                    {user.is_active && user.id !== currentUserId ? (
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
-                        onClick={() => disableUser(user.id)}
-                        variant="warning"
-                        size="xs"
+                        onClick={() => openPasswordReset(user)}
+                        variant="secondary"
+                        size="sm"
                       >
-                        Disable
+                        Reset password
                       </Button>
-                    ) : null}
+                      {user.is_active && user.id !== currentUserId ? (
+                        <Button
+                          type="button"
+                          onClick={() => disableUser(user.id)}
+                          variant="warning"
+                          size="sm"
+                        >
+                          Disable
+                        </Button>
+                      ) : null}
+                      {!user.is_active ? (
+                        <Button
+                          type="button"
+                          onClick={() => enableUser(user.id)}
+                          variant="soft"
+                          size="sm"
+                        >
+                          Enable
+                        </Button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               )) : null}
@@ -268,6 +384,70 @@ export default function UsersPanel({
               disabled={pending || !canCreateUser}
             >
               {pending ? "Creating..." : "Create user"}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(passwordResetUser)}
+        onClose={closePasswordReset}
+        eyebrow="User management"
+        title={`Reset ${passwordResetUser?.username ?? "user"} password`}
+      >
+        <form onSubmit={resetUserPassword}>
+          <div className="grid gap-4">
+            {resettingOwnPassword ? (
+              <input
+                autoFocus
+                type="password"
+                placeholder="Current password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                required
+                className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
+              />
+            ) : null}
+            <input
+              autoFocus={!resettingOwnPassword}
+              type="password"
+              placeholder="New password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              required
+              minLength={8}
+              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
+            />
+            <input
+              type="password"
+              placeholder="Confirm password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+              minLength={8}
+              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
+            />
+          </div>
+          {passwordResetUser?.id === currentUserId ? (
+            <p className="mt-4 text-sm text-amber-200">
+              Resetting your own password signs out this browser session.
+            </p>
+          ) : null}
+          {resetError ? <p className="mt-4 text-sm text-rose-300">{resetError}</p> : null}
+          <div className="mt-5 flex items-center justify-end gap-3">
+            <Button
+              type="button"
+              onClick={closePasswordReset}
+              disabled={resetPending}
+              variant="secondary"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={resetPending || !canResetPassword}
+            >
+              {resetPending ? "Resetting..." : "Reset password"}
             </Button>
           </div>
         </form>
