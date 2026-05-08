@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+.pytest_cache
+__pycache__
+.venv
+.local-data
+.security-private
+backups
+*.pem
+*.key
+docker/certs
+node_modules
+.next

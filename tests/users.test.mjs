@@ -1,0 +1,45 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+test("admin users page passes the signed-in user id into the users panel", async () => {
+  const page = await readFile(new URL("../app/admin/users/page.jsx", import.meta.url), "utf8");
+
+  assert.match(page, /requireCurrentUser/);
+  assert.match(page, /currentUserId=\{currentUser\?\.id \?\? null\}/);
+});
+
+test("users panel omits disable control for the signed-in admin row", async () => {
+  const panel = await readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8");
+
+  assert.match(panel, /user\.is_active && user\.id !== currentUserId/);
+  assert.match(panel, /<Pagination/);
+  assert.match(panel, /function buildPageHref\(page\)/);
+});
+
+test("admin users page builds pagination links", async () => {
+  const page = await readFile(new URL("../app/admin/users/page.jsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(page, /buildPageHref=\{buildPageHref\}/);
+  assert.match(page, /pagination=\{payload\.pagination\}/);
+});
+
+test("admin shell includes settings navigation", async () => {
+  const shell = await readFile(new URL("../app/components/admin-shell.jsx", import.meta.url), "utf8");
+
+  assert.match(shell, /href: "\/admin\/settings"/);
+  assert.match(shell, /label: "Settings"/);
+});
+
+test("first boot setup page and settings panel use setup APIs", async () => {
+  const setupPage = await readFile(new URL("../app/setup/page.jsx", import.meta.url), "utf8");
+  const setupForm = await readFile(new URL("../app/components/setup-form.jsx", import.meta.url), "utf8");
+  const settingsPanel = await readFile(new URL("../app/components/settings-panel.jsx", import.meta.url), "utf8");
+
+  assert.match(setupPage, /\/api\/setup\/status/);
+  assert.match(setupForm, /\/api\/setup\/complete/);
+  assert.match(setupForm, /docker compose restart registry/);
+  assert.match(setupForm, /Continue to sign in after restart/);
+  assert.match(settingsPanel, /\/api\/admin\/settings/);
+  assert.match(settingsPanel, /X-CSRF-Token/);
+});

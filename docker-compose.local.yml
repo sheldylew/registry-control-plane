@@ -1,0 +1,13 @@
+services:
+  auth-init:
+    environment:
+      APP_ENV: development
+      PUBLIC_REGISTRY_ORIGIN: http://localhost:8080
+      SESSION_COOKIE_SECURE: "false"
+
+  api:
+    environment:
+      APP_ENV: development
+      PUBLIC_REGISTRY_ORIGIN: http://localhost:8080
+      FORWARDED_ALLOW_IPS: "*"
+      SESSION_COOKIE_SECURE: "false"

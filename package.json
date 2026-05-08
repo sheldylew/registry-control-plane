@@ -1,0 +1,27 @@
+{
+  "name": "registry-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "./scripts/dev-api.sh",
+    "dev:web": "INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next dev --hostname 0.0.0.0 --port 3000",
+    "build": "INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next build",
+    "start": "INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL:-http://127.0.0.1:8000} next start --hostname 0.0.0.0 --port 3000",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "next": "16.2.4",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.13",
+    "concurrently": "9.2.1",
+    "postcss": "8.5.10",
+    "tailwindcss": "4.1.13"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
+  }
+}

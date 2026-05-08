@@ -1,0 +1,2133 @@
+import stat
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from backend.auth.registry_tokens import bootstrap_signing_material
+from backend.auth.passwords import hash_password
+from backend.config import Settings
+from backend.main import create_app
+from backend.metrics import snapshot as metrics_snapshot
+from backend.models import AppSetting, AuditEvent, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User
+from backend.rate_limit import FixedWindowRateLimiter
+from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, TagSummary
+from backend.setup import PUBLIC_REGISTRY_ORIGIN_KEY, ensure_setup_token
+
+
+def test_healthz_returns_ok(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_api_healthz_returns_ok(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.get("/api/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_auth_token_requires_basic_auth(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:demo/app:pull"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Basic authentication is required."
+
+
+def test_setup_required_when_no_admin_or_saved_origin(settings) -> None:
+    setup_settings = replace(
+        settings,
+        admin_username=None,
+        admin_password=None,
+        admin_email=None,
+        public_registry_origin="",
+    )
+    app = create_app(setup_settings)
+
+    with TestClient(app) as client:
+        status_response = client.get("/api/setup/status")
+        login_response = client.post("/api/session/login", json={"username": "admin", "password": "password"})
+        token_response = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:demo/app:pull"},
+        )
+
+    assert status_response.status_code == 200
+    assert status_response.json()["setup_required"] is True
+    assert login_response.status_code == 503
+    assert token_response.status_code == 503
+
+
+def test_setup_complete_creates_admin_saves_origin_and_invalidates_token(settings) -> None:
+    setup_settings = replace(
+        settings,
+        admin_username=None,
+        admin_password=None,
+        admin_email=None,
+        public_registry_origin="",
+    )
+    raw_token = ensure_setup_token(setup_settings, setup_is_required=True)
+    app = create_app(setup_settings)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/setup/complete",
+            json={
+                "setup_token": raw_token,
+                "admin_username": "first-admin",
+                "admin_email": "first-admin@example.com",
+                "admin_password": "first-admin-pass",
+                "public_registry_origin": "http://localhost:8080",
+            },
+        )
+        replay = client.post(
+            "/api/setup/complete",
+            json={
+                "setup_token": raw_token,
+                "admin_username": "second-admin",
+                "admin_email": "second-admin@example.com",
+                "admin_password": "second-admin-pass",
+                "public_registry_origin": "http://localhost:8080",
+            },
+        )
+        login = client.post(
+            "/api/session/login",
+            json={"username": "first-admin", "password": "first-admin-pass"},
+        )
+
+        with app.state.session_factory() as session:
+            admins = session.scalars(select(User).where(User.is_admin.is_(True))).all()
+            origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
+
+    assert response.status_code == 200
+    assert response.json()["setup_complete"] is True
+    assert response.json()["registry_restart_required"] is True
+    assert response.json()["restart_command"] == "docker compose restart registry"
+    assert replay.status_code == 409
+    assert login.status_code == 200
+    assert len(admins) == 1
+    assert admins[0].username == "first-admin"
+    assert origin is not None
+    assert origin.value == "http://localhost:8080"
+    assert Path(setup_settings.setup_token_path).exists() is False
+    assert "realm: http://localhost:8080/auth/token" in Path(setup_settings.registry_rendered_config_path).read_text(encoding="utf-8")
+
+
+def test_setup_token_rate_limits_repeated_invalid_attempts(settings) -> None:
+    setup_settings = replace(
+        settings,
+        admin_username=None,
+        admin_password=None,
+        admin_email=None,
+        public_registry_origin="",
+    )
+    app = create_app(setup_settings)
+    app.state.setup_rate_limiter = FixedWindowRateLimiter(max_attempts=1, window_seconds=3600)
+
+    payload = {
+        "setup_token": "wrong-token",
+        "admin_username": "first-admin",
+        "admin_email": "first-admin@example.com",
+        "admin_password": "first-admin-pass",
+        "public_registry_origin": "http://localhost:8080",
+    }
+    with TestClient(app) as client:
+        first = client.post("/api/setup/complete", json=payload)
+        second = client.post("/api/setup/complete", json=payload)
+
+    assert first.status_code == 403
+    assert second.status_code == 429
+
+
+def test_env_bootstrap_saves_origin_and_skips_setup(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        setup_response = client.get("/api/setup/status")
+        login_response = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": settings.admin_password},
+        )
+        with app.state.session_factory() as session:
+            origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
+
+    assert setup_response.status_code == 200
+    assert setup_response.json()["setup_required"] is False
+    assert login_response.status_code == 200
+    assert origin is not None
+    assert origin.value == settings.public_registry_origin
+
+
+def test_partial_env_bootstrap_stays_in_setup_mode(settings) -> None:
+    setup_settings = replace(
+        settings,
+        admin_username=settings.admin_username,
+        admin_password=None,
+        admin_email=settings.admin_email,
+        public_registry_origin=settings.public_registry_origin,
+    )
+    app = create_app(setup_settings)
+
+    with TestClient(app) as client:
+        response = client.get("/api/setup/status")
+        with app.state.session_factory() as session:
+            admins = session.scalars(select(User).where(User.is_admin.is_(True))).all()
+
+    assert response.status_code == 200
+    assert response.json()["setup_required"] is True
+    assert response.json()["env_bootstrap_partial"] is True
+    assert admins == []
+
+
+def test_setup_complete_rejects_non_https_origin_in_production(settings) -> None:
+    production_settings = replace(
+        settings,
+        app_env="production",
+        session_cookie_secure=True,
+        admin_username=None,
+        admin_password=None,
+        admin_email=None,
+        public_registry_origin="",
+    )
+    raw_token = ensure_setup_token(production_settings, setup_is_required=True)
+    app = create_app(production_settings)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/setup/complete",
+            json={
+                "setup_token": raw_token,
+                "admin_username": "first-admin",
+                "admin_email": "first-admin@example.com",
+                "admin_password": "first-admin-pass",
+                "public_registry_origin": "http://localhost:8080",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "https" in response.json()["detail"]
+
+
+def test_admin_bootstrap_runs_on_startup(settings) -> None:
+    bootstrap_signing_material(settings)
+    app = create_app(settings)
+
+    with TestClient(app):
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+
+    assert admin is not None
+    assert admin.is_admin is True
+    assert admin.email == settings.admin_email
+
+
+def test_clean_bootstrap_generates_signing_material_and_marker(settings) -> None:
+    bootstrap_signing_material(settings)
+
+    assert settings.auth_bootstrap_marker_path
+    with open(settings.auth_private_key_path, "rb") as private_key_file:
+        assert private_key_file.read().startswith(b"-----BEGIN PRIVATE KEY-----")
+    with open(settings.auth_public_cert_path, "rb") as cert_file:
+        assert cert_file.read().startswith(b"-----BEGIN CERTIFICATE-----")
+    with open(settings.auth_bootstrap_marker_path, "r", encoding="utf-8") as marker_file:
+        assert marker_file.read() == "initialized\n"
+    assert stat.S_IMODE(Path(settings.auth_private_key_path).stat().st_mode) == 0o600
+    assert stat.S_IMODE(Path(settings.auth_public_cert_path).stat().st_mode) == 0o644
+    assert stat.S_IMODE(Path(settings.auth_private_key_path).parent.stat().st_mode) == 0o700
+
+
+def test_api_startup_rejects_group_readable_private_key(settings) -> None:
+    bootstrap_signing_material(settings)
+    Path(settings.auth_private_key_path).chmod(0o644)
+
+    app = create_app(settings)
+    with pytest.raises(RuntimeError, match="expected 0600"):
+        with TestClient(app):
+            pass
+
+
+def test_api_startup_fails_when_marker_exists_but_auth_volume_is_missing(settings) -> None:
+    bootstrap_signing_material(settings)
+
+    Path(settings.auth_private_key_path).unlink()
+    Path(settings.auth_public_cert_path).unlink()
+
+    app = create_app(settings)
+    with pytest.raises(RuntimeError, match="Signing material is missing"):
+        with TestClient(app):
+            pass
+
+
+def test_login_succeeds_with_valid_password(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": settings.admin_password},
+        )
+
+        with app.state.session_factory() as session:
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert response.json()["user"]["username"] == settings.admin_username
+    assert "rcr_session" in response.cookies
+    assert "rcr_csrf" in response.cookies
+    assert events[-1].action == "ui_login_succeeded"
+    assert metrics_snapshot()["registry_ui_logins_total"] == 1
+
+
+def test_login_sets_secure_cookies_in_production(settings) -> None:
+    production_settings = Settings(
+        app_env="production",
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=settings.registry_storage_root,
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin="https://registry.example.com",
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        login_rate_limit_attempts=settings.login_rate_limit_attempts,
+        login_rate_limit_window_seconds=settings.login_rate_limit_window_seconds,
+        auth_token_rate_limit_attempts=settings.auth_token_rate_limit_attempts,
+        auth_token_rate_limit_window_seconds=settings.auth_token_rate_limit_window_seconds,
+        session_cookie_secure=True,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(production_settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/session/login",
+            json={"username": production_settings.admin_username, "password": production_settings.admin_password},
+        )
+
+    set_cookie_headers = response.headers.get_list("set-cookie")
+
+    assert response.status_code == 200
+    assert all("Secure" in header for header in set_cookie_headers)
+
+
+def test_login_fails_with_invalid_password(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": "bad-password"},
+        )
+
+        with app.state.session_factory() as session:
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 401
+    assert events[-1].action == "ui_login_failed"
+    assert metrics_snapshot()["registry_ui_login_failures_total"] == 1
+
+
+def test_login_rate_limits_repeated_failures(settings) -> None:
+    app = create_app(settings)
+    app.state.login_rate_limiter = FixedWindowRateLimiter(max_attempts=2, window_seconds=3600)
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": "bad-password"},
+        )
+        second = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": "bad-password"},
+        )
+        third = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": "bad-password"},
+        )
+
+    assert first.status_code == 401
+    assert second.status_code == 401
+    assert third.status_code == 429
+    assert 3590 <= int(third.headers["retry-after"]) <= 3600
+
+
+def test_production_settings_require_secure_cookies(settings) -> None:
+    try:
+        Settings(
+            app_env="production",
+            database_url=settings.database_url,
+            registry_internal_url=settings.registry_internal_url,
+            registry_storage_root=settings.registry_storage_root,
+            compose_project_dir=settings.compose_project_dir,
+            registry_service_name=settings.registry_service_name,
+            registry_gc_config_path=settings.registry_gc_config_path,
+            token_issuer=settings.token_issuer,
+            token_service=settings.token_service,
+            token_ttl_seconds=settings.token_ttl_seconds,
+            public_registry_origin="https://registry.example.com",
+            auth_private_key_path=settings.auth_private_key_path,
+            auth_public_cert_path=settings.auth_public_cert_path,
+            internal_api_base_url=settings.internal_api_base_url,
+            admin_username=settings.admin_username,
+            admin_password=settings.admin_password,
+            admin_email=settings.admin_email,
+            login_rate_limit_attempts=settings.login_rate_limit_attempts,
+            login_rate_limit_window_seconds=settings.login_rate_limit_window_seconds,
+            auth_token_rate_limit_attempts=settings.auth_token_rate_limit_attempts,
+            auth_token_rate_limit_window_seconds=settings.auth_token_rate_limit_window_seconds,
+            session_cookie_secure=False,
+            session_lifetime_seconds=settings.session_lifetime_seconds,
+        )
+        raise AssertionError("Expected production settings validation to fail.")
+    except ValueError as exc:
+        assert "SESSION_COOKIE_SECURE" in str(exc)
+
+
+def test_production_settings_require_https_public_origin(settings) -> None:
+    with pytest.raises(ValueError, match="PUBLIC_REGISTRY_ORIGIN"):
+        Settings(
+            app_env="production",
+            database_url=settings.database_url,
+            registry_internal_url=settings.registry_internal_url,
+            registry_storage_root=settings.registry_storage_root,
+            compose_project_dir=settings.compose_project_dir,
+            registry_service_name=settings.registry_service_name,
+            registry_gc_config_path=settings.registry_gc_config_path,
+            token_issuer=settings.token_issuer,
+            token_service=settings.token_service,
+            token_ttl_seconds=settings.token_ttl_seconds,
+            public_registry_origin="http://localhost:8080",
+            auth_private_key_path=settings.auth_private_key_path,
+            auth_public_cert_path=settings.auth_public_cert_path,
+            internal_api_base_url=settings.internal_api_base_url,
+            admin_username=settings.admin_username,
+            admin_password=settings.admin_password,
+            admin_email=settings.admin_email,
+            session_cookie_secure=True,
+            session_lifetime_seconds=settings.session_lifetime_seconds,
+        )
+
+
+def test_admin_routes_reject_unauthenticated_user(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.get("/api/admin/users")
+
+    assert response.status_code == 401
+
+
+def test_admin_routes_reject_non_admin_user(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="plain-user",
+                email="plain-user@example.com",
+                password_hash=hash_password("plain-user-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+
+        login = client.post(
+            "/api/session/login",
+            json={"username": "plain-user", "password": "plain-user-pass"},
+        )
+        assert login.status_code == 200
+        response = client.get("/api/admin/users")
+
+    assert response.status_code == 403
+
+
+def test_admin_users_list_supports_pagination(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            users = []
+            for index in range(1, 13):
+                users.append(
+                    User(
+                        username=f"user-{index:02d}",
+                        email=f"user-{index:02d}@example.com",
+                        password_hash=hash_password(f"password-{index:02d}"),
+                        is_admin=False,
+                        is_active=True,
+                    )
+                )
+            session.add_all(users)
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        first = client.get("/api/admin/users")
+        second = client.get("/api/admin/users?page=2")
+
+    body_first = first.json()
+    body_second = second.json()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert body_first["pagination"]["page"] == 1
+    assert body_first["pagination"]["page_size"] == 10
+    assert body_first["pagination"]["total"] == 13
+    assert body_first["pagination"]["has_prev"] is False
+    assert body_first["pagination"]["has_next"] is True
+    assert len(body_first["users"]) == 10
+    assert body_second["pagination"]["page"] == 2
+    assert body_second["pagination"]["total"] == 13
+    assert body_second["pagination"]["has_prev"] is True
+    assert body_second["pagination"]["has_next"] is False
+    assert len(body_second["users"]) == 3
+
+
+def test_admin_cannot_disable_own_account(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": settings.admin_password},
+        )
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+            assert admin is not None
+            admin_id = admin.id
+
+        response = client.post(
+            f"/api/admin/users/{admin_id}/disable",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.id == admin_id))
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "You cannot disable your own account."
+    assert admin is not None
+    assert admin.is_active is True
+
+
+def test_admin_write_requires_same_origin_csrf_request(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": settings.admin_password},
+        )
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/admin/users",
+            json={
+                "username": "csrf-blocked",
+                "email": "csrf-blocked@example.com",
+                "password": "password-123",
+                "is_admin": False,
+            },
+            headers={
+                "X-CSRF-Token": csrf,
+                "Origin": "https://evil.example",
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid request origin."
+
+
+def test_admin_write_allows_same_origin_csrf_request(settings) -> None:
+    custom_settings = Settings(
+        app_env=settings.app_env,
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=settings.registry_storage_root,
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin="https://registry.example.com",
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        session_cookie_secure=settings.session_cookie_secure,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(custom_settings)
+    with TestClient(app, base_url="http://testserver") as client:
+        login = client.post(
+            "/api/session/login",
+            json={"username": custom_settings.admin_username, "password": custom_settings.admin_password},
+        )
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/admin/users",
+            json={
+                "username": "csrf-allowed",
+                "email": "csrf-allowed@example.com",
+                "password": "password-123",
+                "is_admin": False,
+            },
+            headers={
+                "X-CSRF-Token": csrf,
+                "Origin": "https://registry.example.com",
+            },
+        )
+
+    assert response.status_code == 200
+
+
+def test_admin_permissions_endpoint_lists_users_robots_and_rules(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="perm-user",
+                email="perm-user@example.com",
+                password_hash=hash_password("perm-user-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            robot = RobotAccount(name="perm-bot", description="permission bot", is_active=True)
+            session.add_all([user, robot])
+            session.commit()
+            session.refresh(user)
+            session.refresh(robot)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/admin/permissions")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert any(entry["username"] == "perm-user" for entry in body["users"])
+    assert any(entry["name"] == "perm-bot" for entry in body["robots"])
+    assert body["permissions"][0]["subject_name"] == "perm-user"
+    assert body["permissions"][0]["repository_pattern"] == "sheldylew/*"
+
+
+def test_create_user_returns_conflict_for_duplicate_username(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/admin/users",
+            json={
+                "username": settings.admin_username,
+                "email": "another@example.com",
+                "password": "password-123",
+                "is_admin": False,
+            },
+            headers={
+                "X-CSRF-Token": csrf,
+                "Origin": "http://testserver",
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A user with that username or email already exists."
+
+
+def test_create_user_returns_conflict_for_duplicate_email(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/admin/users",
+            json={
+                "username": "another-admin-name",
+                "email": settings.admin_email,
+                "password": "password-123",
+                "is_admin": False,
+            },
+            headers={
+                "X-CSRF-Token": csrf,
+                "Origin": "http://testserver",
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A user with that username or email already exists."
+
+
+def test_create_user_rejects_whitespace_only_username(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/admin/users",
+            json={
+                "username": "   ",
+                "email": "trim-check@example.com",
+                "password": "password-123",
+                "is_admin": False,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Value error, Username is required."
+
+
+def test_create_user_trims_username_and_email_before_persisting(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/admin/users",
+            json={
+                "username": "  trimmed-user  ",
+                "email": "  trimmed-user@example.com  ",
+                "password": "password-123",
+                "is_admin": False,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            user = session.scalar(select(User).where(User.username == "trimmed-user"))
+
+    assert response.status_code == 200
+    assert user is not None
+    assert user.username == "trimmed-user"
+    assert user.email == "trimmed-user@example.com"
+
+
+def test_admin_can_create_or_update_repository_permission(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="perm-editor",
+                email="perm-editor@example.com",
+                password_hash=hash_password("perm-editor-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/permissions",
+            json={
+                "subject_type": "user",
+                "subject_id": user_id,
+                "repository_pattern": "sheldylew/*",
+                "can_pull": True,
+                "can_push": True,
+                "can_delete": False,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            permission = session.scalar(
+                select(RepositoryPermission).where(
+                    RepositoryPermission.subject_type == "user",
+                    RepositoryPermission.subject_id == user_id,
+                    RepositoryPermission.repository_pattern == "sheldylew/*",
+                )
+            )
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert permission is not None
+    assert permission.can_pull is True
+    assert permission.can_push is True
+    assert permission.can_delete is False
+    assert events[-1].action == "repository_permission_created"
+
+
+def test_admin_permission_rejects_whitespace_only_repository_pattern(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/permissions",
+            json={
+                "subject_type": "user",
+                "subject_id": 1,
+                "repository_pattern": "   ",
+                "can_pull": True,
+                "can_push": False,
+                "can_delete": False,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Value error, Repository pattern is required."
+
+
+def test_admin_permission_rejects_global_wildcard_pattern(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/permissions",
+            json={
+                "subject_type": "user",
+                "subject_id": 1,
+                "repository_pattern": "*",
+                "can_pull": True,
+                "can_push": False,
+                "can_delete": False,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Global '*' repository permissions are not allowed."
+
+
+def test_admin_can_delete_repository_permission(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="perm-delete",
+                email="perm-delete@example.com",
+                password_hash=hash_password("perm-delete-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            permission = RepositoryPermission(
+                subject_type="user",
+                subject_id=user.id,
+                repository_pattern="sheldylew/*",
+                can_pull=True,
+                can_push=False,
+                can_delete=False,
+            )
+            session.add(permission)
+            session.commit()
+            session.refresh(permission)
+            permission_id = permission.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/permissions/{permission_id}/delete",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            deleted = session.get(RepositoryPermission, permission_id)
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert deleted is None
+    assert events[-1].action == "repository_permission_deleted"
+
+
+def test_admin_can_create_or_update_repository_visibility(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/repositories/visibility",
+            json={
+                "repository_name": "public/app",
+                "visibility": "public",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            repository = session.scalar(select(Repository).where(Repository.name == "public/app"))
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert repository is not None
+    assert repository.visibility == "public"
+    assert events[-1].action == "repository_visibility_created"
+
+
+def test_admin_repository_visibility_rejects_wildcards(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/repositories/visibility",
+            json={
+                "repository_name": "public/*",
+                "visibility": "public",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Repository visibility must target an exact repository name."
+
+
+def test_public_repository_is_visible_without_explicit_permission(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="public-browser",
+                email="public-browser@example.com",
+                password_hash=hash_password("public-browser-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add_all([user, Repository(name="public/app", visibility="public")])
+            session.commit()
+
+        fake_registry = FakeRegistryClient(repositories=["public/app"], tags={"public/app": ["latest"]})
+        app.state.registry_client_factory = lambda: fake_registry
+
+        login = client.post(
+            "/api/session/login",
+            json={"username": "public-browser", "password": "public-browser-pass"},
+        )
+        assert login.status_code == 200
+        response = client.get("/api/repos")
+
+    assert response.status_code == 200
+    assert response.json()["repos"] == [{"name": "public/app"}]
+
+
+def test_admin_can_disable_robot(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            robot = RobotAccount(name="ops-bot", description="ops", is_active=True)
+            session.add(robot)
+            session.commit()
+            session.refresh(robot)
+            robot_id = robot.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/robots/{robot_id}/disable",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            robot = session.get(RobotAccount, robot_id)
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert robot is not None
+    assert robot.is_active is False
+    assert events[-1].action == "robot_disabled"
+
+
+def test_admin_can_create_robot_with_trimmed_fields(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/admin/robots",
+            json={
+                "name": "  deploy-bot  ",
+                "description": "  automation account  ",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            robot = session.scalar(select(RobotAccount).where(RobotAccount.name == "deploy-bot"))
+
+    assert response.status_code == 200
+    assert robot is not None
+    assert robot.name == "deploy-bot"
+    assert robot.description == "automation account"
+
+
+def test_admin_create_robot_rejects_duplicate_name(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(RobotAccount(name="duplicate-bot", description="existing", is_active=True))
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/robots",
+            json={"name": " duplicate-bot ", "description": "another"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A robot with that name already exists."
+
+
+def test_admin_can_enable_robot(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            robot = RobotAccount(name="ops-bot-disabled", description="ops", is_active=False)
+            session.add(robot)
+            session.commit()
+            session.refresh(robot)
+            robot_id = robot.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/robots/{robot_id}/enable",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            robot = session.get(RobotAccount, robot_id)
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert robot is not None
+    assert robot.is_active is True
+    assert events[-1].action == "robot_enabled"
+
+
+def test_admin_can_revoke_robot_token(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            robot = RobotAccount(name="token-bot", description="token", is_active=True)
+            session.add(robot)
+            session.commit()
+            session.refresh(robot)
+            token = RobotToken(robot_id=robot.id, name="default", token_hash="hash-r1", token_prefix="rbt001")
+            session.add(token)
+            session.commit()
+            session.refresh(token)
+            robot_id = robot.id
+            token_id = token.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/robots/{robot_id}/tokens/{token_id}/revoke",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            token = session.get(RobotToken, token_id)
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert token is not None
+    assert token.revoked_at is not None
+    assert events[-1].action == "robot_token_revoked"
+
+
+def test_admin_create_pat_rejects_whitespace_only_name(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/tokens",
+            json={"name": "   "},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Value error, Token name is required."
+
+
+def test_admin_can_delete_robot_and_tokens(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            robot = RobotAccount(name="delete-bot", description="delete", is_active=True)
+            session.add(robot)
+            session.commit()
+            session.refresh(robot)
+            token = RobotToken(robot_id=robot.id, name="default", token_hash="hash-r2", token_prefix="rbt002")
+            session.add(token)
+            session.commit()
+            session.refresh(token)
+            robot_id = robot.id
+            token_id = token.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/robots/{robot_id}/delete",
+            json={"confirmation": "delete-bot"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            deleted_robot = session.get(RobotAccount, robot_id)
+            deleted_token = session.get(RobotToken, token_id)
+            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
+
+    assert response.status_code == 200
+    assert deleted_robot is None
+    assert deleted_token is None
+    assert events[-1].action == "robot_deleted"
+
+
+class FakeRegistryClient:
+    def __init__(
+        self,
+        repositories=None,
+        tags=None,
+        manifests=None,
+        histories=None,
+        missing_repos=None,
+        repo_pages_truncated=False,
+    ):
+        self.repositories = repositories or []
+        self.tags = tags or {}
+        self.manifests = manifests or {}
+        self.histories = histories or {}
+        self.missing_repos = missing_repos or set()
+        self.repo_pages_truncated = repo_pages_truncated
+        self.deleted_manifests = []
+        self.list_tags_calls = []
+
+    def close(self) -> None:
+        return None
+
+    def list_repositories(self) -> list[str]:
+        return self.repositories
+
+    def list_tags(self, repository_name: str) -> list[str]:
+        self.list_tags_calls.append(repository_name)
+        if repository_name in self.missing_repos:
+            raise RegistryNotFoundError(repository_name)
+        return self.tags.get(repository_name, [])
+
+    def list_tag_summaries(self, repository_name: str) -> list[TagSummary]:
+        summaries, _meta = self.list_tag_summaries_bounded(repository_name)
+        return summaries
+
+    def list_tag_summaries_bounded(
+        self,
+        repository_name: str,
+        *,
+        max_tags=None,
+        max_manifest_children=None,
+        max_history_entries=None,
+    ) -> tuple[list[TagSummary], dict]:
+        if repository_name in self.missing_repos:
+            raise RegistryNotFoundError(repository_name)
+        tags = self.tags.get(repository_name, [])
+        limited = tags[:max_tags] if max_tags is not None else tags
+        return limited, {
+            "truncated": max_tags is not None and len(tags) > max_tags,
+            "returned": len(limited),
+            "available": len(tags),
+        }
+
+    def get_manifest_details(
+        self,
+        repository_name: str,
+        tag: str,
+        *,
+        max_manifest_children=None,
+        max_history_entries=None,
+    ) -> ManifestDetails:
+        if repository_name in self.missing_repos:
+            raise RegistryNotFoundError(repository_name)
+        payload = self.manifests[(repository_name, tag)]
+        return ManifestDetails(**payload)
+
+    def get_tag_history(self, repository_name: str, tag: str) -> list[HistoryVariant]:
+        variants, _meta = self.get_tag_history_bounded(repository_name, tag)
+        return variants
+
+    def get_tag_history_bounded(
+        self,
+        repository_name: str,
+        tag: str,
+        *,
+        max_manifest_children=None,
+        max_history_entries=None,
+    ) -> tuple[list[HistoryVariant], dict]:
+        if repository_name in self.missing_repos:
+            raise RegistryNotFoundError(repository_name)
+        variants = self.histories[(repository_name, tag)]
+        limited = variants[:max_manifest_children] if max_manifest_children is not None else variants
+        return limited, {
+            "truncated": max_manifest_children is not None and len(variants) > max_manifest_children,
+            "returned": len(limited),
+            "available": len(variants),
+        }
+
+    def list_repositories_bounded(self, *, max_pages=None) -> tuple[list[str], dict]:
+        return self.repositories, {
+            "truncated": self.repo_pages_truncated,
+            "pages_fetched": 1,
+        }
+
+    def delete_manifest(self, repository_name: str, digest: str) -> None:
+        self.deleted_manifests.append((repository_name, digest))
+
+
+def _login(client: TestClient, username: str, password: str):
+    return client.post("/api/session/login", json={"username": username, "password": password})
+
+
+def test_admin_can_update_public_registry_origin(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/settings",
+            json={"public_registry_origin": "http://localhost:8080"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        settings_response = client.get("/api/admin/settings")
+        with app.state.session_factory() as session:
+            origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
+
+    assert response.status_code == 200
+    assert response.json()["registry_restart_required"] is True
+    assert response.json()["restart_command"] == "docker compose restart registry"
+    assert settings_response.status_code == 200
+    assert settings_response.json()["public_registry_origin"] == "http://localhost:8080"
+    assert origin is not None
+    assert origin.value == "http://localhost:8080"
+
+
+def test_repo_list_only_shows_visible_repositories(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=["otherns/private", "sheldylew/app", "sheldylew/worker"])
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="repo-reader",
+                email="repo-reader@example.com",
+                password_hash=hash_password("repo-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "repo-reader", "repo-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos")
+
+    assert response.status_code == 200
+    assert response.json()["repos"] == [{"name": "sheldylew/app"}, {"name": "sheldylew/worker"}]
+
+
+def test_admin_sees_all_repositories(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=["otherns/private", "sheldylew/app"])
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/repos")
+
+    assert response.status_code == 200
+    assert response.json()["repos"] == [{"name": "otherns/private"}, {"name": "sheldylew/app"}]
+
+
+def test_repo_list_skips_stale_catalog_entries(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        repositories=["sheldylew/app", "sheldylew/gc-me"],
+        tags={"sheldylew/app": ["latest"]},
+        missing_repos={"sheldylew/gc-me"},
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/repos")
+
+    assert response.status_code == 200
+    assert response.json()["repos"] == [{"name": "sheldylew/app"}]
+
+
+def test_repo_tags_require_pull_permission(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        tags={
+            "sheldylew/app": [
+                TagSummary(
+                    tag="latest",
+                    digest="sha256:manifest",
+                    media_type="application/vnd.oci.image.manifest.v1+json",
+                    total_size=42,
+                    architectures=["linux/amd64"],
+                    created_at="2026-05-04T10:20:30Z",
+                    history_count=3,
+                )
+            ]
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="blocked-reader",
+                email="blocked-reader@example.com",
+                password_hash=hash_password("blocked-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+
+        login = _login(client, "blocked-reader", "blocked-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags")
+
+    assert response.status_code == 403
+
+
+def test_missing_repo_returns_404(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(missing_repos={"sheldylew/missing"})
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="visible-reader",
+                email="visible-reader@example.com",
+                password_hash=hash_password("visible-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "visible-reader", "visible-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/missing/tags")
+
+    assert response.status_code == 404
+
+
+def test_repo_tag_manifest_returns_details(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:manifest",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [{"digest": "sha256:layer", "size": 42, "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"}],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="manifest-reader",
+                email="manifest-reader@example.com",
+                password_hash=hash_password("manifest-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "manifest-reader", "manifest-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags/latest")
+
+    assert response.status_code == 200
+    assert response.json()["manifest"]["digest"] == "sha256:manifest"
+
+
+def test_repo_tags_return_summary_rows(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        tags={
+            "sheldylew/app": [
+                TagSummary(
+                    tag="release",
+                    digest="sha256:abc",
+                    media_type="application/vnd.oci.image.manifest.v1+json",
+                    total_size=1048576,
+                    architectures=["linux/amd64", "linux/arm64"],
+                    created_at="2026-05-04T10:20:30Z",
+                    history_count=5,
+                )
+            ]
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="summary-reader",
+                email="summary-reader@example.com",
+                password_hash=hash_password("summary-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "summary-reader", "summary-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags")
+
+    assert response.status_code == 200
+    assert response.json()["tags"][0]["tag"] == "release"
+    assert response.json()["tags"][0]["architectures"] == ["linux/amd64", "linux/arm64"]
+
+
+def test_repo_tags_return_truncation_metadata(settings) -> None:
+    limited_settings = Settings(
+        app_env=settings.app_env,
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=settings.registry_storage_root,
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin=settings.public_registry_origin,
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        repository_tags_max_items=1,
+        session_cookie_secure=settings.session_cookie_secure,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(limited_settings)
+    fake_registry = FakeRegistryClient(
+        tags={
+            "sheldylew/app": [
+                TagSummary(tag="one", digest="sha256:1", media_type="application/vnd.oci.image.manifest.v1+json", total_size=1, architectures=["linux/amd64"], created_at=None, history_count=1),
+                TagSummary(tag="two", digest="sha256:2", media_type="application/vnd.oci.image.manifest.v1+json", total_size=2, architectures=["linux/arm64"], created_at=None, history_count=1),
+            ]
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="trunc-reader",
+                email="trunc-reader@example.com",
+                password_hash=hash_password("trunc-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "trunc-reader", "trunc-reader-pass")
+        response = client.get("/api/repos/sheldylew/app/tags")
+
+    assert response.status_code == 200
+    assert len(response.json()["tags"]) == 1
+    assert response.json()["truncation"] == {"truncated": True, "returned": 1, "available": 2}
+
+
+def test_repo_tag_history_returns_variants(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        histories={
+            ("sheldylew/app", "release"): [
+                HistoryVariant(
+                    platform="linux/amd64",
+                    manifest_digest="sha256:amd64",
+                    config_digest="sha256:cfg-amd64",
+                    created_at="2026-05-04T18:20:30Z",
+                    entries=[{"created_by": "amd64 step"}],
+                ),
+                HistoryVariant(
+                    platform="linux/arm64",
+                    manifest_digest="sha256:arm64",
+                    config_digest="sha256:cfg-arm64",
+                    created_at="2026-05-03T09:15:00Z",
+                    entries=[{"created_by": "arm64 step 1"}, {"created_by": "arm64 step 2"}],
+                ),
+            ]
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="history-reader",
+                email="history-reader@example.com",
+                password_hash=hash_password("history-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "history-reader", "history-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags/release/history")
+
+    assert response.status_code == 200
+    assert len(response.json()["variants"]) == 2
+    assert response.json()["variants"][0]["platform"] == "linux/amd64"
+    assert response.json()["variants"][1]["entry_count"] == 2
+
+
+def test_repo_tag_history_returns_truncation_metadata(settings) -> None:
+    limited_settings = Settings(
+        app_env=settings.app_env,
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=settings.registry_storage_root,
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin=settings.public_registry_origin,
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        manifest_children_max_items=1,
+        session_cookie_secure=settings.session_cookie_secure,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(limited_settings)
+    fake_registry = FakeRegistryClient(
+        histories={
+            ("sheldylew/app", "release"): [
+                HistoryVariant(platform="linux/amd64", manifest_digest="sha256:amd64", config_digest="sha256:cfg1", created_at=None, entries=[{}]),
+                HistoryVariant(platform="linux/arm64", manifest_digest="sha256:arm64", config_digest="sha256:cfg2", created_at=None, entries=[{}]),
+            ]
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="history-trunc",
+                email="history-trunc@example.com",
+                password_hash=hash_password("history-trunc-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "history-trunc", "history-trunc-pass")
+        response = client.get("/api/repos/sheldylew/app/tags/release/history")
+
+    assert response.status_code == 200
+    assert len(response.json()["variants"]) == 1
+    assert response.json()["truncation"] == {"truncated": True, "returned": 1, "available": 2}
+
+
+def test_admin_dashboard_returns_stats_and_activity(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        repositories=["sheldylew/app", "sheldylew/worker"],
+        tags={
+            "sheldylew/app": ["latest", "release"],
+            "sheldylew/worker": ["stable"],
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="dashboard-user",
+                email="dashboard-user@example.com",
+                password_hash=hash_password("dashboard-user-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(PersonalAccessToken(user_id=user.id, name="cli", token_hash="hash1", token_prefix="pat001"))
+            robot = RobotAccount(name="dashboard-bot", description="dashboard", is_active=True)
+            session.add(robot)
+            session.commit()
+            session.refresh(robot)
+            session.add(RobotToken(robot_id=robot.id, name="bot-cli", token_hash="hash2", token_prefix="rbt001"))
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/admin/dashboard")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["stats"]["users_total"] == 2
+    assert body["stats"]["registry_repositories"] == 2
+    assert body["stats"]["registry_tags"] == 3
+    assert body["repo_distribution"][0]["name"] == "sheldylew/app"
+    assert len(body["provisioning_trend"]["users"]) == 7
+    assert body["recent_activity"][0]["title"]
+    activity_details = " ".join(event["detail"] for event in body["recent_activity"])
+    assert "dashboard-user@example.com" in activity_details
+    assert "pat001" not in activity_details
+    assert "rbt001" not in activity_details
+    assert "Token hidden for non-admin account" in activity_details
+    assert "Token hidden for automation account" in activity_details
+
+
+def test_admin_dashboard_skips_stale_registry_entries(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        repositories=["sheldylew/app", "sheldylew/gc-me"],
+        tags={
+            "sheldylew/app": ["latest", "release"],
+        },
+        missing_repos={"sheldylew/gc-me"},
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/admin/dashboard")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["stats"]["registry_repositories"] == 1
+    assert body["stats"]["registry_tags"] == 2
+    assert body["stats"]["public_pull_tokens_issued"] == 0
+    assert body["repo_distribution"] == [{"name": "sheldylew/app", "tag_count": 2}]
+
+
+def test_admin_dashboard_caps_repository_fanout(settings) -> None:
+    limited_settings = Settings(
+        app_env=settings.app_env,
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=settings.registry_storage_root,
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin=settings.public_registry_origin,
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        dashboard_max_repositories=1,
+        session_cookie_secure=settings.session_cookie_secure,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(limited_settings)
+    fake_registry = FakeRegistryClient(
+        repositories=["sheldylew/app", "sheldylew/worker"],
+        tags={"sheldylew/app": ["latest"], "sheldylew/worker": ["stable"]},
+        repo_pages_truncated=True,
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, limited_settings.admin_username, limited_settings.admin_password)
+        response = client.get("/api/admin/dashboard")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert fake_registry.list_tags_calls == ["sheldylew/app"]
+    assert body["repo_distribution_truncation"]["truncated"] is True
+    assert body["repo_distribution_truncation"]["returned"] == 1
+
+
+def test_admin_dashboard_includes_public_pull_counter(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=["public/app"], tags={"public/app": ["latest"]})
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(Repository(name="public/app", visibility="public"))
+            session.commit()
+
+        public_pull = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:public/app:pull"},
+        )
+        assert public_pull.status_code == 200
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/admin/dashboard")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["stats"]["public_pull_tokens_issued"] == 1
+
+
+def test_admin_audit_endpoint_filters_by_actor_and_repo(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+            session.add(
+                AuditEvent(
+                    actor_type="user",
+                    actor_id=admin.id,
+                    action="repository_tag_deleted",
+                    target_type="repository_tag",
+                    metadata_json={"repo": "sheldylew/app", "tag": "latest"},
+                )
+            )
+            session.add(
+                AuditEvent(
+                    actor_type="user",
+                    actor_id=admin.id,
+                    action="repository_storage_pruned",
+                    target_type="repository",
+                    metadata_json={"repo": "sheldylew/other"},
+                )
+            )
+            session.commit()
+
+        filtered = client.get("/api/admin/audit", params={"actor": settings.admin_username, "repo": "sheldylew/app"})
+
+    assert filtered.status_code == 200
+    assert len(filtered.json()["events"]) == 1
+    assert filtered.json()["events"][0]["metadata_json"]["repo"] == "sheldylew/app"
+
+
+def test_delete_tag_requires_delete_permission(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:manifest",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="delete-blocked",
+                email="delete-blocked@example.com",
+                password_hash=hash_password("delete-blocked-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+
+        login = _login(client, "delete-blocked", "delete-blocked-pass")
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/app/tags/latest/delete",
+            json={"confirmation": "sheldylew/app:latest"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 403
+    assert fake_registry.deleted_manifests == []
+
+
+def test_delete_tag_deletes_manifest_and_records_audit(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:manifest",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="delete-allowed",
+                email="delete-allowed@example.com",
+                password_hash=hash_password("delete-allowed-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=True,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "delete-allowed", "delete-allowed-pass")
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/app/tags/latest/delete",
+            json={"confirmation": "sheldylew/app:latest"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            events = session.query(AuditEvent).all()
+
+    assert response.status_code == 200
+    assert fake_registry.deleted_manifests == [("sheldylew/app", "sha256:manifest")]
+    assert events[-1].action == "repository_tag_deleted"
+
+
+def test_admin_can_delete_tag_without_explicit_repo_permission(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/admin-delete", "latest"): {
+                "name": "sheldylew/admin-delete",
+                "tag": "latest",
+                "digest": "sha256:admin-manifest",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/admin-delete/tags/latest/delete",
+            json={"confirmation": "sheldylew/admin-delete:latest"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 200
+    assert fake_registry.deleted_manifests == [("sheldylew/admin-delete", "sha256:admin-manifest")]
+
+
+def test_delete_empty_repository_prunes_storage(settings, temp_workspace) -> None:
+    repo_root = temp_workspace / "registry-data"
+    repo_path = repo_root / "sheldylew" / "empty"
+    repo_path.mkdir(parents=True)
+    custom_settings = Settings(
+        app_env=settings.app_env,
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=str(repo_root),
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin=settings.public_registry_origin,
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        session_cookie_secure=settings.session_cookie_secure,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(custom_settings)
+    fake_registry = FakeRegistryClient(tags={"sheldylew/empty": []})
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/empty/delete",
+            json={"confirmation": "sheldylew/empty"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 200
+    assert repo_path.exists() is False
+
+
+def test_delete_empty_repository_rejects_non_empty_repo(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(tags={"sheldylew/app": ["latest"]})
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/app/delete",
+            json={"confirmation": "sheldylew/app"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 409
+
+
+def test_non_admin_cannot_prune_empty_repository(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(tags={"sheldylew/empty": []})
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="repo-prune-blocked",
+                email="repo-prune-blocked@example.com",
+                password_hash=hash_password("repo-prune-blocked-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+
+        login = _login(client, "repo-prune-blocked", "repo-prune-blocked-pass")
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/empty/delete",
+            json={"confirmation": "sheldylew/empty"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 403
+
+
+def test_delete_empty_repository_rejects_traversal_segments(settings, temp_workspace) -> None:
+    repo_root = temp_workspace / "registry-data"
+    outside_path = temp_workspace / "escape"
+    outside_path.mkdir()
+    custom_settings = Settings(
+        app_env=settings.app_env,
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=str(repo_root),
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin=settings.public_registry_origin,
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        session_cookie_secure=settings.session_cookie_secure,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(custom_settings)
+    fake_registry = FakeRegistryClient(tags={"../escape": []})
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/%2E%2E/escape/delete",
+            json={"confirmation": "../escape"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 400
+    assert outside_path.exists() is True

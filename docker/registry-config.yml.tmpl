@@ -1,0 +1,25 @@
+version: 0.1
+
+log:
+  level: info
+
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: true
+
+http:
+  addr: 0.0.0.0:5000
+  headers:
+    X-Content-Type-Options:
+      - nosniff
+
+auth:
+  token:
+    realm: {public_registry_origin}/auth/token
+    service: {token_service}
+    issuer: {token_issuer}
+    rootcertbundle: /certs/auth-cert.pem
+    signingalgorithms:
+      - RS256

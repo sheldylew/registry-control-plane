@@ -1,0 +1,13 @@
+.pytest_cache/
+__pycache__/
+.venv/
+.local-data/
+backups/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+node_modules/
+.next/
+npm-debug.log*
+.security-private/
