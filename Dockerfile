@@ -67,7 +67,6 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY app ./app
-COPY public ./public
 COPY jsconfig.json ./
 COPY next.config.mjs ./
 COPY postcss.config.mjs ./
@@ -84,7 +83,6 @@ RUN addgroup -g 10001 -S app && adduser -S -D -H -u 10001 -G app app
 
 COPY --from=web-builder --chown=app:app /web/.next/standalone ./
 COPY --from=web-builder --chown=app:app /web/.next/static ./.next/static
-COPY --from=web-builder --chown=app:app /web/public ./public
 
 USER app
 
