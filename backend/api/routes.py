@@ -1539,11 +1539,23 @@ def list_repositories(
             except RegistryNotFoundError:
                 continue
             resolvable_repositories.append(repository_name)
+        repository_rows = db.scalars(
+            select(Repository).where(Repository.name.in_(resolvable_repositories))
+        ).all()
+        repository_visibility = {
+            repository.name: repository.visibility for repository in repository_rows
+        }
     finally:
         registry.close()
 
     return {
-        "repos": [{"name": repository_name} for repository_name in resolvable_repositories],
+        "repos": [
+            {
+                "name": repository_name,
+                "visibility": repository_visibility.get(repository_name, "private"),
+            }
+            for repository_name in resolvable_repositories
+        ],
         "truncation": truncation,
         "user": _serialize_user(user),
     }

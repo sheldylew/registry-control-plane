@@ -36,7 +36,12 @@ export default async function ReposPage() {
                   href={`/repos/${encodeURIComponent(repo.name)}`}
                   className="block rounded-lg border border-white/10 bg-slate-950/70 px-5 py-5 transition hover:border-cyan-400/40 hover:bg-slate-950"
                 >
-                  <p className="text-lg font-semibold text-white">{repo.name}</p>
+                  <div className="flex items-start justify-between gap-4">
+                    <p className="min-w-0 break-words text-lg font-semibold text-white">{repo.name}</p>
+                    <Badge tone={repo.visibility === "public" ? "emerald" : "slate"} dot>
+                      {repo.visibility === "public" ? "Public" : "Private"}
+                    </Badge>
+                  </div>
                   <p className="mt-2 text-sm text-slate-400">Open tags and manifest details</p>
                 </Link>
               </li>

@@ -1118,7 +1118,7 @@ def test_public_repository_is_visible_without_explicit_permission(settings) -> N
         response = client.get("/api/repos")
 
     assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "public/app"}]
+    assert response.json()["repos"] == [{"name": "public/app", "visibility": "public"}]
 
 
 def test_admin_can_disable_robot(settings) -> None:
@@ -1459,7 +1459,10 @@ def test_repo_list_only_shows_visible_repositories(settings) -> None:
         response = client.get("/api/repos")
 
     assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "sheldylew/app"}, {"name": "sheldylew/worker"}]
+    assert response.json()["repos"] == [
+        {"name": "sheldylew/app", "visibility": "private"},
+        {"name": "sheldylew/worker", "visibility": "private"},
+    ]
 
 
 def test_admin_sees_all_repositories(settings) -> None:
@@ -1473,7 +1476,10 @@ def test_admin_sees_all_repositories(settings) -> None:
         response = client.get("/api/repos")
 
     assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "otherns/private"}, {"name": "sheldylew/app"}]
+    assert response.json()["repos"] == [
+        {"name": "otherns/private", "visibility": "private"},
+        {"name": "sheldylew/app", "visibility": "private"},
+    ]
 
 
 def test_repo_list_skips_stale_catalog_entries(settings) -> None:
@@ -1491,7 +1497,7 @@ def test_repo_list_skips_stale_catalog_entries(settings) -> None:
         response = client.get("/api/repos")
 
     assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "sheldylew/app"}]
+    assert response.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
 
 
 def test_repo_tags_require_pull_permission(settings) -> None:

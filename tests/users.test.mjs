@@ -45,6 +45,14 @@ test("admin users page builds pagination links", async () => {
   assert.match(page, /pagination=\{payload\.pagination\}/);
 });
 
+test("repositories page shows visibility badges", async () => {
+  const page = await readFile(new URL("../app/repos/page.jsx", import.meta.url), "utf8");
+
+  assert.match(page, /repo\.visibility === "public"/);
+  assert.match(page, /Public/);
+  assert.match(page, /Private/);
+});
+
 test("admin shell includes settings navigation", async () => {
   const shell = await readFile(new URL("../app/components/admin-shell.jsx", import.meta.url), "utf8");
 
