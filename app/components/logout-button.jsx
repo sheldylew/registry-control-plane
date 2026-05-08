@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 
+import Button from "@/app/components/ui/button";
+
 function readCookie(name) {
   const match = document.cookie
     .split("; ")
@@ -25,11 +27,12 @@ export default function LogoutButton() {
   }
 
   return (
-    <button
+    <Button
+      type="button"
       onClick={onLogout}
-      className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+      variant="secondary"
     >
       Log out
-    </button>
+    </Button>
   );
 }

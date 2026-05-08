@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import Button from "@/app/components/ui/button";
+import EmptyState from "@/app/components/ui/empty-state";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
 import { apiFetch } from "@/app/lib/server-api";
 
@@ -39,49 +42,46 @@ export default async function RepoTagDetailPage({ params }) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.2em] text-cyan-300">Manifest</p>
-            <h2 className="mt-3 text-3xl font-semibold text-white">
-              {manifest.name}:{manifest.tag}
-            </h2>
-          </div>
-          {payload.can_delete_tag ? (
-            <Link
+      <Panel className="p-6">
+        <PanelHeader
+          eyebrow="Manifest"
+          title={`${manifest.name}:${manifest.tag}`}
+          action={payload.can_delete_tag ? (
+            <Button
+              as={Link}
               href="/admin/maintenance"
-              className="inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
+              variant="secondary"
             >
               Garbage collection
-            </Link>
+            </Button>
           ) : null}
-        </div>
+        />
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Digest</p>
             <p className="mt-2 break-all text-sm text-slate-100">{manifest.digest || "Unavailable"}</p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Media Type</p>
             <p className="mt-2 break-all text-sm text-slate-100">{manifest.media_type || "Unavailable"}</p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Config Digest</p>
             <p className="mt-2 break-all text-sm text-slate-100">{manifest.config_digest || "Unavailable"}</p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+          <div className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Estimated Size</p>
             <p className="mt-2 text-sm text-slate-100">{formatBytes(manifest.total_size)}</p>
           </div>
         </div>
-      </div>
+      </Panel>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <h3 className="text-xl font-semibold text-white">Layers</h3>
+      <Panel className="p-6">
+        <PanelHeader title="Layers" />
         {manifest.layers.length ? (
           <ul className="mt-4 space-y-3">
             {manifest.layers.map((layer) => (
-              <li key={layer.digest} className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+              <li key={layer.digest} className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
                 <p className="break-all text-sm font-medium text-white">{layer.digest}</p>
                 <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{layer.mediaType}</p>
                 <p className="mt-2 text-sm text-slate-300">{formatBytes(layer.size || 0)}</p>
@@ -89,9 +89,14 @@ export default async function RepoTagDetailPage({ params }) {
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-sm text-slate-300">This manifest did not expose OCI layer entries.</p>
+          <div className="mt-4">
+            <EmptyState
+              title="No layer entries"
+              description="This manifest did not expose OCI layer entries."
+            />
+          </div>
         )}
-      </div>
+      </Panel>
 
       {payload.can_delete_tag ? (
         <RepoDeletePanel

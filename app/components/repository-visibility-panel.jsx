@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Label, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/20/solid";
 
+import Alert from "@/app/components/ui/alert";
 import { readApiErrorDetail } from "@/app/lib/user-form";
 
 const visibilityOptions = [
@@ -78,7 +79,7 @@ export default function RepositoryVisibilityPanel({ repositoryName, initialVisib
       <Listbox value={selected} by="value" onChange={updateVisibility} disabled={saving}>
         <Label className="block text-sm font-medium text-slate-300">Visibility</Label>
         <div className="relative mt-2">
-          <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-xl border border-white/10 bg-slate-950/80 py-2.5 pl-3 pr-2 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-70">
+          <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-md border border-white/10 bg-slate-950/80 py-2.5 pl-3 pr-2 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-70">
             <span className="col-start-1 row-start-1 truncate pr-7">
               <span className="block text-sm font-semibold">{selected.label}</span>
               <span className="block truncate text-xs text-slate-400">{selected.description}</span>
@@ -91,7 +92,7 @@ export default function RepositoryVisibilityPanel({ repositoryName, initialVisib
 
           <ListboxOptions
             transition
-            className="absolute right-0 z-10 mt-2 max-h-60 w-full overflow-auto rounded-xl border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/40 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
+            className="absolute right-0 z-10 mt-2 max-h-60 w-full overflow-auto rounded-lg border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/40 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
           >
             {visibilityOptions.map((option) => (
               <ListboxOption
@@ -111,7 +112,7 @@ export default function RepositoryVisibilityPanel({ repositoryName, initialVisib
           </ListboxOptions>
         </div>
       </Listbox>
-      {error ? <p className="mt-2 text-sm text-rose-300">{error}</p> : null}
+      {error ? <Alert tone="rose" className="mt-2">{error}</Alert> : null}
     </div>
   );
 }

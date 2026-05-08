@@ -10,7 +10,7 @@ export default function Disclosure({
   return (
     <details
       defaultOpen={defaultOpen}
-      className="group rounded-2xl border border-white/10 bg-slate-950/70"
+      className="group rounded-lg border border-white/10 bg-slate-950/70"
     >
       <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-slate-200 marker:hidden">
         <span className="inline-flex items-center gap-2">

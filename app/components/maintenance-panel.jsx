@@ -3,6 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import Alert from "@/app/components/ui/alert";
+import Badge from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
+
 function readCookie(name) {
   const match = document.cookie
     .split("; ")
@@ -80,14 +85,12 @@ export default function MaintenancePanel({ logRetentionDays }) {
 
   return (
     <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <form onSubmit={onSubmit} className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <p className="text-sm font-medium uppercase tracking-[0.22em] text-cyan-300">
-          Garbage collection
-        </p>
-        <h2 className="mt-3 text-2xl font-semibold text-white">Schedule registry maintenance</h2>
-        <p className="mt-3 text-sm leading-7 text-slate-300">
-          This creates a maintenance job immediately. Only one job can run at a time.
-        </p>
+      <Panel as="form" onSubmit={onSubmit} className="p-6">
+        <PanelHeader
+          eyebrow="Garbage collection"
+          title="Schedule registry maintenance"
+          description="This creates a maintenance job immediately. Only one job can run at a time."
+        />
 
         <div className="mt-6 grid gap-3">
           {[
@@ -109,7 +112,7 @@ export default function MaintenancePanel({ logRetentionDays }) {
           ].map((option) => (
             <label
               key={option.value}
-              className={`rounded-2xl border px-4 py-4 transition ${mode === option.value ? "border-cyan-400/40 bg-cyan-400/10" : "border-white/10 bg-slate-950/60"}`}
+              className={`rounded-lg border px-4 py-4 transition ${mode === option.value ? "border-cyan-400/40 bg-cyan-400/10" : "border-white/10 bg-slate-950/60"}`}
             >
               <div className="flex items-start gap-3">
                 <input
@@ -129,36 +132,37 @@ export default function MaintenancePanel({ logRetentionDays }) {
           ))}
         </div>
 
-        {error ? <p className="mt-3 text-sm text-rose-200">{error}</p> : null}
+        {error ? <Alert tone="rose" className="mt-3">{error}</Alert> : null}
 
-        <button
+        <Button
           type="submit"
           disabled={pending}
-          className="mt-5 rounded-full border border-cyan-300/30 bg-cyan-400/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/25 disabled:opacity-60"
+          variant="soft"
+          className="mt-5"
         >
           {pending ? "Submitting..." : "Create maintenance job"}
-        </button>
-      </form>
+        </Button>
+      </Panel>
 
-      <article className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <p className="text-sm font-medium uppercase tracking-[0.22em] text-cyan-300">
-          Log retention
-        </p>
-        <h2 className="mt-3 text-2xl font-semibold text-white">Prune retained logs</h2>
-        <p className="mt-3 text-sm leading-7 text-slate-300">
-          Delete audit events and completed maintenance jobs older than {logRetentionDays} days without scheduling a registry maintenance run.
-        </p>
-        {pruneMessage ? <p className="mt-4 text-sm text-emerald-200">{pruneMessage}</p> : null}
-        {pruneError ? <p className="mt-4 text-sm text-rose-200">{pruneError}</p> : null}
-        <button
+      <Panel as="article" className="p-6">
+        <PanelHeader
+          eyebrow="Log retention"
+          title="Prune retained logs"
+          description={`Delete audit events and completed maintenance jobs older than ${logRetentionDays} days without scheduling a registry maintenance run.`}
+          action={<Badge tone="cyan">{logRetentionDays} days</Badge>}
+        />
+        {pruneMessage ? <Alert tone="emerald" className="mt-4">{pruneMessage}</Alert> : null}
+        {pruneError ? <Alert tone="rose" className="mt-4">{pruneError}</Alert> : null}
+        <Button
           type="button"
           onClick={onPruneLogs}
           disabled={prunePending}
-          className="mt-5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:opacity-60"
+          variant="secondary"
+          className="mt-5"
         >
           {prunePending ? "Pruning..." : "Prune old logs now"}
-        </button>
-      </article>
+        </Button>
+      </Panel>
     </section>
   );
 }

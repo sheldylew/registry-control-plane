@@ -1,3 +1,7 @@
+import Badge from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
+import { Panel } from "@/app/components/ui/panel";
+
 const apiBasePath = process.env.NEXT_PUBLIC_API_BASE_PATH || "/api";
 const authTokenPath = process.env.NEXT_PUBLIC_AUTH_TOKEN_PATH || "/auth/token";
 const registryBasePath =
@@ -65,14 +69,12 @@ export default function HomePage() {
               model.
             </p>
           </div>
-          <div className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-100">
-            Built to run as a small, self-hosted service
-          </div>
+          <Badge tone="cyan">Built to run as a small, self-hosted service</Badge>
         </div>
       </header>
 
       <section className="relative z-10 grid gap-6 py-10 lg:grid-cols-3">
-        <article className="rounded-3xl border border-white/10 bg-white/6 p-6 shadow-2xl shadow-slate-950/30 backdrop-blur">
+        <Panel as="article" className="bg-white/6 p-6 shadow-2xl shadow-slate-950/30 backdrop-blur">
           <p className="text-sm font-medium text-slate-400">Operator view</p>
           <h2 className="mt-2 text-2xl font-semibold text-white">
             Daily control surface
@@ -83,22 +85,23 @@ export default function HomePage() {
             htpasswd files, and one-off notes.
           </p>
           <div className="mt-6 flex gap-3">
-            <a
+            <Button
+              as="a"
               href="/login"
-              className="rounded-md bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
             >
               Sign in
-            </a>
-            <a
+            </Button>
+            <Button
+              as="a"
               href="/admin"
-              className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+              variant="secondary"
             >
               Admin dashboard
-            </a>
+            </Button>
           </div>
-        </article>
+        </Panel>
 
-        <article className="rounded-3xl border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-950/30">
+        <article className="rounded-lg border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-950/30">
           <p className="text-sm font-medium text-slate-500">Deployment shape</p>
           <h2 className="mt-2 text-2xl font-semibold">
             Registry stays standard
@@ -122,7 +125,7 @@ export default function HomePage() {
           </dl>
         </article>
 
-        <article className="rounded-3xl border border-emerald-400/20 bg-emerald-400/10 p-6 shadow-2xl shadow-slate-950/30">
+        <Panel as="article" className="border-emerald-400/20 bg-emerald-400/10 p-6 shadow-2xl shadow-slate-950/30">
           <p className="text-sm font-medium text-emerald-200">API ownership</p>
           <h2 className="mt-2 text-2xl font-semibold text-white">
             Access model contained
@@ -142,11 +145,11 @@ export default function HomePage() {
               <dd className="font-semibold">{authTokenPath}</dd>
             </div>
           </dl>
-        </article>
+        </Panel>
       </section>
 
       <section className="relative z-10 grid gap-6 lg:grid-cols-2">
-        <article className="rounded-3xl border border-[color:var(--line)] bg-[color:var(--surface)] p-6">
+        <Panel as="article" className="border-[color:var(--line)] bg-[color:var(--surface)] p-6">
           <h2 className="text-lg font-semibold text-white">
             Production signals
           </h2>
@@ -158,9 +161,9 @@ export default function HomePage() {
               </li>
             ))}
           </ul>
-        </article>
+        </Panel>
 
-        <article className="rounded-3xl border border-[color:var(--line)] bg-[color:var(--surface)] p-6">
+        <Panel as="article" className="border-[color:var(--line)] bg-[color:var(--surface)] p-6">
           <h2 className="text-lg font-semibold text-white">Homelab fit</h2>
           <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-300">
             {operatorWorkflows.map((item) => (
@@ -170,7 +173,7 @@ export default function HomePage() {
               </li>
             ))}
           </ul>
-        </article>
+        </Panel>
       </section>
 
       <footer className="relative z-10 mt-auto pt-10 text-center">

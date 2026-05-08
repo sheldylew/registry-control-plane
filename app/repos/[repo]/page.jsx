@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ClockIcon } from "@heroicons/react/24/outline";
 
+import Badge from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
+import EmptyState from "@/app/components/ui/empty-state";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
 import RepositoryVisibilityPanel from "@/app/components/repository-visibility-panel";
 import { apiFetch } from "@/app/lib/server-api";
@@ -76,17 +82,12 @@ export default async function RepoDetailPage({ params }) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.2em] text-cyan-300">
-              Repository
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold text-white">{payload.repo}</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-300">
-              Browse published tags and inspect manifest details without direct browser-to-registry calls.
-            </p>
-          </div>
+      <Panel className="p-6">
+        <PanelHeader
+          eyebrow="Repository"
+          title={payload.repo}
+          description="Browse published tags and inspect manifest details without direct browser-to-registry calls."
+          action={(
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             {payload.can_manage_visibility ? (
               <RepositoryVisibilityPanel
@@ -95,27 +96,27 @@ export default async function RepoDetailPage({ params }) {
               />
             ) : null}
             {payload.can_delete_tag || payload.can_prune_repository ? (
-              <Link
+              <Button
+                as={Link}
                 href="/admin/maintenance"
-                className="inline-flex rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
+                variant="secondary"
+                className="h-[58px]"
               >
                 Garbage collection
-              </Link>
+              </Button>
             ) : null}
           </div>
-        </div>
-      </div>
+          )}
+        />
+      </Panel>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xl font-semibold text-white">Tags</h3>
-          <p className="text-sm text-slate-400">{payload.tags.length} total</p>
-        </div>
+      <Panel className="p-6">
+        <PanelHeader title="Tags" action={<Badge tone="cyan">{payload.tags.length} total</Badge>} />
         {payload.tags.length ? (
-          <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
-            <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-left text-sm text-slate-200">
-                <thead className="bg-slate-950/80 text-xs uppercase tracking-[0.18em] text-slate-400">
+          <div className="mt-4">
+            <TableShell>
+              <Table>
+                <TableHead>
                   <tr>
                     <th className="px-4 py-4 font-medium">Created</th>
                     <th className="px-4 py-4 font-medium">Size</th>
@@ -125,10 +126,10 @@ export default async function RepoDetailPage({ params }) {
                     <th className="px-4 py-4 font-medium">History</th>
                     {payload.can_delete_tag ? <th className="px-4 py-4 text-right font-medium">Delete</th> : null}
                   </tr>
-                </thead>
-                <tbody>
+                </TableHead>
+                <TableBody>
                   {payload.tags.map((tag) => (
-                    <tr key={tag.tag} className="border-t border-white/10 bg-slate-900/60">
+                    <tr key={tag.tag}>
                       <td className="px-4 py-4 align-top text-slate-300">{formatRelativeTime(tag.created_at)}</td>
                       <td className="px-4 py-4 align-top text-slate-300">{formatBytes(tag.total_size)}</td>
                       <td className="px-4 py-4 align-top">
@@ -139,7 +140,7 @@ export default async function RepoDetailPage({ params }) {
                       <td className="px-4 py-4 align-top text-center">
                         <Link
                           href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}`}
-                          className="inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 font-medium text-cyan-200 transition hover:border-cyan-300 hover:text-cyan-100"
+                          className="inline-flex rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 font-medium text-cyan-200 transition hover:border-cyan-300 hover:text-cyan-100"
                         >
                           {tag.tag}
                         </Link>
@@ -150,7 +151,7 @@ export default async function RepoDetailPage({ params }) {
                             tag.architectures.map((arch) => (
                               <span
                                 key={arch}
-                                className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200"
+                                className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200"
                               >
                                 {formatPlatformLabel(arch)}
                               </span>
@@ -163,24 +164,11 @@ export default async function RepoDetailPage({ params }) {
                       <td className="px-4 py-4 align-top text-slate-300">
                         <Link
                           href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/history`}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/5 text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
                           title={tag.history_count === null ? "View history" : `View ${tag.history_count} history entries`}
                           aria-label={tag.history_count === null ? "View history" : `View ${tag.history_count} history entries`}
                         >
-                          <svg
-                            aria-hidden="true"
-                            viewBox="0 0 24 24"
-                            className="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M3 12a9 9 0 1 0 3-6.7" />
-                            <path d="M3 4v5h5" />
-                            <path d="M12 7v5l3 2" />
-                          </svg>
+                          <ClockIcon className="h-5 w-5" aria-hidden="true" />
                         </Link>
                       </td>
                       {payload.can_delete_tag ? (
@@ -199,13 +187,16 @@ export default async function RepoDetailPage({ params }) {
                       ) : null}
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TableBody>
+              </Table>
+            </TableShell>
           </div>
         ) : (
           <div className="mt-4 space-y-4">
-            <p className="text-sm text-slate-300">No tags were returned by the registry for this repository.</p>
+            <EmptyState
+              title="No tags returned"
+              description="No tags were returned by the registry for this repository."
+            />
             {payload.can_prune_repository ? (
               <RepoDeletePanel
                 title="Delete empty repository"
@@ -219,7 +210,7 @@ export default async function RepoDetailPage({ params }) {
             ) : null}
           </div>
         )}
-      </div>
+      </Panel>
     </div>
   );
 }

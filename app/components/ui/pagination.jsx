@@ -1,28 +1,6 @@
 import Link from "next/link";
 
-function ChevronLeftIcon(props) {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" {...props}>
-      <path
-        fillRule="evenodd"
-        d="M11.78 14.78a.75.75 0 0 1-1.06 0l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 1 1 1.06 1.06L8.06 10l3.72 3.72a.75.75 0 0 1 0 1.06Z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
-
-function ChevronRightIcon(props) {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" {...props}>
-      <path
-        fillRule="evenodd"
-        d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 1 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
+import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
 
 function buildPageItems(page, totalPages) {
   const pages = new Set([1, totalPages, page - 1, page, page + 1]);
@@ -61,7 +39,7 @@ export default function Pagination({ page, pageSize, total, hrefForPage, label =
         <Link
           href={hrefForPage(Math.max(currentPage - 1, 1))}
           aria-disabled={currentPage <= 1}
-          className={`relative inline-flex items-center rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium ${
+          className={`relative inline-flex items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
             currentPage <= 1 ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
           }`}
         >
@@ -70,7 +48,7 @@ export default function Pagination({ page, pageSize, total, hrefForPage, label =
         <Link
           href={hrefForPage(Math.min(currentPage + 1, totalPages))}
           aria-disabled={currentPage >= totalPages}
-          className={`relative ml-3 inline-flex items-center rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium ${
+          className={`relative ml-3 inline-flex items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
             currentPage >= totalPages ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
           }`}
         >

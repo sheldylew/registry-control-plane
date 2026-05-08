@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 
 import Dialog from "@/app/components/ui/dialog";
 import Pagination from "@/app/components/ui/pagination";
+import Badge from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
+import EmptyState from "@/app/components/ui/empty-state";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import {
   FORM_EMAIL_MAX_LENGTH,
   FORM_NAME_MAX_LENGTH,
@@ -127,20 +131,23 @@ export default function UsersPanel({
 
   return (
     <>
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-xl font-semibold text-white">Users</h2>
-          <button
-            type="button"
-            onClick={openDialog}
-            className="rounded-2xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
-          >
-            Create user
-          </button>
-        </div>
-        <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
+      <Panel className="p-6">
+        <PanelHeader
+          title="Users"
+          description="Create identities and review account status for registry access."
+          action={(
+            <Button
+              type="button"
+              onClick={openDialog}
+              size="lg"
+            >
+              Create user
+            </Button>
+          )}
+        />
+        <div className="mt-6 overflow-hidden rounded-lg border border-white/10">
           <table className="min-w-full divide-y divide-white/10 text-sm">
-            <thead className="bg-white/5 text-slate-300">
+            <thead className="bg-white/5 text-xs uppercase tracking-[0.16em] text-slate-400">
               <tr>
                 <th className="px-4 py-3 text-left font-medium">Username</th>
                 <th className="px-4 py-3 text-left font-medium">Email</th>
@@ -150,31 +157,50 @@ export default function UsersPanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {initialUsers.map((user) => (
+              {initialUsers.length ? initialUsers.map((user) => (
                 <tr key={user.id}>
                   <td className="px-4 py-3 text-white">{user.username}</td>
                   <td className="px-4 py-3 text-slate-300">{user.email}</td>
                   <td className="px-4 py-3 text-slate-300">
-                    {user.is_admin ? "Admin" : "User"}
+                    <Badge tone={user.is_admin ? "cyan" : "slate"}>
+                      {user.is_admin ? "Admin" : "User"}
+                    </Badge>
                   </td>
                   <td className="px-4 py-3 text-slate-300">
-                    {user.is_active ? "Active" : "Disabled"}
+                    <Badge tone={user.is_active ? "emerald" : "amber"} dot>
+                      {user.is_active ? "Active" : "Disabled"}
+                    </Badge>
                   </td>
                   <td className="px-4 py-3">
                     {user.is_active && user.id !== currentUserId ? (
-                      <button
+                      <Button
+                        type="button"
                         onClick={() => disableUser(user.id)}
-                        className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100"
+                        variant="warning"
+                        size="xs"
                       >
                         Disable
-                      </button>
+                      </Button>
                     ) : null}
                   </td>
                 </tr>
-              ))}
+              )) : null}
             </tbody>
           </table>
         </div>
+        {!initialUsers.length ? (
+          <div className="mt-6">
+            <EmptyState
+              title="No users found"
+              description="Create the first operator identity for this registry control plane."
+              action={(
+                <Button type="button" onClick={openDialog}>
+                  Create user
+                </Button>
+              )}
+            />
+          </div>
+        ) : null}
         <div className="mt-6">
           <Pagination
             page={pagination.page}
@@ -184,7 +210,7 @@ export default function UsersPanel({
             hrefForPage={buildPageHref}
           />
         </div>
-      </div>
+      </Panel>
 
       <Dialog open={open} onClose={closeDialog} eyebrow="User management" title="Create user">
         <form onSubmit={createUser}>
@@ -196,7 +222,7 @@ export default function UsersPanel({
               onChange={(event) => setUsername(event.target.value)}
               required
               maxLength={FORM_NAME_MAX_LENGTH}
-              className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white"
+              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
             <input
               type="email"
@@ -207,7 +233,7 @@ export default function UsersPanel({
               maxLength={FORM_EMAIL_MAX_LENGTH}
               pattern="^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
               title="Use an address with a full domain, like name@example.com."
-              className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white"
+              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
             <input
               type="password"
@@ -216,9 +242,9 @@ export default function UsersPanel({
               onChange={(event) => setPassword(event.target.value)}
               required
               minLength={8}
-              className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white"
+              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
-            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+            <label className="flex items-center gap-3 rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-200">
               <input
                 type="checkbox"
                 checked={isAdmin}
@@ -229,21 +255,20 @@ export default function UsersPanel({
           </div>
           {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
           <div className="mt-5 flex items-center justify-end gap-3">
-            <button
+            <Button
               type="button"
               onClick={closeDialog}
               disabled={pending}
-              className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:text-white disabled:opacity-60"
+              variant="secondary"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={pending || !canCreateUser}
-              className="rounded-full bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pending ? "Creating..." : "Create user"}
-            </button>
+            </Button>
           </div>
         </form>
       </Dialog>

@@ -1,6 +1,11 @@
 import MaintenancePanel from "@/app/components/maintenance-panel";
+import Alert from "@/app/components/ui/alert";
+import Badge from "@/app/components/ui/badge";
 import Disclosure from "@/app/components/ui/disclosure";
+import EmptyState from "@/app/components/ui/empty-state";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import Pagination from "@/app/components/ui/pagination";
+import StatCard from "@/app/components/ui/stat-card";
 import { apiFetch } from "@/app/lib/server-api";
 
 function formatBytes(size) {
@@ -67,53 +72,33 @@ export default async function AdminMaintenancePage({ searchParams }) {
   return (
     <div className="space-y-6">
       <section className="grid gap-4 md:grid-cols-3">
-        <article className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-          <p className="text-sm font-medium text-slate-300">Registry status</p>
-          <p className="mt-4 text-3xl font-semibold text-white">{payload.registry_status}</p>
-        </article>
-        <article className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-          <p className="text-sm font-medium text-slate-300">Storage usage</p>
-          <p className="mt-4 text-3xl font-semibold text-white">{formatBytes(payload.storage_usage_bytes)}</p>
-        </article>
-        <article className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-          <p className="text-sm font-medium text-slate-300">Last job</p>
-          <p className="mt-4 text-3xl font-semibold capitalize text-white">
-            {payload.last_job ? payload.last_job.status : "None"}
-          </p>
-          <p className="mt-2 text-sm text-slate-400">
-            {payload.last_job ? summarizeMode(payload.last_job) : "No maintenance jobs yet"}
-          </p>
-        </article>
+        <StatCard label="Registry status" value={payload.registry_status} />
+        <StatCard label="Storage usage" value={formatBytes(payload.storage_usage_bytes)} />
+        <StatCard
+          label="Last job"
+          value={payload.last_job ? payload.last_job.status : "None"}
+          detail={payload.last_job ? summarizeMode(payload.last_job) : "No maintenance jobs yet"}
+        />
       </section>
 
       <MaintenancePanel logRetentionDays={payload.log_retention_days} />
 
-      <section className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.22em] text-cyan-300">
-              Job history
-            </p>
-            <h2 className="mt-3 text-2xl font-semibold text-white">Recent maintenance jobs</h2>
-          </div>
-          <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.16em] text-slate-300">
-            Page {payload.pagination.page}
-          </span>
-        </div>
+      <Panel as="section" className="p-6">
+        <PanelHeader
+          eyebrow="Job history"
+          title="Recent maintenance jobs"
+          action={<Badge>Page {payload.pagination.page}</Badge>}
+        />
         <div className="mt-6 space-y-4">
           {payload.jobs.length ? (
             payload.jobs.map((job) => (
-              <article key={job.id} className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+              <article key={job.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-5">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex items-center gap-3">
                       <p className="text-sm font-semibold text-white">Job #{job.id}</p>
-                      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs uppercase tracking-[0.16em] text-slate-300">
-                        {summarizeMode(job)}
-                      </span>
-                      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs uppercase tracking-[0.16em] text-slate-300">
-                        {job.status}
-                      </span>
+                      <Badge>{summarizeMode(job)}</Badge>
+                      <Badge tone={job.status === "failed" ? "rose" : "slate"}>{job.status}</Badge>
                     </div>
                     <p className="mt-2 text-sm text-slate-400">
                       Started {formatDate(job.started_at)}. Finished {formatDate(job.finished_at)}.
@@ -123,9 +108,7 @@ export default async function AdminMaintenancePage({ searchParams }) {
                     </p>
                   </div>
                   {job.error ? (
-                    <p className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                      {job.error}
-                    </p>
+                    <Alert tone="rose">{job.error}</Alert>
                   ) : null}
                 </div>
                 {job.log_output ? (
@@ -144,7 +127,10 @@ export default async function AdminMaintenancePage({ searchParams }) {
               </article>
             ))
           ) : (
-            <p className="text-sm text-slate-300">No maintenance jobs recorded yet.</p>
+            <EmptyState
+              title="No maintenance jobs"
+              description="No maintenance jobs recorded yet."
+            />
           )}
         </div>
         <Pagination
@@ -154,7 +140,7 @@ export default async function AdminMaintenancePage({ searchParams }) {
           label="jobs"
           hrefForPage={buildPageHref}
         />
-      </section>
+      </Panel>
     </div>
   );
 }

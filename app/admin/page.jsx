@@ -1,5 +1,11 @@
 import Link from 'next/link';
 
+import Alert from '@/app/components/ui/alert';
+import Badge from '@/app/components/ui/badge';
+import Button from '@/app/components/ui/button';
+import EmptyState from '@/app/components/ui/empty-state';
+import { Panel, PanelHeader } from '@/app/components/ui/panel';
+import StatCard from '@/app/components/ui/stat-card';
 import { apiFetch } from '@/app/lib/server-api';
 
 function formatRelativeTime(value) {
@@ -32,7 +38,7 @@ function TrendBars({ label, buckets, tone }) {
   const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
   const midpoint = buckets[Math.floor(buckets.length / 2)];
   return (
-    <div className='rounded-3xl border border-white/10 bg-slate-950/60 p-5'>
+    <div className='rounded-lg border border-white/10 bg-slate-950/60 p-5'>
       <div className='flex items-center justify-between'>
         <p className='text-sm font-medium text-white'>{label}</p>
         <p className='text-xs uppercase tracking-[0.18em] text-slate-400'>{total} total</p>
@@ -42,7 +48,7 @@ function TrendBars({ label, buckets, tone }) {
           <div key={bucket.label} className='flex flex-1 flex-col items-center gap-2'>
             <div className='flex h-24 w-full items-end'>
               <div
-                className={`w-full rounded-t-2xl transition-opacity ${tone} ${bucket.count === 0 ? 'opacity-30' : 'opacity-100'}`}
+                className={`w-full rounded-t-md transition-opacity ${tone} ${bucket.count === 0 ? 'opacity-30' : 'opacity-100'}`}
                 style={{ height: bucket.count === 0 ? '4px' : `${Math.max(16, (bucket.count / maxValue) * 100)}%` }}
                 title={`${bucket.label}: ${bucket.count}`}
               />
@@ -70,20 +76,20 @@ export default async function AdminHomePage() {
     // Handle non-JSON responses (like HTML error pages)
     console.error('Failed to parse JSON response:', error);
     return (
-      <div className='rounded-3xl border border-red-500/20 bg-red-950/20 p-8 text-center'>
+      <Alert tone="rose" className='p-8 text-center'>
         <h2 className='text-xl font-bold text-red-400'>Dashboard Error</h2>
         <p className='mt-2 text-red-300'>Failed to load dashboard data. The server returned an unexpected response.</p>
         <p className='mt-2 text-sm text-red-500'>Please check the server logs for more details.</p>
-      </div>
+      </Alert>
     );
   }
 
   if (!response.ok) {
     return (
-      <div className='rounded-3xl border border-red-500/20 bg-red-950/20 p-8 text-center'>
+      <Alert tone="rose" className='p-8 text-center'>
         <h2 className='text-xl font-bold text-red-400'>Dashboard Error</h2>
         <p className='mt-2 text-red-300'>{payload.detail || 'Failed to load dashboard data.'}</p>
-      </div>
+      </Alert>
     );
   }
 
@@ -124,45 +130,44 @@ export default async function AdminHomePage() {
     <div className='space-y-6'>
       <section className='grid gap-4 md:grid-cols-2 xl:grid-cols-5'>
         {stats.map((stat) => (
-          <article key={stat.label} className={`rounded-3xl border border-white/10 bg-gradient-to-br ${stat.tone} p-6 shadow-lg shadow-slate-950/20`}>
-            <p className='text-sm font-medium text-slate-300'>{stat.label}</p>
-            <p className='mt-4 text-4xl font-semibold tracking-tight text-white'>{stat.value}</p>
-            <p className='mt-3 text-sm leading-6 text-slate-400'>{stat.subvalue}</p>
-          </article>
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            detail={stat.subvalue}
+            tone={stat.label === 'Active users' ? 'cyan' : stat.label === 'Active PATs' ? 'emerald' : stat.label === 'Active robots' ? 'amber' : 'slate'}
+          />
         ))}
       </section>
 
       <section className='grid gap-6 xl:grid-cols-[1.45fr_0.95fr]'>
-        <article className='rounded-3xl border border-white/10 bg-slate-900/80 p-6'>
-          <div className='flex items-center justify-between'>
-            <div>
-              <p className='text-sm font-medium uppercase tracking-[0.22em] text-cyan-300'>Provisioning trend</p>
-              <h2 className='mt-3 text-2xl font-semibold text-white'>Identity and token velocity</h2>
-            </div>
-            <p className='text-sm text-slate-400'>
-              Peak bucket: {maxBucketValue([payload.provisioning_trend.users, payload.provisioning_trend.tokens, payload.provisioning_trend.robots])}
-            </p>
-          </div>
+        <Panel as="article" className='p-6'>
+          <PanelHeader
+            eyebrow="Provisioning trend"
+            title="Identity and token velocity"
+            action={<Badge>Peak bucket: {maxBucketValue([payload.provisioning_trend.users, payload.provisioning_trend.tokens, payload.provisioning_trend.robots])}</Badge>}
+          />
           <div className='mt-6 grid gap-4 xl:grid-cols-3'>
             <TrendBars label='Users' buckets={payload.provisioning_trend.users} tone='bg-cyan-400/80' />
             <TrendBars label='Tokens' buckets={payload.provisioning_trend.tokens} tone='bg-emerald-400/80' />
             <TrendBars label='Robots' buckets={payload.provisioning_trend.robots} tone='bg-amber-300/80' />
           </div>
-        </article>
+        </Panel>
 
-        <article className='rounded-3xl border border-white/10 bg-slate-900/80 p-6'>
-          <div className='flex items-center justify-between'>
-            <div>
-              <p className='text-sm font-medium uppercase tracking-[0.22em] text-cyan-300'>Registry mix</p>
-              <h2 className='mt-3 text-2xl font-semibold text-white'>Largest repositories by tag count</h2>
-            </div>
-            <Link
+        <Panel as="article" className='p-6'>
+          <PanelHeader
+            eyebrow="Registry mix"
+            title="Largest repositories by tag count"
+            action={(
+            <Button
+              as={Link}
               href='/repos'
-              className='rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
+              variant="secondary"
             >
               Open browser
-            </Link>
-          </div>
+            </Button>
+            )}
+          />
           <div className='mt-6 space-y-4'>
             {payload.repo_distribution.length ? (
               payload.repo_distribution.map((repo, index) => {
@@ -184,24 +189,19 @@ export default async function AdminHomePage() {
                 );
               })
             ) : (
-              <p className='text-sm text-slate-300'>No registry repositories discovered yet.</p>
+              <EmptyState title="No repositories discovered" description="No registry repositories discovered yet." />
             )}
           </div>
-        </article>
+        </Panel>
       </section>
 
       <section className='grid gap-6 xl:grid-cols-[1.2fr_0.8fr]'>
-        <article className='rounded-3xl border border-white/10 bg-slate-900/80 p-6'>
-          <div className='flex items-center justify-between'>
-            <div>
-              <p className='text-sm font-medium uppercase tracking-[0.22em] text-cyan-300'>Recent activity</p>
-              <h2 className='mt-3 text-2xl font-semibold text-white'>Latest identity and credential events</h2>
-            </div>
-          </div>
+        <Panel as="article" className='p-6'>
+          <PanelHeader eyebrow="Recent activity" title="Latest identity and credential events" />
           <div className='mt-6 space-y-4'>
             {payload.recent_activity.length ? (
               payload.recent_activity.map((event) => (
-                <div key={`${event.type}-${event.timestamp}-${event.title}`} className='rounded-2xl border border-white/10 bg-slate-950/60 p-4'>
+                <div key={`${event.type}-${event.timestamp}-${event.title}`} className='rounded-lg border border-white/10 bg-slate-950/60 p-4'>
                   <div className='flex items-center justify-between gap-4'>
                     <p className='text-sm font-medium text-white'>{event.title}</p>
                     <p className='text-xs uppercase tracking-[0.18em] text-slate-500'>{formatRelativeTime(event.timestamp)}</p>
@@ -210,53 +210,32 @@ export default async function AdminHomePage() {
                 </div>
               ))
             ) : (
-              <p className='text-sm text-slate-300'>No recent activity yet.</p>
+              <EmptyState title="No recent activity" description="No recent activity yet." />
             )}
           </div>
-        </article>
+        </Panel>
 
-        <article className='rounded-3xl border border-white/10 bg-slate-900/80 p-6'>
-          <p className='text-sm font-medium uppercase tracking-[0.22em] text-cyan-300'>Quick links</p>
-          <h2 className='mt-3 text-2xl font-semibold text-white'>Operator shortcuts</h2>
+        <Panel as="article" className='p-6'>
+          <PanelHeader eyebrow="Quick links" title="Operator shortcuts" />
           <div className='mt-6 space-y-3'>
-            <Link
-              href='/admin/users'
-              className='block rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
-            >
-              Manage users
-            </Link>
-            <Link
-              href='/admin/tokens'
-              className='block rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
-            >
-              Review PATs
-            </Link>
-            <Link
-              href='/admin/robots'
-              className='block rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
-            >
-              Review robots
-            </Link>
-            <Link
-              href='/admin/audit'
-              className='block rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
-            >
-              Inspect audit log
-            </Link>
-            <Link
-              href='/admin/maintenance'
-              className='block rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
-            >
-              Run maintenance
-            </Link>
-            <Link
-              href='/repos'
-              className='block rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
-            >
-              Browse registry
-            </Link>
+            {[
+              ['/admin/users', 'Manage users'],
+              ['/admin/tokens', 'Review PATs'],
+              ['/admin/robots', 'Review robots'],
+              ['/admin/audit', 'Inspect audit log'],
+              ['/admin/maintenance', 'Run maintenance'],
+              ['/repos', 'Browse registry'],
+            ].map(([href, label]) => (
+              <Link
+                key={href}
+                href={href}
+                className='block rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
+              >
+                {label}
+              </Link>
+            ))}
           </div>
-        </article>
+        </Panel>
       </section>
     </div>
   );

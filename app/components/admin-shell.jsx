@@ -3,7 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Bars3Icon, XMarkIcon } from "@heroicons/react/24/outline";
 
+import Button from "@/app/components/ui/button";
 import LogoutButton from "@/app/components/logout-button";
 
 const navItems = [
@@ -17,22 +19,6 @@ const navItems = [
   { href: "/admin/permissions", label: "Permissions" },
   { href: "/admin/settings", label: "Settings" },
 ];
-
-function OpenMenuIcon(props) {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" {...props}>
-      <path d="M2 6.75C2 6.33579 2.33579 6 2.75 6H17.25C17.6642 6 18 6.33579 18 6.75C18 7.16421 17.6642 7.5 17.25 7.5H2.75C2.33579 7.5 2 7.16421 2 6.75ZM2 13.25C2 12.8358 2.33579 12.5 2.75 12.5H17.25C17.6642 12.5 18 12.8358 18 13.25C18 13.6642 17.6642 14 17.25 14H2.75C2.33579 14 2 13.6642 2 13.25Z" />
-    </svg>
-  );
-}
-
-function CloseMenuIcon(props) {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" {...props}>
-      <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-    </svg>
-  );
-}
 
 export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
   const pathname = usePathname();
@@ -59,7 +45,7 @@ export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
           <Link
             href={item.href}
             onClick={onNavigate}
-            className={`block rounded-2xl px-4 py-3 text-sm font-medium transition ${
+            className={`block rounded-lg px-4 py-3 text-sm font-medium transition ${
               active
                 ? "bg-white/10 text-white"
                 : "text-slate-200 hover:bg-white/5 hover:text-white"
@@ -88,24 +74,25 @@ export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
         aria-hidden={!mobileNavOpen}
       >
         <div className="pointer-events-none absolute inset-y-6 right-1 w-10 rounded-full bg-black/10 blur-xl" />
-        <div className="relative flex max-h-[calc(100vh-1.5rem)] flex-col rounded-[1.75rem] border border-white/10 bg-slate-950/95 p-4 shadow-[0_24px_80px_rgba(2,6,23,0.55)] backdrop-blur-md">
+        <div className="relative flex max-h-[calc(100vh-1.5rem)] flex-col rounded-lg border border-white/10 bg-slate-950/95 p-4 shadow-[0_24px_80px_rgba(2,6,23,0.55)] backdrop-blur-md">
           <div className="mb-4 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">
               Navigation
             </p>
-            <button
+            <Button
               type="button"
               onClick={closeMobileNav}
               aria-label="Close navigation"
-              className="rounded-full border border-white/10 bg-white/5 p-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+              variant="secondary"
+              size="iconMd"
             >
-              <CloseMenuIcon className="h-5 w-5" />
-            </button>
+              <XMarkIcon className="h-5 w-5" />
+            </Button>
           </div>
-          <nav className="overflow-y-auto rounded-3xl border border-white/10 bg-slate-900/80 p-4">
+          <nav className="overflow-y-auto rounded-lg border border-white/10 bg-slate-900/80 p-4">
             <ul className="space-y-2">{renderNavItems(closeMobileNav)}</ul>
           </nav>
-          <div className="mt-4 rounded-3xl border border-white/10 bg-slate-900/80 p-4">
+          <div className="mt-4 rounded-lg border border-white/10 bg-slate-900/80 p-4">
             <LogoutButton />
           </div>
         </div>
@@ -120,14 +107,16 @@ export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
             <h1 className="text-4xl font-semibold tracking-tight text-white">
               Registry control plane
             </h1>
-            <button
+            <Button
               type="button"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Open navigation"
-              className="shrink-0 rounded-full border border-white/10 bg-white/5 p-2 text-white transition hover:bg-white/10 lg:hidden"
+              variant="secondary"
+              size="iconMd"
+              className="shrink-0 lg:hidden"
             >
-              <OpenMenuIcon className="h-5 w-5" />
-            </button>
+              <Bars3Icon className="h-5 w-5" />
+            </Button>
           </div>
           <p className="mt-3 text-sm leading-6 text-slate-300">
             Signed in as <span className="font-semibold text-white">{user.username}</span>
@@ -139,7 +128,7 @@ export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
       </header>
 
       <div className="grid gap-8 pt-8 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav className="sticky top-8 hidden self-start rounded-3xl border border-white/10 bg-slate-900/80 p-4 lg:block">
+        <nav className="sticky top-8 hidden self-start rounded-lg border border-white/10 bg-slate-900/80 p-4 lg:block">
           <ul className="space-y-2">{renderNavItems()}</ul>
         </nav>
         <section>{children}</section>

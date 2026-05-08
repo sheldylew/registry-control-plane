@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 
+import Alert from "@/app/components/ui/alert";
+import Button from "@/app/components/ui/button";
+import { Field, Input, LightInput } from "@/app/components/ui/form";
+import { Panel } from "@/app/components/ui/panel";
 import {
   hasNonEmptyValue,
   isValidPassword,
@@ -63,10 +67,7 @@ export default function SetupForm({ initialPublicOrigin = "" }) {
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className="rounded-3xl border border-white/10 bg-slate-900/80 p-8 shadow-2xl shadow-slate-950/30"
-    >
+    <Panel as="form" onSubmit={onSubmit} className="p-8 shadow-2xl shadow-slate-950/30">
       <h1 className="text-3xl font-semibold text-white">First boot setup</h1>
       <p className="mt-3 text-sm leading-6 text-slate-300">
         Enter the one-time setup token from container logs, then create the first admin account and public registry origin.
@@ -74,67 +75,65 @@ export default function SetupForm({ initialPublicOrigin = "" }) {
 
       {!result ? (
         <>
-          <label className="mt-6 block text-sm font-medium text-slate-200">Setup token</label>
-          <input
-            value={setupToken}
-            onChange={(event) => setSetupToken(event.target.value)}
-            required
-            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none ring-0"
-            autoComplete="one-time-code"
-          />
+          <Field label="Setup token" className="mt-6">
+            <Input
+              value={setupToken}
+              onChange={(event) => setSetupToken(event.target.value)}
+              required
+              autoComplete="one-time-code"
+            />
+          </Field>
 
-          <label className="mt-5 block text-sm font-medium text-slate-200">Admin username</label>
-          <input
-            value={adminUsername}
-            onChange={(event) => setAdminUsername(event.target.value)}
-            required
-            maxLength={255}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none ring-0"
-            autoComplete="username"
-          />
+          <Field label="Admin username" className="mt-5">
+            <Input
+              value={adminUsername}
+              onChange={(event) => setAdminUsername(event.target.value)}
+              required
+              maxLength={255}
+              autoComplete="username"
+            />
+          </Field>
 
-          <label className="mt-5 block text-sm font-medium text-slate-200">Admin email</label>
-          <input
-            value={adminEmail}
-            onChange={(event) => setAdminEmail(event.target.value)}
-            required
-            maxLength={320}
-            type="email"
-            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none ring-0"
-            autoComplete="email"
-          />
+          <Field label="Admin email" className="mt-5">
+            <Input
+              value={adminEmail}
+              onChange={(event) => setAdminEmail(event.target.value)}
+              required
+              maxLength={320}
+              type="email"
+              autoComplete="email"
+            />
+          </Field>
 
-          <label className="mt-5 block text-sm font-medium text-slate-200">Admin password</label>
-          <input
-            value={adminPassword}
-            onChange={(event) => setAdminPassword(event.target.value)}
-            required
-            minLength={8}
-            type="password"
-            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-100 px-4 py-3 text-slate-950 outline-none ring-0"
-            autoComplete="new-password"
-          />
+          <Field label="Admin password" className="mt-5">
+            <LightInput
+              value={adminPassword}
+              onChange={(event) => setAdminPassword(event.target.value)}
+              required
+              minLength={8}
+              type="password"
+              autoComplete="new-password"
+            />
+          </Field>
 
-          <label className="mt-5 block text-sm font-medium text-slate-200">Public registry origin</label>
-          <input
-            value={publicOrigin}
-            onChange={(event) => setPublicOrigin(event.target.value)}
-            required
-            maxLength={255}
-            placeholder="https://registry.example.com"
-            className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none ring-0"
-          />
+          <Field label="Public registry origin" className="mt-5">
+            <Input
+              value={publicOrigin}
+              onChange={(event) => setPublicOrigin(event.target.value)}
+              required
+              maxLength={255}
+              placeholder="https://registry.example.com"
+            />
+          </Field>
         </>
       ) : null}
 
       {error ? (
-        <p className="mt-4 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
-          {error}
-        </p>
+        <Alert tone="rose" className="mt-4">{error}</Alert>
       ) : null}
 
       {result ? (
-        <div className="mt-4 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+        <Alert tone="amber" className="mt-4">
           <p>
             Setup complete. Restart the registry service before signing in or using Docker clients so the running registry
             reloads the updated token realm.
@@ -148,18 +147,19 @@ export default function SetupForm({ initialPublicOrigin = "" }) {
           >
             Continue to sign in after restart
           </a>
-        </div>
+        </Alert>
       ) : null}
 
       {!result ? (
-        <button
+        <Button
           type="submit"
           disabled={pending || !canSubmit}
-          className="mt-6 w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-6 w-full"
+          size="lg"
         >
           {pending ? "Completing setup..." : "Complete setup"}
-        </button>
+        </Button>
       ) : null}
-    </form>
+    </Panel>
   );
 }

@@ -3,6 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import Badge from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
+import EmptyState from "@/app/components/ui/empty-state";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import { FORM_NAME_MAX_LENGTH, hasNonEmptyValue, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
 
 function readCookie(name) {
@@ -56,14 +60,11 @@ export default function TokensPanel({ initialTokens }) {
 
   return (
     <div className="space-y-6">
-      <form
-        onSubmit={createToken}
-        className="rounded-3xl border border-white/10 bg-slate-900/80 p-6"
-      >
-        <h2 className="text-xl font-semibold text-white">Personal access tokens</h2>
-        <p className="mt-3 text-sm text-slate-300">
-          Create a token for Docker CLI access. The raw secret is shown once.
-        </p>
+      <Panel as="form" onSubmit={createToken} className="p-6">
+        <PanelHeader
+          title="Personal access tokens"
+          description="Create a token for Docker CLI access. The raw secret is shown once."
+        />
         <div className="mt-4 flex gap-3">
           <input
             placeholder="Token name"
@@ -71,33 +72,31 @@ export default function TokensPanel({ initialTokens }) {
             onChange={(event) => setName(event.target.value)}
             required
             maxLength={FORM_NAME_MAX_LENGTH}
-            className="flex-1 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white"
+            className="flex-1 rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
           />
-          <button
+          <Button
             disabled={!canCreateToken}
-            className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+            size="lg"
           >
             Create token
-          </button>
+          </Button>
         </div>
         {latestToken ? (
-          <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-              Copy now
-            </p>
+          <div className="mt-4 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-4">
+            <Badge tone="emerald">Copy now</Badge>
             <p className="mt-2 break-all font-mono text-sm text-white">{latestToken}</p>
           </div>
         ) : null}
         {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
-      </form>
+      </Panel>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <h2 className="text-xl font-semibold text-white">Issued tokens</h2>
+      <Panel className="p-6">
+        <PanelHeader title="Issued tokens" description="Review active and revoked personal access tokens." />
         <ul className="mt-4 space-y-3">
-          {initialTokens.map((token) => (
+          {initialTokens.length ? initialTokens.map((token) => (
             <li
               key={token.id}
-              className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-4 md:flex-row md:items-center md:justify-between"
+              className="flex flex-col gap-3 rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 md:flex-row md:items-center md:justify-between"
             >
               <div>
                 <p className="text-sm font-semibold text-white">{token.name}</p>
@@ -106,19 +105,31 @@ export default function TokensPanel({ initialTokens }) {
                 </p>
               </div>
               {token.revoked_at ? (
-                <span className="text-xs font-semibold text-amber-200">Revoked</span>
+                <Badge tone="amber" dot>
+                  Revoked
+                </Badge>
               ) : (
-                <button
+                <Button
+                  type="button"
                   onClick={() => revokeToken(token.id)}
-                  className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100"
+                  variant="warning"
+                  size="xs"
                 >
                   Revoke
-                </button>
+                </Button>
               )}
             </li>
-          ))}
+          )) : null}
         </ul>
-      </div>
+        {!initialTokens.length ? (
+          <div className="mt-6">
+            <EmptyState
+              title="No issued tokens"
+              description="Create a token when an operator needs Docker CLI access."
+            />
+          </div>
+        ) : null}
+      </Panel>
     </div>
   );
 }

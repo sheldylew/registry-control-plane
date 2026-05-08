@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { Label, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/20/solid";
 
+import Alert from "@/app/components/ui/alert";
+import Badge from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
+import EmptyState from "@/app/components/ui/empty-state";
+import { Input } from "@/app/components/ui/form";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
 import { FORM_NAME_MAX_LENGTH, hasNonEmptyValue, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
 
 function readCookie(name) {
@@ -26,7 +33,7 @@ function CustomListbox({ label, value, options, onChange, disabled = false }) {
       <Listbox value={selected} by="value" onChange={onChange} disabled={disabled || options.length === 0}>
         <Label className="block text-sm text-slate-300">{label}</Label>
         <div className="relative">
-          <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-60">
+          <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-60">
             <span className="col-start-1 row-start-1 truncate pr-7 text-sm font-medium">{selected.label}</span>
             <ChevronUpDownIcon
               aria-hidden="true"
@@ -35,7 +42,7 @@ function CustomListbox({ label, value, options, onChange, disabled = false }) {
           </ListboxButton>
           <ListboxOptions
             transition
-            className="absolute z-10 mt-2 max-h-60 w-full overflow-auto rounded-2xl border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/40 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
+            className="absolute z-10 mt-2 max-h-60 w-full overflow-auto rounded-lg border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/40 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
           >
             {options.map((option) => (
               <ListboxOption
@@ -58,7 +65,7 @@ function CustomListbox({ label, value, options, onChange, disabled = false }) {
 
 function PermissionCheckbox({ id, label, description, checked, onChange }) {
   return (
-    <div className="flex gap-3 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3">
+    <div className="flex gap-3 rounded-lg border border-white/10 bg-slate-950 px-4 py-3">
       <div className="flex h-6 shrink-0 items-center">
         <div className="group grid size-4 grid-cols-1">
           <input
@@ -209,26 +216,27 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <h2 className="text-xl font-semibold text-white">Repository permissions</h2>
-        <p className="mt-3 text-sm leading-7 text-slate-300">
-          Grant pull, push, and tag-delete access to users and robot accounts by repository pattern.
-        </p>
-      </div>
+      <Panel className="p-6">
+        <PanelHeader
+          title="Repository permissions"
+          description="Grant pull, push, and tag-delete access to users and robot accounts by repository pattern."
+        />
+      </Panel>
 
-      <form onSubmit={savePermission} className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <div className="flex items-center justify-between gap-4">
-          <h3 className="text-lg font-semibold text-white">{editingId ? "Edit permission" : "Add permission"}</h3>
-          {editingId ? (
-            <button
+      <Panel as="form" onSubmit={savePermission} className="p-6">
+        <PanelHeader
+          title={editingId ? "Edit permission" : "Add permission"}
+          action={editingId ? (
+            <Button
               type="button"
               onClick={() => resetForm(subjectType)}
-              className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200"
+              variant="secondary"
+              size="xs"
             >
               Cancel edit
-            </button>
+            </Button>
           ) : null}
-        </div>
+        />
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <CustomListbox
@@ -251,7 +259,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
               placeholder="sheldylew/*"
               required
               maxLength={FORM_NAME_MAX_LENGTH}
-              className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-white"
+              className="w-full rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
           </label>
         </div>
@@ -276,21 +284,23 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
           </div>
         </fieldset>
 
-        {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
+        {error ? <Alert tone="rose" className="mt-4">{error}</Alert> : null}
 
-        <button
+        <Button
           disabled={!canSavePermission}
-          className="mt-5 rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-5"
+          size="lg"
         >
           {editingId ? "Save permission" : "Add permission"}
-        </button>
-      </form>
+        </Button>
+      </Panel>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <h3 className="text-lg font-semibold text-white">Current permissions</h3>
-        <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
-          <table className="min-w-full divide-y divide-white/10 text-sm">
-            <thead className="bg-white/5 text-slate-300">
+      <Panel className="p-6">
+        <PanelHeader title="Current permissions" />
+        <div className="mt-4">
+          <TableShell>
+          <Table>
+            <TableHead>
               <tr>
                 <th className="px-4 py-3 text-left font-medium">Subject</th>
                 <th className="px-4 py-3 text-left font-medium">Pattern</th>
@@ -299,46 +309,50 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
                 <th className="px-4 py-3 text-left font-medium">Delete tag</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-white/10">
-              {initialPermissions.map((permission) => (
+            </TableHead>
+            <TableBody>
+              {initialPermissions.length ? initialPermissions.map((permission) => (
                 <tr key={permission.id}>
                   <td className="px-4 py-3 text-white">{subjectLabel(permission)}</td>
                   <td className="px-4 py-3 font-mono text-slate-300">{permission.repository_pattern}</td>
-                  <td className="px-4 py-3 text-slate-300">{permission.can_pull ? "Yes" : "No"}</td>
-                  <td className="px-4 py-3 text-slate-300">{permission.can_push ? "Yes" : "No"}</td>
-                  <td className="px-4 py-3 text-slate-300">{permission.can_delete ? "Yes" : "No"}</td>
+                  <td className="px-4 py-3 text-slate-300"><Badge tone={permission.can_pull ? "emerald" : "slate"}>{permission.can_pull ? "Yes" : "No"}</Badge></td>
+                  <td className="px-4 py-3 text-slate-300"><Badge tone={permission.can_push ? "cyan" : "slate"}>{permission.can_push ? "Yes" : "No"}</Badge></td>
+                  <td className="px-4 py-3 text-slate-300"><Badge tone={permission.can_delete ? "amber" : "slate"}>{permission.can_delete ? "Yes" : "No"}</Badge></td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
-                      <button
+                      <Button
                         type="button"
                         onClick={() => beginEdit(permission)}
-                        className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100"
+                        variant="soft"
+                        size="xs"
                       >
                         Edit
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
                         onClick={() => removePermission(permission.id)}
-                        className="rounded-full border border-rose-400/30 bg-rose-400/10 px-3 py-1 text-xs font-semibold text-rose-100"
+                        variant="danger"
+                        size="xs"
                       >
                         Delete
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
-              ))}
-              {!initialPermissions.length ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-300">
-                    No explicit repository permissions are configured yet.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+              )) : null}
+            </TableBody>
+          </Table>
+          </TableShell>
         </div>
-      </div>
+        {!initialPermissions.length ? (
+          <div className="mt-6">
+            <EmptyState
+              title="No repository permissions"
+              description="Add a permission to grant a user or robot account access to matching repositories."
+            />
+          </div>
+        ) : null}
+      </Panel>
     </div>
   );
 }

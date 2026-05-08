@@ -1,5 +1,8 @@
 import Link from "next/link";
 
+import Badge from "@/app/components/ui/badge";
+import EmptyState from "@/app/components/ui/empty-state";
+import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import { apiFetch } from "@/app/lib/server-api";
 
 export default async function ReposPage() {
@@ -12,18 +15,18 @@ export default async function ReposPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <h2 className="text-3xl font-semibold text-white">Repositories</h2>
-        <p className="mt-3 text-sm leading-7 text-slate-300">
-          Browse the repositories you are allowed to pull, then inspect tags and manifests from the control plane.
-        </p>
-      </div>
+      <Panel className="p-6">
+        <PanelHeader
+          title="Repositories"
+          description="Browse the repositories you are allowed to pull, then inspect tags and manifests from the control plane."
+        />
+      </Panel>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xl font-semibold text-white">Visible repositories</h3>
-          <p className="text-sm text-slate-400">{payload.repos.length} visible</p>
-        </div>
+      <Panel className="p-6">
+        <PanelHeader
+          title="Visible repositories"
+          action={<Badge tone="cyan">{payload.repos.length} visible</Badge>}
+        />
 
         {payload.repos.length ? (
           <ul className="mt-4 grid gap-4 md:grid-cols-2">
@@ -31,7 +34,7 @@ export default async function ReposPage() {
               <li key={repo.name}>
                 <Link
                   href={`/repos/${encodeURIComponent(repo.name)}`}
-                  className="block rounded-2xl border border-white/10 bg-slate-950/70 px-5 py-5 transition hover:border-cyan-400/40 hover:bg-slate-950"
+                  className="block rounded-lg border border-white/10 bg-slate-950/70 px-5 py-5 transition hover:border-cyan-400/40 hover:bg-slate-950"
                 >
                   <p className="text-lg font-semibold text-white">{repo.name}</p>
                   <p className="mt-2 text-sm text-slate-400">Open tags and manifest details</p>
@@ -40,9 +43,14 @@ export default async function ReposPage() {
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-sm text-slate-300">No repositories are visible for this account yet.</p>
+          <div className="mt-6">
+            <EmptyState
+              title="No visible repositories"
+              description="No repositories are visible for this account yet."
+            />
+          </div>
         )}
-      </div>
+      </Panel>
     </div>
   );
 }
