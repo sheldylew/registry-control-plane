@@ -20,11 +20,6 @@ jobs:
         run: |
           apk add --no-cache git nodejs bash curl
 
-      - name: Verify package registry access
-        run: |
-          curl --silent --show-error --fail --max-time 20 https://registry.npmjs.org/
-          curl --silent --show-error --fail --max-time 20 https://pypi.org/simple/
-
       - name: Check out repository
         uses: actions/checkout@v4
 
