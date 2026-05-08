@@ -1592,6 +1592,7 @@ def list_repository_tags(
     return {
         "repo": repo_name,
         "visibility": visibility,
+        "public_registry_origin": effective_public_registry_origin(db, settings),
         "can_manage_visibility": user.is_admin,
         "can_delete_tag": can_delete_tag,
         "can_prune_repository": can_prune_repository,
@@ -1626,7 +1627,11 @@ def get_repository_tag_details(
     finally:
         registry.close()
 
-    return {"manifest": _serialize_manifest(manifest), "can_delete_tag": can_delete_tag}
+    return {
+        "manifest": _serialize_manifest(manifest),
+        "public_registry_origin": effective_public_registry_origin(db, settings),
+        "can_delete_tag": can_delete_tag,
+    }
 
 
 @router.get("/repos/{repo_name:path}/tags/{tag}/history")

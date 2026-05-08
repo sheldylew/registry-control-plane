@@ -1,5 +1,7 @@
 import "./globals.css";
 
+import { ToastProvider } from "@/app/components/ui/toast-provider";
+
 export const metadata = {
   title: "Registry Control Plane",
   description:
@@ -9,7 +11,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

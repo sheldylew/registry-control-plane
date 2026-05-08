@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import TagCopyButton from "@/app/components/tag-copy-button";
 import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
@@ -24,6 +25,17 @@ function formatBytes(size) {
   return `${value.toFixed(value >= 10 || unit === "B" ? 0 : 1)} ${unit}`;
 }
 
+function buildDockerPullCommand(origin, repo, tag) {
+  try {
+    const parsed = new URL(origin);
+    const path = parsed.pathname.replace(/\/$/, "");
+    return `docker pull ${parsed.host}${path}/${repo}:${tag}`;
+  } catch {
+    const normalizedOrigin = origin.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return `docker pull ${normalizedOrigin}/${repo}:${tag}`;
+  }
+}
+
 export default async function RepoTagDetailPage({ params }) {
   const resolvedParams = await params;
   const repoPath = decodeURIComponent(resolvedParams.repo);
@@ -39,6 +51,7 @@ export default async function RepoTagDetailPage({ params }) {
   }
 
   const { manifest } = payload;
+  const pullCommand = buildDockerPullCommand(payload.public_registry_origin, manifest.name, manifest.tag);
 
   return (
     <div className="space-y-6">
@@ -57,6 +70,24 @@ export default async function RepoTagDetailPage({ params }) {
           ) : null}
         />
         <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="rounded-lg border border-white/10 bg-slate-950/70 p-4 md:col-span-2">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Docker pull</p>
+                <p className="mt-2 break-all text-sm text-slate-100">
+                  {pullCommand}
+                </p>
+              </div>
+              <TagCopyButton
+                publicRegistryOrigin={payload.public_registry_origin}
+                repositoryName={manifest.name}
+                tag={manifest.tag}
+                size="md"
+                label="Copy pull command"
+                className="shrink-0 self-start"
+              />
+            </div>
+          </div>
           <div className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Digest</p>
             <p className="mt-2 break-all text-sm text-slate-100">{manifest.digest || "Unavailable"}</p>

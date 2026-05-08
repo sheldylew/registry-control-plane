@@ -1625,6 +1625,7 @@ def test_repo_tag_manifest_returns_details(settings) -> None:
 
     assert response.status_code == 200
     assert response.json()["manifest"]["digest"] == "sha256:manifest"
+    assert response.json()["public_registry_origin"] == settings.public_registry_origin
 
 
 def test_repo_tags_return_summary_rows(settings) -> None:
@@ -1676,6 +1677,7 @@ def test_repo_tags_return_summary_rows(settings) -> None:
 
     assert response.status_code == 200
     assert response.json()["visibility"] == "private"
+    assert response.json()["public_registry_origin"] == settings.public_registry_origin
     assert response.json()["can_manage_visibility"] is False
     assert response.json()["tags"][0]["tag"] == "release"
     assert response.json()["tags"][0]["architectures"] == ["linux/amd64", "linux/arm64"]
