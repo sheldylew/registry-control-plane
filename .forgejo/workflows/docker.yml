@@ -142,11 +142,10 @@ jobs:
           # Validation should exercise the multi-arch build graph without pushing images.
           export REVISION="${GITHUB_SHA}"
           export VERSION="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
+          export IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}"
+          export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
 
-          docker buildx bake \
-            --var "IMAGE_PREFIX=${{ steps.meta.outputs.image_prefix }}" \
-            --var "IMAGE_TAG=${{ steps.meta.outputs.image_tag }}" \
-            validate-multiarch
+          docker buildx bake validate-multiarch
 
       - name: Publish multi-arch images
         if: steps.meta.outputs.publish == 'true'
@@ -155,10 +154,10 @@ jobs:
           set -euo pipefail
 
           # Publish uses the same metadata plus version/revision labels for the pushed images.
-          docker buildx bake \
-            --var "REVISION=${GITHUB_SHA}" \
-            --var "VERSION=${{ steps.meta.outputs.version }}" \
-            --var "IMAGE_PREFIX=${{ steps.meta.outputs.image_prefix }}" \
-            --var "IMAGE_TAG=${{ steps.meta.outputs.image_tag }}" \
-            --var "IMAGE_TAG_ALT=${{ steps.meta.outputs.image_tag_alt }}" \
-            publish
+          export REVISION="${GITHUB_SHA}"
+          export VERSION="${{ steps.meta.outputs.version }}"
+          export IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}"
+          export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
+          export IMAGE_TAG_ALT="${{ steps.meta.outputs.image_tag_alt }}"
+
+          docker buildx bake publish
