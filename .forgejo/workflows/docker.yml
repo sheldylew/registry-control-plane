@@ -145,7 +145,7 @@ jobs:
           export IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}"
           export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
 
-          docker buildx bake validate-multiarch
+          docker buildx bake --allow=fs=/tmp validate-multiarch
 
       - name: Publish multi-arch images
         if: steps.meta.outputs.publish == 'true'
@@ -160,7 +160,7 @@ jobs:
           export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
           export IMAGE_TAG_ALT="${{ steps.meta.outputs.image_tag_alt }}"
 
-          docker buildx bake publish
+          docker buildx bake --allow=fs=/tmp publish
 
       - name: Prune expired BuildKit cache
         if: always()
@@ -172,8 +172,8 @@ jobs:
           mkdir -p /tmp/buildkit-registry-control-plane
 
           # Run cleanup after the build so the current job gets the best cache hit rate.
-          # Keep the local cache best-effort and bounded to four days of age.
+          # Keep the local cache best-effort and bounded to ten days of age.
           docker buildx prune \
             --builder forgejo-builder \
-            --filter until=96h \
+            --filter until=240h \
             --force || true
