@@ -11,6 +11,11 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  REGISTRY: git.sheldylew.com
+  IMAGE_NAMESPACE: sheldon
+  IMAGE_NAME: registry-control-plane
+
 jobs:
   docker-build:
     runs-on: docker-build
@@ -22,6 +27,10 @@ jobs:
 
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Install arm64 emulation
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
 
       - name: Set up Buildx builder
         shell: bash
@@ -40,7 +49,69 @@ jobs:
 
           docker buildx inspect --bootstrap
 
-      - name: Validate amd64 build
+      - name: Prepare image metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish="false"
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" && -n "${REGISTRY}" ]]; then
+            publish="true"
+          fi
+
+          ref_name="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
+          ref="${GITHUB_REF:-}"
+          image_tag_alt=""
+
+          case "${ref_name}" in
+            master)
+              image_tag="edge"
+              ;;
+            development)
+              image_tag="nightly"
+              ;;
+            release)
+              image_tag="release"
+              ;;
+            *)
+              if [[ "${ref}" == refs/tags/v* ]]; then
+                image_tag="${ref_name}"
+                if [[ "${ref_name}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  image_tag_alt="latest"
+                fi
+              else
+                image_tag="${GITHUB_SHA::12}"
+              fi
+              ;;
+          esac
+
+          {
+            echo "publish=${publish}"
+            echo "image_prefix=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}"
+            echo "image_tag=${image_tag}"
+            echo "image_tag_alt=${image_tag_alt}"
+            echo "version=${ref_name}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Log in to registry
+        if: steps.meta.outputs.publish == 'true'
+        shell: bash
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${REGISTRY_USERNAME}" || -z "${REGISTRY_TOKEN}" ]]; then
+            echo "REGISTRY_USERNAME and REGISTRY_TOKEN secrets are required for publishing." >&2
+            exit 1
+          fi
+
+          printf '%s' "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" --username "${REGISTRY_USERNAME}" --password-stdin
+
+      - name: Validate multi-arch build
+        if: steps.meta.outputs.publish != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -48,4 +119,21 @@ jobs:
           export REVISION="${GITHUB_SHA}"
           export VERSION="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
 
-          docker buildx bake validate-amd64
+          docker buildx bake \
+            --var "IMAGE_PREFIX=${{ steps.meta.outputs.image_prefix }}" \
+            --var "IMAGE_TAG=${{ steps.meta.outputs.image_tag }}" \
+            validate-multiarch
+
+      - name: Publish multi-arch images
+        if: steps.meta.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker buildx bake \
+            --var "REVISION=${GITHUB_SHA}" \
+            --var "VERSION=${{ steps.meta.outputs.version }}" \
+            --var "IMAGE_PREFIX=${{ steps.meta.outputs.image_prefix }}" \
+            --var "IMAGE_TAG=${{ steps.meta.outputs.image_tag }}" \
+            --var "IMAGE_TAG_ALT=${{ steps.meta.outputs.image_tag_alt }}" \
+            publish

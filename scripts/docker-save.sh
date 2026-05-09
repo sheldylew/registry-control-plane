@@ -172,7 +172,7 @@ docker buildx bake \
   --var "IMAGE_PREFIX=$IMAGE_PREFIX" \
   --var "IMAGE_TAG=$IMAGE_TAG" \
   --var "PLATFORM=$PLATFORM" \
-  validate-amd64
+  local-export
 
 for service in "${services[@]}"; do
   image_name="${IMAGE_PREFIX}-${service}:${IMAGE_TAG}"
