@@ -14,7 +14,7 @@ from backend.db import make_engine, make_session_factory
 from backend.maintenance import LocalRegistryMaintenanceRunner, MaintenanceService
 from backend.metrics import increment as increment_metric
 from backend.metrics import render_prometheus_text
-from backend.log_retention import prune_expired_logs
+from backend.log_retention import prune_expired_logs, prune_expired_operational_records
 from backend.models import Base
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import RegistryClient
@@ -49,6 +49,11 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
                 bootstrap_admin(session, settings)
             app_public_origin = saved_public_registry_origin(session) or settings.public_registry_origin
             prune_expired_logs(session, retention_days=settings.log_retention_days)
+            prune_expired_operational_records(
+                session,
+                web_session_retention_days=settings.web_session_retention_days,
+                token_record_retention_days=settings.token_record_retention_days,
+            )
 
         app.state.settings = settings
         app.state.public_registry_origin = app_public_origin

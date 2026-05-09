@@ -13,6 +13,7 @@ const navItems = [
   { href: "/admin/maintenance", label: "Maintenance" },
   { href: "/repos", label: "Repositories" },
   { href: "/admin/users", label: "Users" },
+  { href: "/admin/sessions", label: "Sessions" },
   { href: "/admin/tokens", label: "Tokens" },
   { href: "/admin/robots", label: "Robots" },
   { href: "/admin/audit", label: "Audit" },

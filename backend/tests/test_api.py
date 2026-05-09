@@ -329,6 +329,106 @@ def test_login_sets_secure_cookies_in_production(settings) -> None:
     assert all("Secure" in header for header in set_cookie_headers)
 
 
+def test_logout_requires_csrf_token_but_not_trusted_origin(settings) -> None:
+    production_settings = Settings(
+        app_env="production",
+        database_url=settings.database_url,
+        registry_internal_url=settings.registry_internal_url,
+        registry_storage_root=settings.registry_storage_root,
+        compose_project_dir=settings.compose_project_dir,
+        registry_service_name=settings.registry_service_name,
+        registry_gc_config_path=settings.registry_gc_config_path,
+        token_issuer=settings.token_issuer,
+        token_service=settings.token_service,
+        token_ttl_seconds=settings.token_ttl_seconds,
+        public_registry_origin="https://registry.example.com",
+        auth_private_key_path=settings.auth_private_key_path,
+        auth_public_cert_path=settings.auth_public_cert_path,
+        internal_api_base_url=settings.internal_api_base_url,
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        admin_email=settings.admin_email,
+        login_rate_limit_attempts=settings.login_rate_limit_attempts,
+        login_rate_limit_window_seconds=settings.login_rate_limit_window_seconds,
+        auth_token_rate_limit_attempts=settings.auth_token_rate_limit_attempts,
+        auth_token_rate_limit_window_seconds=settings.auth_token_rate_limit_window_seconds,
+        session_cookie_secure=True,
+        session_lifetime_seconds=settings.session_lifetime_seconds,
+    )
+    app = create_app(production_settings)
+    with TestClient(app, base_url="https://registry.example.com") as client:
+        login = client.post(
+            "/api/session/login",
+            json={"username": production_settings.admin_username, "password": production_settings.admin_password},
+        )
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            "/api/session/logout",
+            headers={
+                "X-CSRF-Token": csrf,
+                "Origin": "http://localhost:8080",
+            },
+        )
+        current_user = client.get("/api/session/me")
+
+    assert response.status_code == 200
+    assert current_user.status_code == 401
+
+
+def test_admin_can_list_and_revoke_web_sessions(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": settings.admin_password},
+        )
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        sessions = client.get("/api/admin/sessions")
+        assert sessions.status_code == 200
+        body = sessions.json()
+        current = next(session for session in body["sessions"] if session["is_current"])
+
+        revoke = client.post(
+            f"/api/admin/sessions/{current['id']}/revoke",
+            headers={"X-CSRF-Token": csrf},
+        )
+        current_user = client.get("/api/session/me")
+
+    assert body["summary"]["active_sessions"] >= 1
+    assert body["summary"]["expired_sessions"] == 0
+    assert body["summary"]["revoked_sessions"] == 0
+    assert body["pagination"]["page_size"] == 10
+    assert current["user"]["username"] == settings.admin_username
+    assert revoke.status_code == 200
+    assert current_user.status_code == 401
+
+
+def test_admin_can_revoke_all_sessions_for_user(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        first_login = client.post(
+            "/api/session/login",
+            json={"username": settings.admin_username, "password": settings.admin_password},
+        )
+        assert first_login.status_code == 200
+        user_id = first_login.json()["user"]["id"]
+        csrf = first_login.cookies.get("rcr_csrf")
+
+        response = client.post(
+            f"/api/admin/users/{user_id}/sessions/revoke",
+            headers={"X-CSRF-Token": csrf},
+        )
+        current_user = client.get("/api/session/me")
+
+    assert response.status_code == 200
+    assert response.json()["revoked_sessions"] >= 1
+    assert current_user.status_code == 401
+
+
 def test_login_fails_with_invalid_password(settings) -> None:
     app = create_app(settings)
     with TestClient(app) as client:

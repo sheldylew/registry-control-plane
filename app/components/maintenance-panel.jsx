@@ -77,7 +77,7 @@ export default function MaintenancePanel({ logRetentionDays }) {
 
     const body = await response.json();
     setPruneMessage(
-      `Removed ${body.pruned.audit_events_deleted} audit events and ${body.pruned.gc_jobs_deleted} completed maintenance jobs older than ${body.retention_days} days.`,
+      `Removed ${body.pruned.audit_events_deleted} audit events, ${body.pruned.gc_jobs_deleted} completed maintenance jobs, ${body.pruned.web_sessions_deleted} browser sessions, ${body.pruned.personal_access_tokens_deleted} PAT records, and ${body.pruned.robot_tokens_deleted} robot token records past retention.`,
     );
     router.refresh();
     setPrunePending(false);

@@ -11,7 +11,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.log_retention import prune_expired_logs
+from backend.log_retention import prune_expired_logs, prune_expired_operational_records
 from backend.models import AuditEvent, GcJob, User
 
 
@@ -214,14 +214,26 @@ class MaintenanceService:
 
     def prune_logs(self, session: Session, *, actor: User) -> dict[str, int]:
         counts = prune_expired_logs(session, retention_days=self._settings.log_retention_days)
+        counts.update(
+            prune_expired_operational_records(
+                session,
+                web_session_retention_days=self._settings.web_session_retention_days,
+                token_record_retention_days=self._settings.token_record_retention_days,
+            )
+        )
         _record_audit_event(
             session,
             actor=actor,
             action="logs_pruned",
             metadata_json={
                 "retention_days": self._settings.log_retention_days,
+                "web_session_retention_days": self._settings.web_session_retention_days,
+                "token_record_retention_days": self._settings.token_record_retention_days,
                 "audit_events_deleted": counts["audit_events_deleted"],
                 "gc_jobs_deleted": counts["gc_jobs_deleted"],
+                "web_sessions_deleted": counts["web_sessions_deleted"],
+                "personal_access_tokens_deleted": counts["personal_access_tokens_deleted"],
+                "robot_tokens_deleted": counts["robot_tokens_deleted"],
             },
             retention_days=self._settings.log_retention_days,
         )

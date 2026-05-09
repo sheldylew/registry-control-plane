@@ -53,6 +53,8 @@ class Settings:
     setup_rate_limit_attempts: int = 5
     setup_rate_limit_window_seconds: int = 60
     log_retention_days: int = 30
+    web_session_retention_days: int = 30
+    token_record_retention_days: int = 90
     session_cookie_name: str = "rcr_session"
     session_cookie_secure: bool = False
     session_lifetime_seconds: int = 28800
@@ -66,6 +68,10 @@ class Settings:
             raise ValueError("PUBLIC_REGISTRY_ORIGIN must use https:// when APP_ENV=production.")
         if self.log_retention_days < 1:
             raise ValueError("LOG_RETENTION_DAYS must be at least 1.")
+        if self.web_session_retention_days < 1:
+            raise ValueError("WEB_SESSION_RETENTION_DAYS must be at least 1.")
+        if self.token_record_retention_days < 1:
+            raise ValueError("TOKEN_RECORD_RETENTION_DAYS must be at least 1.")
         if self.registry_catalog_max_pages < 1:
             raise ValueError("REGISTRY_CATALOG_MAX_PAGES must be at least 1.")
         if self.dashboard_max_repositories < 1:
@@ -125,6 +131,8 @@ def load_settings() -> Settings:
         setup_rate_limit_attempts=int(os.getenv("SETUP_RATE_LIMIT_ATTEMPTS", "5")),
         setup_rate_limit_window_seconds=int(os.getenv("SETUP_RATE_LIMIT_WINDOW_SECONDS", "60")),
         log_retention_days=int(os.getenv("LOG_RETENTION_DAYS", "30")),
+        web_session_retention_days=int(os.getenv("WEB_SESSION_RETENTION_DAYS", "30")),
+        token_record_retention_days=int(os.getenv("TOKEN_RECORD_RETENTION_DAYS", "90")),
         session_cookie_secure=_get_bool_env("SESSION_COOKIE_SECURE", False),
         session_lifetime_seconds=int(os.getenv("SESSION_LIFETIME_SECONDS", "28800")),
     )

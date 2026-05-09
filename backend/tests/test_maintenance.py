@@ -246,11 +246,18 @@ def test_admin_can_prune_retained_logs_manually(settings) -> None:
 
     assert response.status_code == 200
     assert response.json()["retention_days"] == settings.log_retention_days
-    assert response.json()["pruned"] == {"audit_events_deleted": 1, "gc_jobs_deleted": 1}
+    assert response.json()["pruned"] == {
+        "audit_events_deleted": 1,
+        "gc_jobs_deleted": 1,
+        "web_sessions_deleted": 0,
+        "personal_access_tokens_deleted": 0,
+        "robot_tokens_deleted": 0,
+    }
     assert jobs == []
     assert events[-1].action == "logs_pruned"
     assert events[-1].metadata_json["audit_events_deleted"] == 1
     assert events[-1].metadata_json["gc_jobs_deleted"] == 1
+    assert events[-1].metadata_json["web_sessions_deleted"] == 0
 
 
 def test_non_admin_cannot_prune_retained_logs_manually(settings) -> None:

@@ -1,6 +1,6 @@
 from pathlib import Path
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -24,7 +24,7 @@ from backend.config import Settings
 from backend.maintenance import MaintenanceService
 from backend.metrics import increment as increment_metric
 from backend.metrics import snapshot as metrics_snapshot
-from backend.models import AuditEvent, GcJob, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User
+from backend.models import AuditEvent, GcJob, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryClient, RegistryNotFoundError, TagSummary
 from backend.setup import (
     RESTART_COMMAND,
@@ -85,6 +85,18 @@ def _serialize_user(user: User) -> dict:
         "email": user.email,
         "is_admin": user.is_admin,
         "is_active": user.is_active,
+    }
+
+
+def _serialize_web_session(web_session: WebSession, *, user: User, current_session_id: Optional[int]) -> dict:
+    return {
+        "id": web_session.id,
+        "user": _serialize_user(user),
+        "is_current": web_session.id == current_session_id,
+        "created_at": web_session.created_at.isoformat(),
+        "last_seen_at": web_session.last_seen_at.isoformat(),
+        "expires_at": web_session.expires_at.isoformat(),
+        "revoked_at": web_session.revoked_at.isoformat() if web_session.revoked_at else None,
     }
 
 
@@ -401,14 +413,23 @@ def _validate_same_origin_request(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid request origin.")
 
 
-def require_csrf(request: Request, user: User = Depends(require_authenticated_user), db: Session = Depends(get_db)) -> User:
+def _validate_csrf_token(request: Request, db: Session) -> None:
     submitted = request.headers.get("X-CSRF-Token")
     if not submitted:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing CSRF token.")
-    _validate_same_origin_request(request)
     web_session, _current_user = _get_authenticated_user(request, db)
     if web_session is None or web_session.csrf_token != submitted:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token.")
+
+
+def require_csrf(request: Request, user: User = Depends(require_authenticated_user), db: Session = Depends(get_db)) -> User:
+    _validate_same_origin_request(request)
+    _validate_csrf_token(request, db)
+    return user
+
+
+def require_csrf_token(request: Request, user: User = Depends(require_authenticated_user), db: Session = Depends(get_db)) -> User:
+    _validate_csrf_token(request, db)
     return user
 
 
@@ -752,7 +773,7 @@ def logout(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
-    user: User = Depends(require_csrf),
+    user: User = Depends(require_csrf_token),
     settings: Settings = Depends(get_settings),
 ):
     raw_token = request.cookies.get(settings.session_cookie_name)
@@ -938,6 +959,117 @@ def reset_user_password(
         db,
         actor=csrf_user,
         action="user_password_reset",
+        target_type="user",
+        target_id=user.id,
+        metadata_json={"username": user.username, "revoked_sessions": revoked_sessions},
+    )
+    return {"user": _serialize_user(user), "revoked_sessions": revoked_sessions}
+
+
+@router.get("/admin/sessions")
+def list_web_sessions(
+    request: Request,
+    page: int = 1,
+    page_size: int = 10,
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    safe_page = max(page, 1)
+    safe_page_size = min(max(page_size, 1), 100)
+    current_session, _current_user = _get_authenticated_user(request, db)
+    current_session_id = current_session.id if current_session else None
+    total_sessions = db.scalar(select(func.count()).select_from(WebSession)) or 0
+    sessions = db.scalars(
+        select(WebSession)
+        .order_by(WebSession.revoked_at.is_(None).desc(), WebSession.last_seen_at.desc())
+        .offset((safe_page - 1) * safe_page_size)
+        .limit(safe_page_size)
+    ).all()
+    user_ids = {web_session.user_id for web_session in sessions}
+    users = db.scalars(select(User).where(User.id.in_(user_ids))).all() if user_ids else []
+    users_by_id = {user.id: user for user in users}
+    now = datetime.now(timezone.utc)
+    active_sessions = db.scalar(
+        select(func.count())
+        .select_from(WebSession)
+        .where(
+            WebSession.revoked_at.is_(None),
+            WebSession.expires_at > now,
+        )
+    ) or 0
+    expired_sessions = db.scalar(
+        select(func.count())
+        .select_from(WebSession)
+        .where(
+            WebSession.revoked_at.is_(None),
+            WebSession.expires_at <= now,
+        )
+    ) or 0
+    revoked_sessions = db.scalar(
+        select(func.count()).select_from(WebSession).where(WebSession.revoked_at.is_not(None))
+    ) or 0
+
+    return {
+        "sessions": [
+            _serialize_web_session(web_session, user=users_by_id[web_session.user_id], current_session_id=current_session_id)
+            for web_session in sessions
+            if web_session.user_id in users_by_id
+        ],
+        "summary": {
+            "active_sessions": active_sessions,
+            "expired_sessions": expired_sessions,
+            "revoked_sessions": revoked_sessions,
+            "total_sessions": total_sessions,
+        },
+        "pagination": {
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total": total_sessions,
+            "has_prev": safe_page > 1,
+            "has_next": safe_page * safe_page_size < total_sessions,
+        },
+    }
+
+
+@router.post("/admin/sessions/{session_id}/revoke")
+def revoke_web_session(
+    session_id: int,
+    csrf_user: User = Depends(require_csrf),
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    web_session = db.get(WebSession, session_id)
+    if web_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+    if web_session.revoked_at is None:
+        web_session.revoked_at = datetime.utcnow()
+        db.commit()
+    record_audit_event(
+        db,
+        actor=csrf_user,
+        action="web_session_revoked",
+        target_type="web_session",
+        target_id=web_session.id,
+        metadata_json={"user_id": web_session.user_id},
+    )
+    return {"session_id": web_session.id, "revoked": True}
+
+
+@router.post("/admin/users/{user_id}/sessions/revoke")
+def revoke_user_web_sessions(
+    user_id: int,
+    csrf_user: User = Depends(require_csrf),
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    revoked_sessions = revoke_user_sessions(db, user_id=user.id)
+    record_audit_event(
+        db,
+        actor=csrf_user,
+        action="user_sessions_revoked",
         target_type="user",
         target_id=user.id,
         metadata_json={"username": user.username, "revoked_sessions": revoked_sessions},

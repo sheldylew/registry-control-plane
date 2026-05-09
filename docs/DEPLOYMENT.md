@@ -14,7 +14,7 @@ Deployment shape:
 
 - leave `PUBLIC_REGISTRY_ORIGIN`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_EMAIL` blank to use the first-boot wizard
 - or set all four values to complete first-boot setup automatically from `.env`
-- review `TOKEN_ISSUER`, `TOKEN_SERVICE`, `TOKEN_TTL_SECONDS`, `SESSION_COOKIE_SECURE`, `CSRF_TRUSTED_ORIGINS`, `FORWARDED_ALLOW_IPS`, and `RCP_HTTP_BIND`
+- review `TOKEN_ISSUER`, `TOKEN_SERVICE`, `TOKEN_TTL_SECONDS`, `SESSION_COOKIE_SECURE`, `CSRF_TRUSTED_ORIGINS`, `WEB_SESSION_RETENTION_DAYS`, `TOKEN_RECORD_RETENTION_DAYS`, `FORWARDED_ALLOW_IPS`, and `RCP_HTTP_BIND`
 - start with `docker compose up --build -d`
 
 ## Configuration reference
@@ -50,6 +50,8 @@ Deployment shape:
 ### Maintenance and retention
 
 - `LOG_RETENTION_DAYS`: retention window for audit events and completed maintenance job logs. Defaults to `30`.
+- `WEB_SESSION_RETENTION_DAYS`: retention window for expired or revoked browser session rows. Defaults to `30`.
+- `TOKEN_RECORD_RETENTION_DAYS`: retention window for expired or revoked PAT and robot-token rows. Defaults to `90`.
 - `MAINTENANCE_MIN_GATE_SECONDS`: minimum time the destructive maintenance gate stays up during a destructive GC run.
 
 ### Network and binding

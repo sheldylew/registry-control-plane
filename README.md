@@ -78,6 +78,14 @@ The repo also supports optional controls for:
 - repository list and history response bounds
 - maintenance gate timing and retained log lifetime
 
+### Browser login from LAN hostnames
+
+Production runs default to secure browser cookies. Login can work from `http://localhost:8080` while failing from a plain HTTP LAN hostname because browsers treat `localhost` as a trustworthy development context, but they do not send `Secure` cookies over `http://some-lan-name:8080`.
+
+For LAN browser access, put TLS in front of the stack and access the control plane through `https://...`. If the LAN HTTPS hostname differs from `PUBLIC_REGISTRY_ORIGIN`, add it to `CSRF_TRUSTED_ORIGINS` so cookie-authenticated admin writes pass the same-origin checks.
+
+Keep `PUBLIC_REGISTRY_ORIGIN` as the Docker registry origin used in bearer-token challenges. Do not change it only to make browser login work from a LAN hostname.
+
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the public configuration reference.
 
 ## Verification

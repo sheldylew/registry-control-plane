@@ -7,7 +7,7 @@ from backend.audit import record_audit_event
 from backend.config import Settings
 from backend.log_retention import utcnow
 from backend.main import create_app
-from backend.models import AuditEvent, GcJob
+from backend.models import AuditEvent, GcJob, PersonalAccessToken, RobotAccount, RobotToken, User, WebSession
 
 
 def test_startup_prunes_old_audit_events_and_completed_gc_jobs(settings) -> None:
@@ -39,6 +39,57 @@ def test_startup_prunes_old_audit_events_and_completed_gc_jobs(settings) -> None
             with app_with_existing_data.state.session_factory() as session:
                 assert session.scalars(select(AuditEvent)).all() == []
                 assert session.scalars(select(GcJob)).all() == []
+
+
+def test_startup_prunes_stale_sessions_and_token_records(settings) -> None:
+    app = create_app(settings)
+    stale_session_time = utcnow() - timedelta(days=settings.web_session_retention_days + 1)
+    stale_token_time = utcnow() - timedelta(days=settings.token_record_retention_days + 1)
+
+    with TestClient(app):
+        with app.state.session_factory() as session:
+            user = session.scalars(select(User).order_by(User.id.asc())).first()
+            robot = RobotAccount(name="stale-bot", description="stale token owner")
+            session.add(robot)
+            session.flush()
+            session.add(
+                WebSession(
+                    user_id=user.id,
+                    session_hash="stale-session-hash",
+                    csrf_token="stale-csrf-token",
+                    expires_at=stale_session_time,
+                    last_seen_at=stale_session_time,
+                    created_at=stale_session_time,
+                )
+            )
+            session.add(
+                PersonalAccessToken(
+                    user_id=user.id,
+                    name="stale-pat",
+                    token_hash="stale-pat-hash",
+                    token_prefix="stale-pat",
+                    expires_at=stale_token_time,
+                    created_at=stale_token_time,
+                )
+            )
+            session.add(
+                RobotToken(
+                    robot_id=robot.id,
+                    name="stale-robot-token",
+                    token_hash="stale-robot-token-hash",
+                    token_prefix="stale-robot",
+                    revoked_at=stale_token_time,
+                    created_at=stale_token_time,
+                )
+            )
+            session.commit()
+
+        app_with_existing_data = create_app(settings)
+        with TestClient(app_with_existing_data):
+            with app_with_existing_data.state.session_factory() as session:
+                assert session.scalars(select(WebSession).where(WebSession.session_hash == "stale-session-hash")).all() == []
+                assert session.scalars(select(PersonalAccessToken).where(PersonalAccessToken.name == "stale-pat")).all() == []
+                assert session.scalars(select(RobotToken).where(RobotToken.name == "stale-robot-token")).all() == []
 
 
 def test_new_audit_write_prunes_old_logs(settings) -> None:
