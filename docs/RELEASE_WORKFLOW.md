@@ -43,6 +43,27 @@ The release helper:
 - supports `major`, `minor`, `patch`, or an explicit version
 - supports `--dry-run` for validation without creating a tag
 
+## Offline image package
+
+To export the project images for transport or offline deploy, use:
+
+```bash
+./scripts/docker-save.sh
+./scripts/docker-save.sh --tag v1.2.3
+```
+
+This creates a folder under `releases/` (for example, `releases/latest` by default, or `releases/v1.2.3` when a tag is supplied) containing:
+
+- `api-<tag>.tar`
+- `auth-init-<tag>.tar`
+- `web-<tag>.tar`
+- `docker-compose.yml`
+- `docker/nginx-main.conf`
+- `docker/nginx.conf`
+- `README.md`
+
+Load the tarballs first (`docker load -i <tarfile>`) before running the generated compose file.
+
 Validation examples:
 
 ```bash
