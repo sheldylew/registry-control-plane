@@ -4,6 +4,8 @@ import { useState } from "react";
 
 import Alert from "@/app/components/ui/alert";
 import Button from "@/app/components/ui/button";
+import DetailList from "@/app/components/ui/detail-list";
+import FormDialog from "@/app/components/ui/form-dialog";
 import { Field, Input } from "@/app/components/ui/form";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import { isValidPublicOrigin, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
@@ -17,11 +19,27 @@ function readCookie(name) {
 
 export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
   const [publicOrigin, setPublicOrigin] = useState(initialPublicOrigin || "");
+  const [draftPublicOrigin, setDraftPublicOrigin] = useState(initialPublicOrigin || "");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
-  const normalizedOrigin = normalizeTextInput(publicOrigin).replace(/\/$/, "");
+  const [open, setOpen] = useState(false);
+  const normalizedOrigin = normalizeTextInput(draftPublicOrigin).replace(/\/$/, "");
   const canSubmit = isValidPublicOrigin(normalizedOrigin);
+
+  function openDialog() {
+    setDraftPublicOrigin(publicOrigin);
+    setError("");
+    setOpen(true);
+  }
+
+  function closeDialog() {
+    if (pending) {
+      return;
+    }
+    setOpen(false);
+    setError("");
+  }
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -50,43 +68,74 @@ export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
     }
 
     setPublicOrigin(payload.settings.public_registry_origin);
+    setDraftPublicOrigin(payload.settings.public_registry_origin);
     setMessage(payload.restart_command || restartCommand);
+    setOpen(false);
   }
 
   return (
-    <Panel as="form" onSubmit={onSubmit} className="p-6">
-      <PanelHeader
-        title="Registry origin"
-        description="This is the external origin Docker clients use when the registry requests a bearer token."
-      />
-      <Field label="Public registry origin" className="mt-5">
-        <Input
-          value={publicOrigin}
-          onChange={(event) => setPublicOrigin(event.target.value)}
-          required
-          maxLength={255}
+    <>
+      <Panel className="p-6">
+        <PanelHeader
+          title="Registry origin"
+          description="Review the public origin Docker clients use when the registry requests a bearer token."
+          action={(
+            <Button type="button" onClick={openDialog} size="lg">
+              Edit origin
+            </Button>
+          )}
         />
-      </Field>
 
-      {error ? (
-        <Alert tone="rose" className="mt-4">{error}</Alert>
-      ) : null}
+        <div className="mt-6">
+          <DetailList
+            items={[
+              {
+                label: "Public origin",
+                value: <code className="text-sm text-white">{publicOrigin || "Not configured"}</code>,
+              },
+              {
+                label: "Registry restart",
+                value: <code className="text-sm text-white">{restartCommand}</code>,
+              },
+              {
+                label: "Change behavior",
+                value: "After updating the saved origin, restart only the registry service so Docker clients receive the new token realm.",
+              },
+            ]}
+          />
+        </div>
 
-      {message ? (
-        <Alert tone="amber" className="mt-4">
-          <p>Restart the registry service so Docker clients receive the updated token realm.</p>
-          <code className="mt-2 block rounded-lg bg-slate-950 px-3 py-2 text-amber-50">{message}</code>
-        </Alert>
-      ) : null}
+        {message ? (
+          <Alert tone="amber" className="mt-6">
+            <p>Registry restart required after the latest settings change.</p>
+            <code className="mt-2 block rounded-lg bg-slate-950 px-3 py-2 text-amber-50">{message}</code>
+          </Alert>
+        ) : null}
+      </Panel>
 
-      <Button
-        type="submit"
-        disabled={pending || !canSubmit}
-        className="mt-6"
-        size="lg"
+      <FormDialog
+        open={open}
+        onClose={closeDialog}
+        eyebrow="Settings"
+        title="Edit registry origin"
+        description="Update the external registry origin used in bearer-token challenges and copied pull commands."
+        onSubmit={onSubmit}
+        submitLabel="Save settings"
+        submitPendingLabel="Saving..."
+        pending={pending}
+        disabled={!canSubmit}
+        error={error}
       >
-        {pending ? "Saving..." : "Save settings"}
-      </Button>
-    </Panel>
+        <Field label="Public registry origin">
+          <Input
+            autoFocus
+            value={draftPublicOrigin}
+            onChange={(event) => setDraftPublicOrigin(event.target.value)}
+            required
+            maxLength={255}
+          />
+        </Field>
+      </FormDialog>
+    </>
   );
 }

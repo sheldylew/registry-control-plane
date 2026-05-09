@@ -12,7 +12,8 @@ test("admin users page passes the signed-in user id into the users panel", async
 test("users panel omits disable control for the signed-in admin row", async () => {
   const panel = await readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8");
 
-  assert.match(panel, /user\.is_active && user\.id !== currentUserId/);
+  assert.match(panel, /user\.id === currentUserId && !nextActive/);
+  assert.match(panel, /user\.id === currentUserId && user\.is_active/);
   assert.match(panel, /<Pagination/);
   assert.match(panel, /function buildPageHref\(page\)/);
 });
@@ -32,10 +33,9 @@ test("users panel exposes admin password reset controls", async () => {
 test("users panel exposes enable action for disabled users", async () => {
   const panel = await readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8");
 
-  assert.match(panel, /function enableUser\(userId\)/);
-  assert.match(panel, /\/api\/admin\/users\/\$\{userId\}\/enable/);
-  assert.match(panel, /!user\.is_active/);
-  assert.match(panel, /Enable/);
+  assert.match(panel, /async function setUserActive\(user, nextActive\)/);
+  assert.match(panel, /\/api\/admin\/users\/\$\{user\.id\}\/\$\{nextActive \? "enable" : "disable"\}/);
+  assert.match(panel, /user\.is_active \? "Enabled" : "Disabled"/);
 });
 
 test("admin users page builds pagination links", async () => {

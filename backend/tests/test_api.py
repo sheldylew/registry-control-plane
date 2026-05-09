@@ -499,6 +499,112 @@ def test_admin_users_list_supports_pagination(settings) -> None:
     assert len(body_second["users"]) == 3
 
 
+def test_admin_can_load_user_detail_profile_payload(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="detail-user",
+                email="detail-user@example.com",
+                password_hash=hash_password("detail-user-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+            session.add(
+                PersonalAccessToken(
+                    user_id=user_id,
+                    name="cli-token",
+                    token_hash="a" * 64,
+                    token_prefix="pref1234",
+                )
+            )
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user_id,
+                    repository_pattern="detail/*",
+                    can_pull=True,
+                    can_push=True,
+                    can_delete=False,
+                )
+            )
+            session.add(
+                AuditEvent(
+                    actor_type="user",
+                    actor_id=user_id,
+                    action="user_password_reset",
+                    target_type="user",
+                    target_id=user_id,
+                )
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get(f"/api/admin/users/{user_id}")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["user"]["username"] == "detail-user"
+    assert body["tokens"][0]["name"] == "cli-token"
+    assert body["permissions"][0]["repository_pattern"] == "detail/*"
+    assert body["recent_activity"][0]["action"] == "user_password_reset"
+
+
+def test_admin_can_load_robot_detail_profile_payload(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            robot = RobotAccount(name="detail-bot", description="profile bot", is_active=True)
+            session.add(robot)
+            session.commit()
+            session.refresh(robot)
+            robot_id = robot.id
+            session.add(
+                RobotToken(
+                    robot_id=robot_id,
+                    name="default",
+                    token_hash="b" * 64,
+                    token_prefix="rbt12345",
+                )
+            )
+            session.add(
+                RepositoryPermission(
+                    subject_type="robot",
+                    subject_id=robot_id,
+                    repository_pattern="robot/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.add(
+                AuditEvent(
+                    actor_type="user",
+                    actor_id=1,
+                    action="robot_created",
+                    target_type="robot_account",
+                    target_id=robot_id,
+                )
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get(f"/api/admin/robots/{robot_id}")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["robot"]["name"] == "detail-bot"
+    assert body["robot"]["tokens"][0]["name"] == "default"
+    assert body["permissions"][0]["repository_pattern"] == "robot/*"
+    assert body["recent_activity"][0]["action"] == "robot_created"
+
+
 def test_admin_cannot_disable_own_account(settings) -> None:
     app = create_app(settings)
     with TestClient(app) as client:
@@ -1480,6 +1586,36 @@ def test_admin_sees_all_repositories(settings) -> None:
         {"name": "otherns/private", "visibility": "private"},
         {"name": "sheldylew/app", "visibility": "private"},
     ]
+
+
+def test_repo_list_supports_pagination(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 13)])
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        page_one = client.get("/api/repos?page=1")
+        page_two = client.get("/api/repos?page=2")
+
+    assert page_one.status_code == 200
+    assert page_two.status_code == 200
+    assert page_one.json()["repos"] == [
+        {"name": f"repo/{n:02d}", "visibility": "private"} for n in range(1, 11)
+    ]
+    assert page_two.json()["repos"] == [
+        {"name": f"repo/{n:02d}", "visibility": "private"} for n in range(11, 13)
+    ]
+    assert page_one.json()["pagination"]["page"] == 1
+    assert page_one.json()["pagination"]["page_size"] == 10
+    assert page_one.json()["pagination"]["total"] == 12
+    assert page_one.json()["pagination"]["has_next"] is True
+    assert page_one.json()["pagination"]["has_prev"] is False
+    assert page_two.json()["pagination"]["page"] == 2
+    assert page_two.json()["pagination"]["has_prev"] is True
+    assert page_two.json()["pagination"]["has_next"] is False
+    assert page_two.json()["pagination"]["total"] == 12
 
 
 def test_repo_list_skips_stale_catalog_entries(settings) -> None:

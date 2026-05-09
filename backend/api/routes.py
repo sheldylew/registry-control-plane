@@ -143,6 +143,16 @@ def _serialize_repository(repository: Repository) -> dict:
     }
 
 
+def _serialize_entity_activity(events: list[AuditEvent], actor_names: dict[int, str]) -> list[dict]:
+    return [
+        _serialize_audit_event(
+            event,
+            actor_names.get(event.actor_id) if event.actor_type == "user" and event.actor_id is not None else event.actor_type,
+        )
+        for event in events
+    ]
+
+
 def get_db(request: Request) -> Session:
     session_factory = request.app.state.session_factory
     with session_factory() as session:
@@ -781,6 +791,62 @@ def list_users(
     }
 
 
+@router.get("/admin/users/{user_id}")
+def get_user_detail(
+    user_id: int,
+    activity_page: int = 1,
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    tokens = db.scalars(
+        select(PersonalAccessToken)
+        .where(PersonalAccessToken.user_id == user.id)
+        .order_by(PersonalAccessToken.created_at.desc())
+    ).all()
+    permissions = db.scalars(
+        select(RepositoryPermission)
+        .where(
+            RepositoryPermission.subject_type == "user",
+            RepositoryPermission.subject_id == user.id,
+        )
+        .order_by(RepositoryPermission.repository_pattern.asc())
+    ).all()
+    safe_activity_page = max(activity_page, 1)
+    activity_page_size = 10
+    activity_query = select(AuditEvent).where(
+        ((AuditEvent.actor_type == "user") & (AuditEvent.actor_id == user.id))
+        | ((AuditEvent.target_type == "user") & (AuditEvent.target_id == user.id))
+    ).order_by(AuditEvent.created_at.desc())
+    total_activities = db.scalar(select(func.count()).select_from(activity_query.subquery())) or 0
+    events = db.scalars(
+        activity_query.offset((safe_activity_page - 1) * activity_page_size).limit(activity_page_size)
+    ).all()
+
+    actor_ids = sorted({event.actor_id for event in events if event.actor_type == "user" and event.actor_id is not None})
+    actor_names: dict[int, str] = {}
+    if actor_ids:
+        actors = db.scalars(select(User).where(User.id.in_(actor_ids))).all()
+        actor_names = {actor.id: actor.username for actor in actors}
+
+    return {
+        "user": _serialize_user(user),
+        "tokens": [_serialize_token(token) for token in tokens],
+        "permissions": [_serialize_permission(permission, subject_name=user.username) for permission in permissions],
+        "recent_activity": _serialize_entity_activity(events, actor_names),
+        "activity_pagination": {
+            "page": safe_activity_page,
+            "page_size": activity_page_size,
+            "total": total_activities,
+            "has_prev": safe_activity_page > 1,
+            "has_next": safe_activity_page * activity_page_size < total_activities,
+        },
+    }
+
+
 @router.post("/admin/users")
 def create_user(
     payload: CreateUserPayload,
@@ -880,11 +946,32 @@ def reset_user_password(
 
 
 @router.get("/admin/tokens")
-def list_tokens(user: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+def list_tokens(
+    page: int = 1,
+    user: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    safe_page = max(page, 1)
+    page_size = 10
+    query = (
+        select(PersonalAccessToken)
+        .where(PersonalAccessToken.user_id == user.id)
+        .order_by(PersonalAccessToken.created_at.desc())
+    )
+    total_tokens = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     tokens = db.scalars(
-        select(PersonalAccessToken).where(PersonalAccessToken.user_id == user.id).order_by(PersonalAccessToken.created_at.desc())
+        query.offset((safe_page - 1) * page_size).limit(page_size)
     ).all()
-    return {"tokens": [_serialize_token(token) for token in tokens]}
+    return {
+        "tokens": [_serialize_token(token) for token in tokens],
+        "pagination": {
+            "page": safe_page,
+            "page_size": page_size,
+            "total": total_tokens,
+            "has_prev": safe_page > 1,
+            "has_next": safe_page * page_size < total_tokens,
+        },
+    }
 
 
 @router.post("/admin/tokens")
@@ -954,16 +1041,64 @@ def list_robots(_admin: User = Depends(require_admin_user), db: Session = Depend
     return {"robots": [_serialize_robot(robot) for robot in robots]}
 
 
+@router.get("/admin/robots/{robot_id}")
+def get_robot_detail(
+    robot_id: int,
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    robot = db.get(RobotAccount, robot_id)
+    if robot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Robot account not found.")
+
+    permissions = db.scalars(
+        select(RepositoryPermission)
+        .where(
+            RepositoryPermission.subject_type == "robot",
+            RepositoryPermission.subject_id == robot.id,
+        )
+        .order_by(RepositoryPermission.repository_pattern.asc())
+    ).all()
+    events = db.scalars(
+        select(AuditEvent)
+        .where(
+            (AuditEvent.target_type == "robot_account") & (AuditEvent.target_id == robot.id)
+        )
+        .order_by(AuditEvent.created_at.desc())
+        .limit(10)
+    ).all()
+
+    actor_ids = sorted({event.actor_id for event in events if event.actor_type == "user" and event.actor_id is not None})
+    actor_names: dict[int, str] = {}
+    if actor_ids:
+        actors = db.scalars(select(User).where(User.id.in_(actor_ids))).all()
+        actor_names = {actor.id: actor.username for actor in actors}
+
+    return {
+        "robot": _serialize_robot(robot),
+        "permissions": [_serialize_permission(permission, subject_name=robot.name) for permission in permissions],
+        "recent_activity": _serialize_entity_activity(events, actor_names),
+    }
+
+
 @router.get("/admin/permissions")
-def list_permissions(_admin: User = Depends(require_admin_user), db: Session = Depends(get_db)):
+def list_permissions(
+    page: int = 1,
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
     users = db.scalars(select(User).order_by(User.username.asc())).all()
     robots = db.scalars(select(RobotAccount).order_by(RobotAccount.name.asc())).all()
+    safe_page = max(page, 1)
+    page_size = 10
+    query = select(RepositoryPermission).order_by(
+        RepositoryPermission.subject_type.asc(),
+        RepositoryPermission.subject_id.asc(),
+        RepositoryPermission.repository_pattern.asc(),
+    )
+    total_permissions = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     permissions = db.scalars(
-        select(RepositoryPermission).order_by(
-            RepositoryPermission.subject_type.asc(),
-            RepositoryPermission.subject_id.asc(),
-            RepositoryPermission.repository_pattern.asc(),
-        )
+        query.offset((safe_page - 1) * page_size).limit(page_size)
     ).all()
     user_names = {user.id: user.username for user in users}
     robot_names = {robot.id: robot.name for robot in robots}
@@ -979,6 +1114,13 @@ def list_permissions(_admin: User = Depends(require_admin_user), db: Session = D
             )
             for permission in permissions
         ],
+        "pagination": {
+            "page": safe_page,
+            "page_size": page_size,
+            "total": total_permissions,
+            "has_prev": safe_page > 1,
+            "has_next": safe_page * page_size < total_permissions,
+        },
     }
 
 
@@ -1522,7 +1664,10 @@ def list_repositories(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
     registry: RegistryClient = Depends(get_registry_client),
+    page: int = 1,
 ):
+    safe_page = max(page, 1)
+    page_size = 10
     try:
         all_repositories, truncation = registry.list_repositories_bounded(
             max_pages=settings.registry_catalog_max_pages
@@ -1532,6 +1677,8 @@ def list_repositories(
             repository_names=all_repositories,
             **_subject_for_user(user),
         )
+        visible_repositories = sorted(visible_repositories)
+        paged_repositories = visible_repositories[(safe_page - 1) * page_size : safe_page * page_size]
         resolvable_repositories: list[str] = []
         for repository_name in visible_repositories:
             try:
@@ -1539,8 +1686,9 @@ def list_repositories(
             except RegistryNotFoundError:
                 continue
             resolvable_repositories.append(repository_name)
+        resolvable_set = set(resolvable_repositories)
         repository_rows = db.scalars(
-            select(Repository).where(Repository.name.in_(resolvable_repositories))
+            select(Repository).where(Repository.name.in_(paged_repositories))
         ).all()
         repository_visibility = {
             repository.name: repository.visibility for repository in repository_rows
@@ -1548,15 +1696,23 @@ def list_repositories(
     finally:
         registry.close()
 
+    visible_and_resolvable = [
+        repository_name for repository_name in paged_repositories if repository_name in resolvable_set
+    ]
+    total_visible = sum(1 for name in visible_repositories if name in resolvable_set)
     return {
         "repos": [
-            {
-                "name": repository_name,
-                "visibility": repository_visibility.get(repository_name, "private"),
-            }
-            for repository_name in resolvable_repositories
+            {"name": repository_name, "visibility": repository_visibility.get(repository_name, "private")}
+            for repository_name in visible_and_resolvable
         ],
         "truncation": truncation,
+        "pagination": {
+            "page": safe_page,
+            "page_size": page_size,
+            "total": total_visible,
+            "has_prev": safe_page > 1,
+            "has_next": truncation or safe_page * page_size < total_visible,
+        },
         "user": _serialize_user(user),
     }
 

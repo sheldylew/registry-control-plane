@@ -5,12 +5,16 @@ import { useRouter } from "next/navigation";
 import { Label, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/20/solid";
 
+import ActionMenu from "@/app/components/ui/action-menu";
 import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
+import FormDialog from "@/app/components/ui/form-dialog";
 import { Input } from "@/app/components/ui/form";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import Pagination from "@/app/components/ui/pagination";
+import Switch from "@/app/components/ui/switch";
 import { Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
 import { FORM_NAME_MAX_LENGTH, hasNonEmptyValue, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
 
@@ -63,49 +67,7 @@ function CustomListbox({ label, value, options, onChange, disabled = false }) {
   );
 }
 
-function PermissionCheckbox({ id, label, description, checked, onChange }) {
-  return (
-    <div className="flex gap-3 rounded-lg border border-white/10 bg-slate-950 px-4 py-3">
-      <div className="flex h-6 shrink-0 items-center">
-        <div className="group grid size-4 grid-cols-1">
-          <input
-            id={id}
-            name={id}
-            type="checkbox"
-            checked={checked}
-            onChange={(event) => onChange(event.target.checked)}
-            aria-describedby={`${id}-description`}
-            className="col-start-1 row-start-1 appearance-none rounded-sm border border-white/10 bg-white/5 checked:border-cyan-400 checked:bg-cyan-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400 disabled:border-white/5 disabled:bg-white/10 disabled:checked:bg-white/10 forced-colors:appearance-auto"
-          />
-          <svg
-            fill="none"
-            viewBox="0 0 14 14"
-            className="pointer-events-none col-start-1 row-start-1 size-3.5 self-center justify-self-center stroke-slate-950 group-has-disabled:stroke-white/25"
-          >
-            <path
-              d="M3 8L6 11L11 3.5"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="opacity-0 group-has-checked:opacity-100"
-            />
-          </svg>
-        </div>
-      </div>
-      <div className="text-sm leading-6">
-        <label htmlFor={id} className="font-medium text-white">
-          {label}
-        </label>{" "}
-        <span id={`${id}-description`} className="text-slate-400">
-          <span className="sr-only">{label} </span>
-          {description}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-export default function PermissionsPanel({ initialUsers, initialRobots, initialPermissions }) {
+export default function PermissionsPanel({ initialUsers, initialRobots, initialPermissions, pagination }) {
   const router = useRouter();
   const [subjectType, setSubjectType] = useState("user");
   const [subjectId, setSubjectId] = useState(initialUsers[0]?.id?.toString() || "");
@@ -115,6 +77,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
   const [canDelete, setCanDelete] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
   const hasValidRepositoryPattern = hasNonEmptyValue(repositoryPattern);
   const canSavePermission =
     Boolean(subjectId) &&
@@ -145,6 +108,39 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
     setCanPush(false);
     setCanDelete(false);
     setEditingId(null);
+  }
+
+  function openCreateDialog() {
+    resetForm("user");
+    setError("");
+    setDialogOpen(true);
+  }
+
+  function closeDialog() {
+    setDialogOpen(false);
+    setError("");
+    resetForm(subjectType);
+  }
+
+  function buildPageHref(page) {
+    if (page <= 1) {
+      return "/admin/permissions";
+    }
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    return `/admin/permissions?${params.toString()}`;
+  }
+
+  function beginEdit(permission) {
+    setEditingId(permission.id);
+    setSubjectType(permission.subject_type);
+    setSubjectId(String(permission.subject_id));
+    setRepositoryPattern(permission.repository_pattern);
+    setCanPull(permission.can_pull);
+    setCanPush(permission.can_push);
+    setCanDelete(permission.can_delete);
+    setError("");
+    setDialogOpen(true);
   }
 
   async function savePermission(event) {
@@ -182,7 +178,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
       return;
     }
 
-    resetForm(subjectType);
+    closeDialog();
     router.refresh();
   }
 
@@ -198,52 +194,129 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
       return;
     }
     if (editingId === permissionId) {
-      resetForm(subjectType);
+      closeDialog();
     }
     router.refresh();
   }
 
-  function beginEdit(permission) {
-    setEditingId(permission.id);
-    setSubjectType(permission.subject_type);
-    setSubjectId(String(permission.subject_id));
-    setRepositoryPattern(permission.repository_pattern);
-    setCanPull(permission.can_pull);
-    setCanPush(permission.can_push);
-    setCanDelete(permission.can_delete);
-    setError("");
-  }
-
   return (
-    <div className="space-y-6">
-      <Panel className="p-6">
-        <PanelHeader
-          title="Repository permissions"
-          description="Grant pull, push, and tag-delete access to users and robot accounts by repository pattern."
-        />
-      </Panel>
+    <>
+      <div className="space-y-6">
+        <Panel className="p-6">
+          <PanelHeader
+            title="Repository permissions"
+            description="Inspect the current access map first, then open focused add or edit flows when a change is needed."
+            action={(
+              <Button type="button" onClick={openCreateDialog} size="lg">
+                Add permission
+              </Button>
+            )}
+          />
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Badge tone="cyan">{pagination.total} rules</Badge>
+            <Badge tone="slate">{initialUsers.length} users</Badge>
+            <Badge tone="slate">{initialRobots.length} robots</Badge>
+          </div>
+          {error ? <Alert tone="rose" className="mt-6">{error}</Alert> : null}
+        </Panel>
 
-      <Panel as="form" onSubmit={savePermission} className="p-6">
-        <PanelHeader
-          title={editingId ? "Edit permission" : "Add permission"}
-          action={editingId ? (
-            <Button
-              type="button"
-              onClick={() => resetForm(subjectType)}
-              variant="secondary"
-              size="xs"
-            >
-              Cancel edit
-            </Button>
+        <Panel className="p-6">
+          <PanelHeader title="Current permissions" />
+          <div className="mt-4">
+            <TableShell>
+              <Table>
+                <TableHead>
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">Subject</th>
+                    <th className="px-4 py-3 text-left font-medium">Pattern</th>
+                    <th className="px-4 py-3 text-left font-medium">Access</th>
+                    <th className="px-4 py-3 text-right font-medium">Actions</th>
+                  </tr>
+                </TableHead>
+                <TableBody>
+                  {initialPermissions.length ? initialPermissions.map((permission) => (
+                    <tr key={permission.id}>
+                      <td className="px-4 py-3 text-white">{subjectLabel(permission)}</td>
+                      <td className="px-4 py-3 font-mono text-slate-300">{permission.repository_pattern}</td>
+                      <td className="px-4 py-3 text-slate-300">
+                        <div className="flex flex-wrap gap-2">
+                          <Badge tone={permission.can_pull ? "emerald" : "slate"}>{permission.can_pull ? "Pull" : "No pull"}</Badge>
+                          <Badge tone={permission.can_push ? "cyan" : "slate"}>{permission.can_push ? "Push" : "No push"}</Badge>
+                          <Badge tone={permission.can_delete ? "amber" : "slate"}>{permission.can_delete ? "Delete tag" : "No delete"}</Badge>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            onClick={() => beginEdit(permission)}
+                            variant="soft"
+                            size="xs"
+                          >
+                            Edit
+                          </Button>
+                          <ActionMenu
+                            items={[
+                              {
+                                label: "Delete permission",
+                                onSelect: () => removePermission(permission.id),
+                              },
+                            ]}
+                            label={`Actions for ${subjectLabel(permission)}`}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )) : null}
+                </TableBody>
+              </Table>
+            </TableShell>
+          </div>
+          {!initialPermissions.length ? (
+            <div className="mt-6">
+              <EmptyState
+                title="No repository permissions"
+                description="Add a permission to grant a user or robot account access to matching repositories."
+                action={(
+                  <Button type="button" onClick={openCreateDialog}>
+                    Add permission
+                  </Button>
+                )}
+              />
+            </div>
           ) : null}
-        />
+          <Pagination
+            page={pagination.page}
+            pageSize={pagination.page_size}
+            total={pagination.total}
+            label="rules"
+            hrefForPage={buildPageHref}
+          />
+        </Panel>
+      </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <FormDialog
+        open={dialogOpen}
+        onClose={closeDialog}
+        eyebrow="Permissions"
+        title={editingId ? "Edit permission" : "Add permission"}
+        description="Keep the page itself in presentation mode and use a focused dialog for access changes."
+        onSubmit={savePermission}
+        submitLabel={editingId ? "Save permission" : "Add permission"}
+        submitPendingLabel={editingId ? "Saving..." : "Adding..."}
+        disabled={!canSavePermission}
+        error={error}
+        maxWidth="max-w-2xl"
+      >
+        <div className="grid gap-4 md:grid-cols-2">
           <CustomListbox
             label="Subject type"
             value={selectedSubjectType}
             options={subjectTypeOptions}
-            onChange={(option) => resetForm(option.value)}
+            onChange={(option) => {
+              resetForm(option.value);
+              setDialogOpen(true);
+            }}
           />
           <CustomListbox
             label="Subject"
@@ -253,106 +326,46 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
           />
           <label className="space-y-2 md:col-span-2">
             <span className="text-sm text-slate-300">Repository pattern</span>
-            <input
+            <Input
               value={repositoryPattern}
               onChange={(event) => setRepositoryPattern(event.target.value)}
               placeholder="sheldylew/*"
               required
               maxLength={FORM_NAME_MAX_LENGTH}
-              className="w-full rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
           </label>
         </div>
 
-        <fieldset className="mt-4">
-          <legend className="sr-only">Repository access</legend>
-          <div className="grid gap-3 md:grid-cols-3">
-            {[
-              ["permission-pull", "Pull", "read images from matches.", canPull, setCanPull],
-              ["permission-push", "Push", "write images to matches.", canPush, setCanPush],
-              ["permission-delete", "Delete tag", "remove matching tags.", canDelete, setCanDelete],
-            ].map(([id, label, description, value, setter]) => (
-              <PermissionCheckbox
-                id={id}
-                key={label}
-                label={label}
-                description={description}
-                checked={value}
-                onChange={setter}
-              />
-            ))}
-          </div>
-        </fieldset>
-
-        {error ? <Alert tone="rose" className="mt-4">{error}</Alert> : null}
-
-        <Button
-          disabled={!canSavePermission}
-          className="mt-5"
-          size="lg"
-        >
-          {editingId ? "Save permission" : "Add permission"}
-        </Button>
-      </Panel>
-
-      <Panel className="p-6">
-        <PanelHeader title="Current permissions" />
-        <div className="mt-4">
-          <TableShell>
-          <Table>
-            <TableHead>
-              <tr>
-                <th className="px-4 py-3 text-left font-medium">Subject</th>
-                <th className="px-4 py-3 text-left font-medium">Pattern</th>
-                <th className="px-4 py-3 text-left font-medium">Pull</th>
-                <th className="px-4 py-3 text-left font-medium">Push</th>
-                <th className="px-4 py-3 text-left font-medium">Delete tag</th>
-                <th className="px-4 py-3 text-right font-medium">Actions</th>
-              </tr>
-            </TableHead>
-            <TableBody>
-              {initialPermissions.length ? initialPermissions.map((permission) => (
-                <tr key={permission.id}>
-                  <td className="px-4 py-3 text-white">{subjectLabel(permission)}</td>
-                  <td className="px-4 py-3 font-mono text-slate-300">{permission.repository_pattern}</td>
-                  <td className="px-4 py-3 text-slate-300"><Badge tone={permission.can_pull ? "emerald" : "slate"}>{permission.can_pull ? "Yes" : "No"}</Badge></td>
-                  <td className="px-4 py-3 text-slate-300"><Badge tone={permission.can_push ? "cyan" : "slate"}>{permission.can_push ? "Yes" : "No"}</Badge></td>
-                  <td className="px-4 py-3 text-slate-300"><Badge tone={permission.can_delete ? "amber" : "slate"}>{permission.can_delete ? "Yes" : "No"}</Badge></td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        onClick={() => beginEdit(permission)}
-                        variant="soft"
-                        size="xs"
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => removePermission(permission.id)}
-                        variant="danger"
-                        size="xs"
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              )) : null}
-            </TableBody>
-          </Table>
-          </TableShell>
-        </div>
-        {!initialPermissions.length ? (
-          <div className="mt-6">
-            <EmptyState
-              title="No repository permissions"
-              description="Add a permission to grant a user or robot account access to matching repositories."
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-white/10 bg-slate-950 px-4 py-3">
+            <Switch
+              checked={canPull}
+              onChange={setCanPull}
+              label="Pull"
+              description="Allow image reads from matching repositories."
+              align="start"
             />
           </div>
-        ) : null}
-      </Panel>
-    </div>
+          <div className="rounded-lg border border-white/10 bg-slate-950 px-4 py-3">
+            <Switch
+              checked={canPush}
+              onChange={setCanPush}
+              label="Push"
+              description="Allow writes to matching repositories."
+              align="start"
+            />
+          </div>
+          <div className="rounded-lg border border-white/10 bg-slate-950 px-4 py-3">
+            <Switch
+              checked={canDelete}
+              onChange={setCanDelete}
+              label="Delete tag"
+              description="Allow tag delete operations."
+              align="start"
+            />
+          </div>
+        </div>
+      </FormDialog>
+    </>
   );
 }

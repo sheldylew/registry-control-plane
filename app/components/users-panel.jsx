@@ -1,14 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import Dialog from "@/app/components/ui/dialog";
-import Pagination from "@/app/components/ui/pagination";
+import ActionMenu from "@/app/components/ui/action-menu";
+import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
+import FormDialog from "@/app/components/ui/form-dialog";
+import { Field, Input } from "@/app/components/ui/form";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import Pagination from "@/app/components/ui/pagination";
+import Switch from "@/app/components/ui/switch";
 import {
   FORM_EMAIL_MAX_LENGTH,
   FORM_NAME_MAX_LENGTH,
@@ -39,6 +44,8 @@ export default function UsersPanel({
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
+  const [pendingStatusUserId, setPendingStatusUserId] = useState(null);
   const [passwordResetUser, setPasswordResetUser] = useState(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -138,29 +145,24 @@ export default function UsersPanel({
     router.refresh();
   }
 
-  async function disableUser(userId) {
-    const response = await fetch(`/api/admin/users/${userId}/disable`, {
-      method: "POST",
-      headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      setError(payload.detail || "Could not disable user.");
+  async function setUserActive(user, nextActive) {
+    if (user.id === currentUserId && !nextActive) {
       return;
     }
-    router.refresh();
-  }
 
-  async function enableUser(userId) {
-    const response = await fetch(`/api/admin/users/${userId}/enable`, {
+    setPendingStatusUserId(user.id);
+    setStatusError("");
+    const response = await fetch(`/api/admin/users/${user.id}/${nextActive ? "enable" : "disable"}`, {
       method: "POST",
       headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
-      setError(payload.detail || "Could not enable user.");
+      setStatusError(readApiErrorDetail(payload, `Could not ${nextActive ? "enable" : "disable"} user.`));
+      setPendingStatusUserId(null);
       return;
     }
+    setPendingStatusUserId(null);
     router.refresh();
   }
 
@@ -230,7 +232,7 @@ export default function UsersPanel({
       <Panel className="p-6">
         <PanelHeader
           title="Users"
-          description="Create identities and review account status for registry access."
+          description="Review operator identities first, then open focused create, reset, and profile actions when needed."
           action={(
             <Button
               type="button"
@@ -241,62 +243,68 @@ export default function UsersPanel({
             </Button>
           )}
         />
+
+        {statusError ? <Alert tone="rose" className="mt-6">{statusError}</Alert> : null}
+
         <div className="mt-6 overflow-hidden rounded-lg border border-white/10">
           <table className="min-w-full divide-y divide-white/10 text-sm">
             <thead className="bg-white/5 text-xs uppercase tracking-[0.16em] text-slate-400">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Username</th>
-                <th className="px-4 py-3 text-left font-medium">Email</th>
+                <th className="px-4 py-3 text-left font-medium">User</th>
                 <th className="px-4 py-3 text-left font-medium">Role</th>
                 <th className="px-4 py-3 text-left font-medium">Status</th>
-                <th className="px-4 py-3 text-left font-medium">Action</th>
+                <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
               {initialUsers.length ? initialUsers.map((user) => (
                 <tr key={user.id}>
-                  <td className="px-4 py-3 text-white">{user.username}</td>
-                  <td className="px-4 py-3 text-slate-300">{user.email}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <Badge tone={user.is_active ? "emerald" : "amber"} dot>
+                        {user.is_active ? "Active" : "Disabled"}
+                      </Badge>
+                      <Link href={`/admin/users/${user.id}`} className="font-medium text-white transition hover:text-cyan-200">
+                        {user.username}
+                      </Link>
+                    </div>
+                    <p className="mt-1 text-slate-400">{user.email}</p>
+                  </td>
                   <td className="px-4 py-3 text-slate-300">
                     <Badge tone={user.is_admin ? "cyan" : "slate"}>
                       {user.is_admin ? "Admin" : "User"}
                     </Badge>
                   </td>
-                  <td className="px-4 py-3 text-slate-300">
-                    <Badge tone={user.is_active ? "emerald" : "amber"} dot>
-                      {user.is_active ? "Active" : "Disabled"}
-                    </Badge>
-                  </td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <Switch
+                      checked={user.is_active}
+                      onChange={(nextActive) => setUserActive(user, nextActive)}
+                      disabled={pendingStatusUserId === user.id || (user.id === currentUserId && user.is_active)}
+                      srLabel={`Set ${user.username} ${user.is_active ? "inactive" : "active"}`}
+                      label={user.is_active ? "Enabled" : "Disabled"}
+                      description={user.id === currentUserId ? "Current operator" : "Access toggle"}
+                      align="start"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
                       <Button
-                        type="button"
-                        onClick={() => openPasswordReset(user)}
-                        variant="secondary"
-                        size="sm"
+                        as={Link}
+                        href={`/admin/users/${user.id}`}
+                        variant="soft"
+                        size="xs"
                       >
-                        Reset password
+                        View profile
                       </Button>
-                      {user.is_active && user.id !== currentUserId ? (
-                        <Button
-                          type="button"
-                          onClick={() => disableUser(user.id)}
-                          variant="warning"
-                          size="sm"
-                        >
-                          Disable
-                        </Button>
-                      ) : null}
-                      {!user.is_active ? (
-                        <Button
-                          type="button"
-                          onClick={() => enableUser(user.id)}
-                          variant="soft"
-                          size="sm"
-                        >
-                          Enable
-                        </Button>
-                      ) : null}
+                      <ActionMenu
+                        items={[
+                          {
+                            label: "Reset password",
+                            onSelect: () => openPasswordReset(user),
+                          },
+                        ]}
+                        label={`Actions for ${user.username}`}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -328,130 +336,116 @@ export default function UsersPanel({
         </div>
       </Panel>
 
-      <Dialog open={open} onClose={closeDialog} eyebrow="User management" title="Create user">
-        <form onSubmit={createUser}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <input
+      <FormDialog
+        open={open}
+        onClose={closeDialog}
+        eyebrow="User management"
+        title="Create user"
+        description="Create the identity first, then manage its profile and password from the detail view."
+        onSubmit={createUser}
+        submitLabel="Create user"
+        submitPendingLabel="Creating..."
+        pending={pending}
+        disabled={!canCreateUser}
+        error={error}
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Username">
+            <Input
               autoFocus
               placeholder="Username"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               required
               maxLength={FORM_NAME_MAX_LENGTH}
-              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
-            <input
+          </Field>
+          <Field label="Email">
+            <Input
               type="email"
-              placeholder="Email"
+              placeholder="name@example.com"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
               maxLength={FORM_EMAIL_MAX_LENGTH}
               pattern="^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
               title="Use an address with a full domain, like name@example.com."
-              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
-            <input
+          </Field>
+          <Field label="Password">
+            <Input
               type="password"
               placeholder="Password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               required
               minLength={8}
-              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
-            <label className="flex items-center gap-3 rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-200">
-              <input
-                type="checkbox"
-                checked={isAdmin}
-                onChange={(event) => setIsAdmin(event.target.checked)}
-              />
-              Admin user
-            </label>
+          </Field>
+          <div className="rounded-md border border-white/10 bg-slate-950 px-3 py-3">
+            <Switch
+              checked={isAdmin}
+              onChange={setIsAdmin}
+              label={isAdmin ? "Admin access enabled" : "Standard user"}
+              description="Admin users can manage identities, permissions, and maintenance."
+              align="start"
+            />
           </div>
-          {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
-          <div className="mt-5 flex items-center justify-end gap-3">
-            <Button
-              type="button"
-              onClick={closeDialog}
-              disabled={pending}
-              variant="secondary"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={pending || !canCreateUser}
-            >
-              {pending ? "Creating..." : "Create user"}
-            </Button>
-          </div>
-        </form>
-      </Dialog>
+        </div>
+      </FormDialog>
 
-      <Dialog
+      <FormDialog
         open={Boolean(passwordResetUser)}
         onClose={closePasswordReset}
         eyebrow="User management"
         title={`Reset ${passwordResetUser?.username ?? "user"} password`}
+        description="Use a focused reset flow instead of editing credentials inline."
+        onSubmit={resetUserPassword}
+        submitLabel="Reset password"
+        submitPendingLabel="Resetting..."
+        pending={resetPending}
+        disabled={!canResetPassword}
+        error={resetError}
       >
-        <form onSubmit={resetUserPassword}>
-          <div className="grid gap-4">
-            {resettingOwnPassword ? (
-              <input
-                autoFocus
-                type="password"
-                placeholder="Current password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                required
-                className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
-              />
-            ) : null}
-            <input
-              autoFocus={!resettingOwnPassword}
+        {resettingOwnPassword ? (
+          <Field label="Current password">
+            <Input
+              autoFocus
               type="password"
-              placeholder="New password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
+              placeholder="Current password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
               required
-              minLength={8}
-              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
             />
-            <input
-              type="password"
-              placeholder="Confirm password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              required
-              minLength={8}
-              className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-white outline-none focus:border-cyan-300/50"
-            />
-          </div>
-          {passwordResetUser?.id === currentUserId ? (
-            <p className="mt-4 text-sm text-amber-200">
-              Resetting your own password signs out this browser session.
-            </p>
-          ) : null}
-          {resetError ? <p className="mt-4 text-sm text-rose-300">{resetError}</p> : null}
-          <div className="mt-5 flex items-center justify-end gap-3">
-            <Button
-              type="button"
-              onClick={closePasswordReset}
-              disabled={resetPending}
-              variant="secondary"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={resetPending || !canResetPassword}
-            >
-              {resetPending ? "Resetting..." : "Reset password"}
-            </Button>
-          </div>
-        </form>
-      </Dialog>
+          </Field>
+        ) : null}
+        <Field label="New password">
+          <Input
+            autoFocus={!resettingOwnPassword}
+            type="password"
+            placeholder="New password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            required
+            minLength={8}
+          />
+        </Field>
+        <Field label="Confirm password">
+          <Input
+            type="password"
+            placeholder="Confirm password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            required
+            minLength={8}
+          />
+        </Field>
+        {passwordResetUser?.id === currentUserId ? (
+          <Alert tone="amber">
+            Resetting your own password signs out this browser session.
+          </Alert>
+        ) : null}
+      </FormDialog>
     </>
   );
 }

@@ -83,31 +83,33 @@ export default async function RepoDetailPage({ params }) {
   return (
     <div className="space-y-6">
       <Panel className="p-6">
-        <PanelHeader
-          eyebrow="Repository"
-          title={payload.repo}
-          description="Browse published tags and inspect manifest details without direct browser-to-registry calls."
-          action={(
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            {payload.can_manage_visibility ? (
-              <RepositoryVisibilityPanel
-                repositoryName={payload.repo}
-                initialVisibility={payload.visibility}
-              />
-            ) : null}
-            {payload.can_delete_tag || payload.can_prune_repository ? (
-              <Button
-                as={Link}
-                href="/admin/maintenance"
-                variant="secondary"
-                className="h-[58px]"
-              >
-                Garbage collection
-              </Button>
-            ) : null}
-          </div>
-          )}
-        />
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.95fr)] xl:items-start">
+          <PanelHeader
+            eyebrow="Repository"
+            title={payload.repo}
+            description="Browse published tags and inspect manifest details without direct browser-to-registry calls."
+          />
+          {(payload.can_manage_visibility || payload.can_delete_tag || payload.can_prune_repository) ? (
+            <div className="space-y-3">
+              {payload.can_manage_visibility ? (
+                <RepositoryVisibilityPanel
+                  repositoryName={payload.repo}
+                  initialVisibility={payload.visibility}
+                />
+              ) : null}
+              {payload.can_delete_tag || payload.can_prune_repository ? (
+                <Button
+                  as={Link}
+                  href="/admin/maintenance"
+                  variant="secondary"
+                  className="w-full justify-center"
+                >
+                  Garbage collection
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </Panel>
 
       <Panel className="p-6">

@@ -2,11 +2,27 @@ import Link from "next/link";
 
 import Badge from "@/app/components/ui/badge";
 import EmptyState from "@/app/components/ui/empty-state";
+import Pagination from "@/app/components/ui/pagination";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import { apiFetch } from "@/app/lib/server-api";
 
-export default async function ReposPage() {
-  const response = await apiFetch("/api/repos");
+function buildApiPath(page) {
+  return `/api/repos?page=${String(page)}`;
+}
+
+function buildPageHref(page) {
+  if (page <= 1) {
+    return "/repos";
+  }
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  return `/repos?${params.toString()}`;
+}
+
+export default async function ReposPage({ searchParams }) {
+  const resolvedSearchParams = await searchParams;
+  const page = Math.max(Number(resolvedSearchParams?.page || "1") || 1, 1);
+  const response = await apiFetch(buildApiPath(page));
   const payload = await response.json();
 
   if (!response.ok) {
@@ -25,7 +41,7 @@ export default async function ReposPage() {
       <Panel className="p-6">
         <PanelHeader
           title="Visible repositories"
-          action={<Badge tone="cyan">{payload.repos.length} visible</Badge>}
+          action={<Badge tone="cyan">{payload.pagination.total} visible</Badge>}
         />
 
         {payload.repos.length ? (
@@ -55,6 +71,13 @@ export default async function ReposPage() {
             />
           </div>
         )}
+        <Pagination
+          page={payload.pagination.page}
+          pageSize={payload.pagination.page_size}
+          total={payload.pagination.total}
+          label="repositories"
+          hrefForPage={buildPageHref}
+        />
       </Panel>
     </div>
   );
