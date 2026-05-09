@@ -1,7 +1,9 @@
 name: Docker Build
 
 on:
+  # PRs only validate that the Docker build still works.
   pull_request:
+  # Branch pushes and version tags are the publish paths.
   push:
     branches:
       - master
@@ -9,26 +11,40 @@ on:
       - release
     tags:
       - 'v*'
+  # Manual runs are useful for debugging the pipeline on demand.
   workflow_dispatch:
 
 env:
+  # Image coordinates are assembled later as REGISTRY/NAMESPACE/NAME:TAG.
   REGISTRY: git.sheldylew.com
   IMAGE_NAMESPACE: sheldon
   IMAGE_NAME: registry-control-plane
 
 jobs:
   docker-build:
+    # Self-hosted runner with Docker available for buildx/bake.
     runs-on: docker-build
 
     steps:
       - name: Install checkout runtime dependencies
+        # Forgejo checkout is a JS action, so required tools must exist before it runs.
+        # Only install packages that are actually missing on the runner.
         run: |
-          apk add --no-cache git nodejs bash curl
+          missing_packages=""
+          command -v git >/dev/null 2>&1 || missing_packages="$missing_packages git"
+          command -v node >/dev/null 2>&1 || missing_packages="$missing_packages nodejs"
+          command -v bash >/dev/null 2>&1 || missing_packages="$missing_packages bash"
+          command -v curl >/dev/null 2>&1 || missing_packages="$missing_packages curl"
+
+          if [ -n "$missing_packages" ]; then
+            apk add --no-cache $missing_packages
+          fi
 
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Install arm64 emulation
+        # The runner is amd64; install binfmt so buildx can validate/publish arm64 too.
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64
 
@@ -37,9 +53,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Reuse a named builder across runs when it already exists.
           if docker buildx inspect forgejo-builder >/dev/null 2>&1; then
             docker buildx use forgejo-builder
           else
+            # Host networking avoids registry/network surprises inside the builder container.
             docker buildx create \
               --name forgejo-builder \
               --driver docker-container \
@@ -47,6 +65,7 @@ jobs:
               --use
           fi
 
+          # Ensure the builder is ready before any bake target runs.
           docker buildx inspect --bootstrap
 
       - name: Prepare image metadata
@@ -55,6 +74,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # PRs validate only. Everything else may publish if a registry is configured.
           publish="false"
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" && -n "${REGISTRY}" ]]; then
             publish="true"
@@ -64,6 +84,8 @@ jobs:
           ref="${GITHUB_REF:-}"
           image_tag_alt=""
 
+          # Branches publish moving aliases; SemVer tags publish immutable versions.
+          # Stable SemVer tags also get "latest". Any other ref falls back to a short SHA.
           case "${ref_name}" in
             master)
               image_tag="edge"
@@ -98,6 +120,7 @@ jobs:
         if: steps.meta.outputs.publish == 'true'
         shell: bash
         env:
+          # Keep credentials scoped to the one step that needs them.
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
@@ -116,6 +139,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Validation should exercise the multi-arch build graph without pushing images.
           export REVISION="${GITHUB_SHA}"
           export VERSION="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
 
@@ -130,6 +154,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Publish uses the same metadata plus version/revision labels for the pushed images.
           docker buildx bake \
             --var "REVISION=${GITHUB_SHA}" \
             --var "VERSION=${{ steps.meta.outputs.version }}" \
