@@ -64,7 +64,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /web
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci \
+      --cache=/root/.npm \
+      --fetch-retries=5 \
+      --fetch-retry-factor=2 \
+      --fetch-retry-mintimeout=1000 \
+      --fetch-retry-maxtimeout=30000
 
 COPY app ./app
 COPY jsconfig.json ./
