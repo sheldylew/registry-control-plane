@@ -16,8 +16,8 @@ on:
 
 env:
   # Image coordinates are assembled later as REGISTRY/NAMESPACE/NAME:TAG.
-  REGISTRY: git.sheldylew.com
-  IMAGE_NAMESPACE: sheldon
+  REGISTRY: registry.sheldylew.com
+  IMAGE_NAMESPACE: sheldylew
   IMAGE_NAME: registry-control-plane
 
 jobs:

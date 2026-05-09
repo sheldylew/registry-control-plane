@@ -4,7 +4,7 @@ The repository includes a workflow at `.forgejo/workflows/docker.yml` that valid
 
 Pull requests build the `api`, `auth-init`, `web`, and `nginx` Dockerfile targets through `docker buildx bake validate-multiarch` without pushing images.
 
-Pushes to `master`, `development`, `release`, `v*` tags, and manual dispatches log in to `git.sheldylew.com` and publish the same four targets through `docker buildx bake publish`.
+Pushes to `master`, `development`, `release`, `v*` tags, and manual dispatches log in to `registry.sheldylew.com` and publish the same four targets through `docker buildx bake publish`.
 
 Published branch tags are:
 
@@ -17,10 +17,10 @@ Published branch tags are:
 
 The workflow publishes these image names:
 
-- `git.sheldylew.com/sheldon/registry-control-plane-api:<tag>`
-- `git.sheldylew.com/sheldon/registry-control-plane-auth-init:<tag>`
-- `git.sheldylew.com/sheldon/registry-control-plane-web:<tag>`
-- `git.sheldylew.com/sheldon/registry-control-plane-nginx:<tag>`
+- `registry.sheldylew.com/sheldylew/registry-control-plane-api:<tag>`
+- `registry.sheldylew.com/sheldylew/registry-control-plane-auth-init:<tag>`
+- `registry.sheldylew.com/sheldylew/registry-control-plane-web:<tag>`
+- `registry.sheldylew.com/sheldylew/registry-control-plane-nginx:<tag>`
 
 It expects a Forgejo runner with:
 
