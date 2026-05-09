@@ -134,16 +134,14 @@ if [[ -d "$RELEASE_DIR" ]]; then
 fi
 
 mkdir -p "$RELEASE_DIR"
-mkdir -p "$RELEASE_DIR/docker"
-cp "$ROOT_DIR/docker/nginx-main.conf" "$RELEASE_DIR/docker/nginx-main.conf"
-cp "$ROOT_DIR/docker/nginx.conf" "$RELEASE_DIR/docker/nginx.conf"
 
 cd "$ROOT_DIR"
 
-services=("api" "web" "auth-init")
+services=("api" "web" "auth-init" "nginx")
 AUTH_INIT_IMAGE=""
 API_IMAGE=""
 WEB_IMAGE=""
+NGINX_IMAGE=""
 for service in "${services[@]}"; do
   image_name="${IMAGE_PREFIX}-${service}:${IMAGE_TAG}"
 
@@ -156,6 +154,9 @@ for service in "${services[@]}"; do
       ;;
     web)
       WEB_IMAGE="$image_name"
+      ;;
+    nginx)
+      NGINX_IMAGE="$image_name"
       ;;
   esac
 done
@@ -179,7 +180,7 @@ for service in "${services[@]}"; do
   docker save --output "$RELEASE_DIR/${service}-${IMAGE_TAG}.tar" "$image_name"
 done
 
-if [[ -z "$AUTH_INIT_IMAGE" || -z "$API_IMAGE" || -z "$WEB_IMAGE" ]]; then
+if [[ -z "$AUTH_INIT_IMAGE" || -z "$API_IMAGE" || -z "$WEB_IMAGE" || -z "$NGINX_IMAGE" ]]; then
   echo "Failed to capture all built image names." >&2
   exit 1
 fi
@@ -220,14 +221,11 @@ services:
       - registry-config-data:/registry-config
 
   nginx:
-    image: nginx:1.27.4-alpine
+    image: ${NGINX_IMAGE}
     restart: unless-stopped
     user: "101:101"
     ports:
       - "\${RCP_HTTP_BIND:-127.0.0.1:8080}:8080"
-    volumes:
-      - ./docker/nginx-main.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     cap_drop:
       - ALL
     cap_add:
@@ -374,6 +372,7 @@ Loaded images:
 - ${AUTH_INIT_IMAGE}
 - ${API_IMAGE}
 - ${WEB_IMAGE}
+- ${NGINX_IMAGE}
 
 Load images:
 
@@ -382,6 +381,7 @@ Load images:
    - docker load -i api-${IMAGE_TAG}.tar
    - docker load -i auth-init-${IMAGE_TAG}.tar
    - docker load -i web-${IMAGE_TAG}.tar
+   - docker load -i nginx-${IMAGE_TAG}.tar
 
 2. Start the stack:
 

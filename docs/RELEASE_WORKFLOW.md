@@ -57,9 +57,8 @@ This creates a folder under `releases/` (for example, `releases/latest` by defau
 - `api-<tag>.tar`
 - `auth-init-<tag>.tar`
 - `web-<tag>.tar`
+- `nginx-<tag>.tar`
 - `docker-compose.yml`
-- `docker/nginx-main.conf`
-- `docker/nginx.conf`
 - `README.md`
 
 Load the tarballs first (`docker load -i <tarfile>`) before running the generated compose file.

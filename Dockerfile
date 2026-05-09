@@ -89,3 +89,8 @@ USER app
 EXPOSE 3000
 
 CMD ["node", "server.js"]
+
+FROM nginx:1.27.4-alpine AS nginx
+
+COPY docker/nginx-main.conf /etc/nginx/nginx.conf
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
