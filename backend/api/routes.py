@@ -1843,7 +1843,7 @@ def list_repositories(
             "page_size": page_size,
             "total": total_visible,
             "has_prev": safe_page > 1,
-            "has_next": truncation or safe_page * page_size < total_visible,
+            "has_next": bool(truncation.get("truncated")) or safe_page * page_size < total_visible,
         },
         "user": _serialize_user(user),
     }
