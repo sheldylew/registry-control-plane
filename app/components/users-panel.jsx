@@ -212,7 +212,7 @@ export default function UsersPanel({
     setConfirmPassword("");
     setResetError("");
     if (resetOwnPassword) {
-      router.push("/login");
+      router.push("/");
       return;
     }
     router.refresh();

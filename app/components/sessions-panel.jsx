@@ -70,7 +70,7 @@ export default function SessionsPanel({ initialSessions, summary, pagination }) 
       return;
     }
     if (currentSession) {
-      router.push("/login");
+      router.push("/");
       return;
     }
     setPendingAction("");

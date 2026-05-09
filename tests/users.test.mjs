@@ -27,7 +27,19 @@ test("users panel exposes admin password reset controls", async () => {
   assert.match(panel, /current_password: resettingOwnPassword \? currentPassword : undefined/);
   assert.match(panel, /Reset password/);
   assert.match(panel, /Passwords must match\./);
-  assert.match(panel, /router\.push\("\/login"\)/);
+  assert.match(panel, /router\.push\("\/"\)/);
+});
+
+test("logout flows redirect signed-out operators to the public home page", async () => {
+  const logoutButton = await readFile(new URL("../app/components/logout-button.jsx", import.meta.url), "utf8");
+  const sessionsPanel = await readFile(new URL("../app/components/sessions-panel.jsx", import.meta.url), "utf8");
+  const profilePanel = await readFile(new URL("../app/components/user-profile-panel.jsx", import.meta.url), "utf8");
+  const logoutPage = await readFile(new URL("../app/logout/page.jsx", import.meta.url), "utf8");
+
+  assert.match(logoutButton, /router\.push\("\/"\)/);
+  assert.match(sessionsPanel, /router\.push\("\/"\)/);
+  assert.match(profilePanel, /router\.push\("\/"\)/);
+  assert.match(logoutPage, /redirect\("\/"\)/);
 });
 
 test("users panel exposes enable action for disabled users", async () => {

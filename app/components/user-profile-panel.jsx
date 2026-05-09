@@ -139,7 +139,7 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
     setResetPending(false);
     setResetOpen(false);
     if (resettingOwnPassword) {
-      router.push("/login");
+      router.push("/");
       return;
     }
     router.refresh();
