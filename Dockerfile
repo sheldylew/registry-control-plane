@@ -64,6 +64,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /web
 
 COPY package.json package-lock.json ./
+# Reuse downloaded npm tarballs inside the build step to reduce repeat fetches.
 RUN --mount=type=cache,target=/root/.npm \
     npm ci \
       --cache=/root/.npm \

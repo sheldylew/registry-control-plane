@@ -56,6 +56,10 @@ group "publish" {
 target "common" {
   context = "."
   dockerfile = "Dockerfile"
+  # Reuse a runner-local BuildKit cache across validation and publish jobs.
+  cache-from = ["type=local,src=/tmp/buildkit-registry-control-plane"]
+  # Export updated cache contents back to the same path after each build.
+  cache-to = ["type=local,dest=/tmp/buildkit-registry-control-plane,mode=max"]
   labels = {
     "org.opencontainers.image.revision" = REVISION
     "org.opencontainers.image.version" = VERSION

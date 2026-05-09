@@ -161,3 +161,19 @@ jobs:
           export IMAGE_TAG_ALT="${{ steps.meta.outputs.image_tag_alt }}"
 
           docker buildx bake publish
+
+      - name: Prune expired BuildKit cache
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Buildx exports cache here via docker-bake.hcl, so ensure the path exists.
+          mkdir -p /tmp/buildkit-registry-control-plane
+
+          # Run cleanup after the build so the current job gets the best cache hit rate.
+          # Keep the local cache best-effort and bounded to four days of age.
+          docker buildx prune \
+            --builder forgejo-builder \
+            --filter until=96h \
+            --force || true
