@@ -1,5 +1,6 @@
 import stat
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from backend.metrics import snapshot as metrics_snapshot
 from backend.models import AppSetting, AuditEvent, CachedManifestSummary, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
+from backend.runtime_secrets import ensure_registry_notifications_token
 from backend.setup import PUBLIC_REGISTRY_ORIGIN_KEY, ensure_setup_token
 
 
@@ -1690,6 +1692,10 @@ def _login(client: TestClient, username: str, password: str):
     return client.post("/api/session/login", json={"username": username, "password": password})
 
 
+def _registry_event_headers(app) -> dict[str, str]:
+    return {"Authorization": f"Bearer {ensure_registry_notifications_token(app.state.settings)}"}
+
+
 def test_admin_can_update_public_registry_origin(settings) -> None:
     app = create_app(settings)
 
@@ -2489,6 +2495,120 @@ def test_repo_tags_skip_stale_tags_when_manifest_resolution_fails(settings) -> N
             "history_truncated": False,
         }
     ]
+
+
+def test_registry_events_require_internal_bearer_token(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        response = client.post("/api/internal/registry-events", json={"events": []})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Registry event authentication failed."
+
+
+def test_registry_push_event_warms_cache_using_live_tag_resolution(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        descriptors={
+            ("sheldylew/app", "latest"): ("sha256:new", "application/vnd.oci.image.manifest.v1+json"),
+        },
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:new",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-new",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 99,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-06T10:20:30Z",
+                "history_count": 4,
+            }
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/internal/registry-events",
+            headers=_registry_event_headers(app),
+            json={
+                "events": [
+                    {
+                        "action": "push",
+                        "repository": "sheldylew/app",
+                        "tag": "latest",
+                        "target": {
+                            "repository": "sheldylew/app",
+                            "digest": "sha256:stale",
+                            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        },
+                    }
+                ]
+            },
+        )
+        with app.state.session_factory() as session:
+            cached_rows = session.scalars(select(CachedManifestSummary)).all()
+
+    assert response.status_code == 202
+    assert response.json() == {"accepted": 1}
+    assert fake_registry.resolve_manifest_descriptor_calls == [("sheldylew/app", "latest")]
+    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:new")]
+    assert len(cached_rows) == 1
+    assert cached_rows[0].repository_name == "sheldylew/app"
+    assert cached_rows[0].manifest_digest == "sha256:new"
+    assert cached_rows[0].total_size == 99
+
+
+def test_registry_delete_event_removes_cached_manifest_summary(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(
+                CachedManifestSummary(
+                    repository_name="sheldylew/app",
+                    manifest_digest="sha256:gone",
+                    media_type="application/vnd.oci.image.manifest.v1+json",
+                    config_digest="sha256:cfg-gone",
+                    total_size=10,
+                    created_at=None,
+                    architectures=["linux/amd64"],
+                    history_count=1,
+                    children_truncated=False,
+                    history_truncated=False,
+                    cached_at=datetime.now(timezone.utc),
+                    last_seen_at=datetime.now(timezone.utc),
+                )
+            )
+            session.commit()
+
+        response = client.post(
+            "/api/internal/registry-events",
+            headers=_registry_event_headers(app),
+            json={
+                "events": [
+                    {
+                        "action": "delete",
+                        "repository": "sheldylew/app",
+                        "target": {
+                            "repository": "sheldylew/app",
+                            "digest": "sha256:gone",
+                            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        },
+                    }
+                ]
+            },
+        )
+        with app.state.session_factory() as session:
+            cached_rows = session.scalars(select(CachedManifestSummary)).all()
+
+    assert response.status_code == 202
+    assert response.json() == {"accepted": 1}
+    assert cached_rows == []
 
 
 def test_repo_tag_history_returns_variants(settings) -> None:

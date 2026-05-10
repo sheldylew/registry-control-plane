@@ -35,6 +35,7 @@ class Settings:
     auth_bootstrap_marker_path: str = ".local-data/auth/bootstrap-complete"
     setup_token_path: str = ".local-data/setup-token.json"
     setup_complete_marker_path: str = ".local-data/setup-complete"
+    registry_notifications_token_path: str = ".local-data/registry-events-token"
     registry_config_template_path: str = "docker/registry-config.yml.tmpl"
     registry_rendered_config_path: str = ".local-data/registry-config.yml"
     maintenance_min_gate_seconds: float = 1.0
@@ -116,6 +117,10 @@ def load_settings() -> Settings:
         ),
         setup_token_path=os.getenv("SETUP_TOKEN_PATH", ".local-data/setup-token.json"),
         setup_complete_marker_path=os.getenv("SETUP_COMPLETE_MARKER_PATH", ".local-data/setup-complete"),
+        registry_notifications_token_path=os.getenv(
+            "REGISTRY_NOTIFICATIONS_TOKEN_PATH",
+            ".local-data/registry-events-token",
+        ),
         registry_config_template_path=os.getenv("REGISTRY_CONFIG_TEMPLATE_PATH", "docker/registry-config.yml.tmpl"),
         registry_rendered_config_path=os.getenv("REGISTRY_RENDERED_CONFIG_PATH", ".local-data/registry-config.yml"),
         internal_api_base_url=os.getenv("INTERNAL_API_BASE_URL", "http://api:8000"),

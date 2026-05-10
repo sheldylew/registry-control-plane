@@ -17,7 +17,9 @@ services:
       AUTH_BOOTSTRAP_MARKER_PATH: /data/auth-bootstrap-complete
       SETUP_TOKEN_PATH: /data/setup-token.json
       SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
       REGISTRY_RENDERED_CONFIG_PATH: /registry-config/config.yml
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://api:8000}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
@@ -92,9 +94,11 @@ services:
       AUTH_PUBLIC_CERT_PATH: /run/auth-public/auth-cert.pem
       SETUP_TOKEN_PATH: /data/setup-token.json
       SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
       REGISTRY_GC_CONFIG_PATH: /etc/docker/registry/config.yml
       REGISTRY_RENDERED_CONFIG_PATH: /etc/docker/registry/config.yml
       REGISTRY_CONFIG_TEMPLATE_PATH: /srv/docker/registry-config.yml.tmpl
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-http://api:8000}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

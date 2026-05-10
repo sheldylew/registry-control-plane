@@ -13,6 +13,7 @@ sys.path.insert(0, "/srv")
 from backend.auth.signing_material import bootstrap_signing_material
 from backend.config import load_settings
 from backend.registry_config import render_registry_config
+from backend.runtime_secrets import ensure_registry_notifications_token
 
 
 APP_UID = int(os.getenv("APP_UID", "10001"))
@@ -43,7 +44,12 @@ def _chown_tree(path: Path, *, uid: int, gid: int) -> None:
 def _render_registry_config(settings) -> None:
     template = REGISTRY_CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
     public_origin = settings.public_registry_origin or "http://localhost:8080"
-    rendered = render_registry_config(template, settings, public_registry_origin=public_origin)
+    rendered = render_registry_config(
+        template,
+        settings,
+        public_registry_origin=public_origin,
+        registry_notifications_token=ensure_registry_notifications_token(settings),
+    )
     REGISTRY_RENDERED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     REGISTRY_RENDERED_CONFIG_PATH.write_text(rendered, encoding="utf-8")
     os.chmod(REGISTRY_RENDERED_CONFIG_PATH, 0o644)
@@ -116,6 +122,7 @@ def main() -> None:
     _chown_tree(Path(settings.auth_bootstrap_marker_path), uid=APP_UID, gid=APP_GID)
     _chown_tree(Path(settings.setup_token_path), uid=APP_UID, gid=APP_GID)
     _chown_tree(Path(settings.setup_complete_marker_path), uid=APP_UID, gid=APP_GID)
+    _chown_tree(Path(settings.registry_notifications_token_path), uid=APP_UID, gid=APP_GID)
 
 
 if __name__ == "__main__":

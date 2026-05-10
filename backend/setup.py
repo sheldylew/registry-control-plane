@@ -20,12 +20,14 @@ from backend.auth.passwords import hash_password
 from backend.config import Settings
 from backend.models import AppSetting, User
 from backend.registry_config import render_registry_config
+from backend.runtime_secrets import ensure_registry_notifications_token
 
 
 PUBLIC_REGISTRY_ORIGIN_KEY = "public_registry_origin"
 UI_TIMEZONE_KEY = "ui_timezone"
 DEFAULT_UI_TIMEZONE = "America/Los_Angeles"
 RESTART_COMMAND = "docker compose restart registry"
+REGISTRY_EVENTS_PATH = "/api/internal/registry-events"
 
 
 class SetupError(ValueError):
@@ -212,10 +214,12 @@ def render_registry_config_to_path(settings: Settings, *, public_registry_origin
     template_path = Path(settings.registry_config_template_path)
     rendered_path = Path(settings.registry_rendered_config_path)
     template = template_path.read_text(encoding="utf-8")
+    registry_notifications_token = ensure_registry_notifications_token(settings)
     rendered = render_registry_config(
         template,
         settings=settings,
         public_registry_origin=public_registry_origin,
+        registry_notifications_token=registry_notifications_token,
     )
     rendered_path.parent.mkdir(parents=True, exist_ok=True)
     rendered_path.write_text(rendered, encoding="utf-8")

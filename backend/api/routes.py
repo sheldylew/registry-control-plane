@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import hmac
 from pathlib import Path
 import shutil
 from datetime import datetime, timezone
@@ -54,6 +55,13 @@ MAX_SHORT_TEXT_LENGTH = 255
 MAX_EMAIL_LENGTH = 320
 MAX_PASSWORD_LENGTH = 512
 MAX_DESCRIPTION_LENGTH = 2000
+REGISTRY_NOTIFICATION_HEADER = "Authorization"
+REGISTRY_NOTIFICATION_MANIFEST_MEDIA_TYPES = {
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+}
 
 
 def _normalize_required_text(value: str, *, field_name: str, max_length: int = MAX_SHORT_TEXT_LENGTH) -> str:
@@ -381,6 +389,152 @@ def _load_manifest_details_for_summary(
         )
     finally:
         registry.close()
+
+
+def _require_registry_notification_auth(request: Request) -> None:
+    expected_token = getattr(request.app.state, "registry_notifications_token", None)
+    received_header = request.headers.get(REGISTRY_NOTIFICATION_HEADER, "")
+    expected_header = f"Bearer {expected_token}" if expected_token else ""
+    if not expected_header or not hmac.compare_digest(received_header, expected_header):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registry event authentication failed.")
+
+
+def _is_manifest_notification_media_type(media_type: Optional[str]) -> bool:
+    return media_type in REGISTRY_NOTIFICATION_MANIFEST_MEDIA_TYPES
+
+
+def _normalize_registry_notification_events(payload: dict) -> list[dict[str, Optional[str]]]:
+    raw_events = payload.get("events")
+    if not isinstance(raw_events, list):
+        return []
+
+    normalized_events: list[dict[str, Optional[str]]] = []
+    for raw_event in raw_events:
+        if not isinstance(raw_event, dict):
+            continue
+        target = raw_event.get("target") if isinstance(raw_event.get("target"), dict) else {}
+        action = raw_event.get("action")
+        repository_name = target.get("repository") or raw_event.get("repository")
+        media_type = target.get("mediaType")
+        if action not in {"push", "delete"} or not isinstance(repository_name, str):
+            continue
+        if not _is_manifest_notification_media_type(media_type):
+            continue
+        normalized_events.append(
+            {
+                "action": action,
+                "repository_name": repository_name,
+                "tag": raw_event.get("tag") or target.get("tag"),
+                "digest": target.get("digest"),
+                "media_type": media_type,
+            }
+        )
+    return normalized_events
+
+
+def _delete_cached_manifest_summary(
+    session_factory,
+    *,
+    repository_name: str,
+    manifest_digest: str,
+) -> None:
+    with session_factory() as db:
+        cached_rows = db.scalars(
+            select(CachedManifestSummary).where(
+                CachedManifestSummary.repository_name == repository_name,
+                CachedManifestSummary.manifest_digest == manifest_digest,
+            )
+        ).all()
+        if not cached_rows:
+            return
+        for row in cached_rows:
+            db.delete(row)
+        db.commit()
+
+
+def _warm_cached_manifest_summary(
+    request: Request,
+    *,
+    repository_name: str,
+    tag: Optional[str],
+    digest: Optional[str],
+) -> None:
+    registry = request.app.state.registry_client_factory()
+    try:
+        reference = digest
+        if tag:
+            try:
+                resolved_descriptor = registry.resolve_manifest_descriptor(repository_name, tag)
+            except RegistryNotFoundError:
+                resolved_descriptor = None
+            else:
+                if resolved_descriptor.digest:
+                    reference = resolved_descriptor.digest
+        if not reference:
+            return
+        details = registry.get_manifest_details(
+            repository_name,
+            reference,
+            max_manifest_children=request.app.state.settings.manifest_children_max_items,
+            max_history_entries=request.app.state.settings.history_entries_max_items,
+        )
+    except RegistryNotFoundError:
+        return
+    finally:
+        registry.close()
+
+    resolved_digest = details.digest or digest or reference
+    if not resolved_digest:
+        return
+
+    seen_at = datetime.now(timezone.utc)
+    with request.app.state.session_factory() as db:
+        _upsert_cached_manifest_summary(
+            db,
+            repository_name=repository_name,
+            manifest_digest=resolved_digest,
+            details=details,
+            seen_at=seen_at,
+        )
+        db.commit()
+
+
+def _process_registry_notification_events(request: Request, events: list[dict[str, Optional[str]]]) -> None:
+    warmed_references: set[tuple[str, Optional[str], Optional[str]]] = set()
+    deleted_digests: set[tuple[str, str]] = set()
+
+    for event in events:
+        repository_name = event.get("repository_name")
+        if not repository_name:
+            continue
+
+        action = event.get("action")
+        digest = event.get("digest")
+        tag = event.get("tag")
+        if action == "delete":
+            if not digest:
+                continue
+            delete_key = (repository_name, digest)
+            if delete_key in deleted_digests:
+                continue
+            _delete_cached_manifest_summary(
+                request.app.state.session_factory,
+                repository_name=repository_name,
+                manifest_digest=digest,
+            )
+            deleted_digests.add(delete_key)
+            continue
+
+        warm_key = (repository_name, tag, digest)
+        if warm_key in warmed_references:
+            continue
+        _warm_cached_manifest_summary(
+            request,
+            repository_name=repository_name,
+            tag=tag,
+            digest=digest,
+        )
+        warmed_references.add(warm_key)
 
 
 def _serialize_history_variant(variant: HistoryVariant) -> dict:
@@ -1845,6 +1999,19 @@ def internal_registry_maintenance_gate(
     if maintenance.registry_gate_enabled(db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registry maintenance in progress.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/internal/registry-events", status_code=status.HTTP_202_ACCEPTED)
+def ingest_registry_events(
+    payload: dict,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    _require_registry_notification_auth(request)
+    events = _normalize_registry_notification_events(payload)
+    if events:
+        background_tasks.add_task(_process_registry_notification_events, request, events)
+    return {"accepted": len(events)}
 
 
 @router.get("/admin/audit")

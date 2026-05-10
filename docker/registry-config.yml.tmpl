@@ -17,6 +17,23 @@ http:
     X-Content-Type-Options:
       - nosniff
 
+notifications:
+  events:
+    includereferences: true
+  endpoints:
+    - name: registry-control-plane
+      url: {internal_api_base_url}/api/internal/registry-events
+      headers:
+        Authorization:
+          - Bearer {registry_notifications_token}
+      timeout: 1s
+      threshold: 5
+      backoff: 1s
+      ignore:
+        actions:
+          - pull
+          - mount
+
 auth:
   token:
     realm: {public_registry_origin}/auth/token

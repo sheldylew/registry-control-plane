@@ -18,7 +18,13 @@ from backend.log_retention import prune_expired_logs, prune_expired_operational_
 from backend.models import Base
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import RegistryClient
-from backend.setup import complete_setup_from_environment, saved_public_registry_origin, setup_required
+from backend.runtime_secrets import ensure_registry_notifications_token
+from backend.setup import (
+    complete_setup_from_environment,
+    render_registry_config_to_path,
+    saved_public_registry_origin,
+    setup_required,
+)
 
 
 def _client_ip(request: Request) -> str:
@@ -48,6 +54,8 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
             if not setup_required(session):
                 bootstrap_admin(session, settings)
             app_public_origin = saved_public_registry_origin(session) or settings.public_registry_origin
+            if not setup_required(session):
+                render_registry_config_to_path(settings, public_registry_origin=app_public_origin)
             prune_expired_logs(session, retention_days=settings.log_retention_days)
             prune_expired_operational_records(
                 session,
@@ -57,6 +65,7 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
 
         app.state.settings = settings
         app.state.public_registry_origin = app_public_origin
+        app.state.registry_notifications_token = ensure_registry_notifications_token(settings)
         app.state.engine = engine
         app.state.session_factory = session_factory
         if not hasattr(app.state, "registry_client_factory"):

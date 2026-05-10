@@ -46,6 +46,7 @@ def settings(temp_database_url, temp_workspace):
         auth_bootstrap_marker_path=str(temp_workspace / "auth-bootstrap-complete"),
         setup_token_path=str(temp_workspace / "setup-token.json"),
         setup_complete_marker_path=str(temp_workspace / "setup-complete"),
+        registry_notifications_token_path=str(temp_workspace / "registry-events-token"),
         registry_config_template_path=str(ROOT / "docker/registry-config.yml.tmpl"),
         registry_rendered_config_path=str(temp_workspace / "registry-config.yml"),
         internal_api_base_url="http://api:8000",
