@@ -39,6 +39,7 @@ export default async function RepoTagHistoryPage({ params }) {
             <Button
               as={Link}
               href={`/repos/${encodeURIComponent(payload.repo)}`}
+              prefetch={false}
               variant="secondary"
             >
               Back to repository

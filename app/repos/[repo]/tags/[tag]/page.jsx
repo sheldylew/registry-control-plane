@@ -63,6 +63,7 @@ export default async function RepoTagDetailPage({ params }) {
             <Button
               as={Link}
               href="/admin/maintenance"
+              prefetch={false}
               variant="secondary"
             >
               Garbage collection

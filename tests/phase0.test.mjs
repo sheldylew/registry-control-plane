@@ -28,3 +28,19 @@ test("dashboard page references API and registry paths", async () => {
   assert.match(page, /NEXT_PUBLIC_AUTH_TOKEN_PATH/);
   assert.match(page, /NEXT_PUBLIC_REGISTRY_BASE_PATH/);
 });
+
+test("protected repo navigation disables automatic prefetch", async () => {
+  const [adminShell, reposPage, repoPage, tagPage, historyPage] = await Promise.all([
+    readFile(new URL("../app/components/admin-shell.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/tags/[tag]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/tags/[tag]/history/page.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(adminShell, /prefetch=\{false\}/);
+  assert.match(reposPage, /prefetch=\{false\}/);
+  assert.match(repoPage, /prefetch=\{false\}/);
+  assert.match(tagPage, /prefetch=\{false\}/);
+  assert.match(historyPage, /prefetch=\{false\}/);
+});

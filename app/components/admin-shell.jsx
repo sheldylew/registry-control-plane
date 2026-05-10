@@ -45,6 +45,7 @@ export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
           ) : null}
           <Link
             href={item.href}
+            prefetch={false}
             onClick={onNavigate}
             className={`block rounded-lg px-4 py-3 text-sm font-medium transition ${
               active

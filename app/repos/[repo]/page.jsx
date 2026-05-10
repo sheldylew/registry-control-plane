@@ -81,6 +81,7 @@ export default async function RepoDetailPage({ params }) {
                 <Button
                   as={Link}
                   href="/admin/maintenance"
+                  prefetch={false}
                   variant="secondary"
                   className="w-full justify-center"
                 >
@@ -122,6 +123,7 @@ export default async function RepoDetailPage({ params }) {
                       <td className="px-4 py-4 align-top text-center">
                         <Link
                           href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}`}
+                          prefetch={false}
                           className="inline-flex rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 font-medium text-cyan-200 transition hover:border-cyan-300 hover:text-cyan-100"
                         >
                           {tag.tag}
@@ -146,6 +148,7 @@ export default async function RepoDetailPage({ params }) {
                       <td className="px-4 py-4 align-top text-slate-300">
                         <Link
                           href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/history`}
+                          prefetch={false}
                           className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/5 text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
                           title={tag.history_count === null ? "View history" : `View ${tag.history_count} history entries`}
                           aria-label={tag.history_count === null ? "View history" : `View ${tag.history_count} history entries`}

@@ -50,6 +50,7 @@ export default async function ReposPage({ searchParams }) {
               <li key={repo.name}>
                 <Link
                   href={`/repos/${encodeURIComponent(repo.name)}`}
+                  prefetch={false}
                   className="block rounded-lg border border-white/10 bg-slate-950/70 px-5 py-5 transition hover:border-cyan-400/40 hover:bg-slate-950"
                 >
                   <div className="flex items-start justify-between gap-4">
