@@ -418,7 +418,11 @@ def _normalize_registry_notification_events(payload: dict) -> list[dict[str, Opt
         media_type = target.get("mediaType")
         if action not in {"push", "delete"} or not isinstance(repository_name, str):
             continue
-        if not _is_manifest_notification_media_type(media_type):
+        # Distribution delete notifications omit target.mediaType, while push
+        # notifications include it for manifests and indexes. Only require a
+        # manifest media type for push events so digest-based delete events
+        # still invalidate cached rows.
+        if action == "push" and not _is_manifest_notification_media_type(media_type):
             continue
         normalized_events.append(
             {

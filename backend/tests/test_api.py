@@ -2597,7 +2597,6 @@ def test_registry_delete_event_removes_cached_manifest_summary(settings) -> None
                         "target": {
                             "repository": "sheldylew/app",
                             "digest": "sha256:gone",
-                            "mediaType": "application/vnd.oci.image.manifest.v1+json",
                         },
                     }
                 ]
