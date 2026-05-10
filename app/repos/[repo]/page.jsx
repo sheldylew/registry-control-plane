@@ -76,7 +76,7 @@ export default async function RepoDetailPage({ params, searchParams }) {
       </Panel>
 
       <Panel className="p-6">
-        <PanelHeader title="Tags" action={<Badge tone="cyan">{payload.tags.length} total</Badge>} />
+        <PanelHeader title="Tags" action={<Badge tone="cyan">{payload.pagination.total} total</Badge>} />
         {payload.tags.length ? (
           <div className="mt-4">
             <TableShell>

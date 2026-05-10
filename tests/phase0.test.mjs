@@ -66,6 +66,13 @@ test("protected repo navigation disables automatic prefetch", async () => {
   assert.match(historyPage, /prefetch=\{false\}/);
 });
 
+test("repository tag page shows the paginated total count", async () => {
+  const repoPage = await readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8");
+
+  assert.match(repoPage, /payload\.pagination\.total/);
+  assert.doesNotMatch(repoPage, /payload\.tags\.length} total/);
+});
+
 test("web healthchecks use the static root page", async () => {
   const [compose, bindCompose, dockerSave] = await Promise.all([
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
