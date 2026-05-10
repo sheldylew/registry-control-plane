@@ -5,6 +5,10 @@ import { readFile } from "node:fs/promises";
 test("nginx routes app, auth, and registry paths to the expected upstreams", async () => {
   const nginxConf = await readFile(new URL("../docker/nginx.conf", import.meta.url), "utf8");
 
+  assert.match(nginxConf, /client_max_body_size 300m;/);
+  assert.match(nginxConf, /location = \/_internal\/registry-maintenance \{/);
+  assert.match(nginxConf, /proxy_pass_request_body off;/);
+  assert.match(nginxConf, /proxy_set_header Content-Length "";/);
   assert.match(nginxConf, /location \/v2\/ \{/);
   assert.match(nginxConf, /proxy_pass http:\/\/registry:5000;/);
   assert.match(nginxConf, /location \/api\/ \{/);
