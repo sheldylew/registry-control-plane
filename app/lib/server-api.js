@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 
 const internalApiBaseUrl =
-  process.env.INTERNAL_API_BASE_URL || "http://api:8000";
+  process.env.INTERNAL_API_BASE_URL || "http://127.0.0.1:8000";
 const sessionCookieName = "rcr_session";
 
 function buildCookieHeader(store) {

@@ -203,7 +203,9 @@ services:
       AUTH_BOOTSTRAP_MARKER_PATH: /data/auth-bootstrap-complete
       SETUP_TOKEN_PATH: /data/setup-token.json
       SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
       REGISTRY_RENDERED_CONFIG_PATH: /registry-config/config.yml
+      INTERNAL_API_BASE_URL: \${INTERNAL_API_BASE_URL:-http://api:8000}
       ADMIN_USERNAME: \${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: \${ADMIN_PASSWORD:-}
       ADMIN_EMAIL: \${ADMIN_EMAIL:-}
@@ -219,6 +221,8 @@ services:
       - auth-private-data:/auth-private
       - auth-public-data:/auth-public
       - registry-config-data:/registry-config
+    networks:
+      - rcp
 
   nginx:
     image: ${NGINX_IMAGE}
@@ -244,6 +248,10 @@ services:
         condition: service_healthy
       registry:
         condition: service_started
+    networks:
+      rcp:
+        aliases:
+          - nginx
 
   api:
     image: ${API_IMAGE}
@@ -273,9 +281,11 @@ services:
       AUTH_PUBLIC_CERT_PATH: /run/auth-public/auth-cert.pem
       SETUP_TOKEN_PATH: /data/setup-token.json
       SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
       REGISTRY_GC_CONFIG_PATH: /etc/docker/registry/config.yml
       REGISTRY_RENDERED_CONFIG_PATH: /etc/docker/registry/config.yml
       REGISTRY_CONFIG_TEMPLATE_PATH: /srv/docker/registry-config.yml.tmpl
+      INTERNAL_API_BASE_URL: \${INTERNAL_API_BASE_URL:-http://api:8000}
       FORWARDED_ALLOW_IPS: \${FORWARDED_ALLOW_IPS:-*}
       ADMIN_USERNAME: \${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: \${ADMIN_PASSWORD:-}
@@ -310,6 +320,10 @@ services:
     depends_on:
       auth-init:
         condition: service_completed_successfully
+    networks:
+      rcp:
+        aliases:
+          - api
 
   web:
     image: ${WEB_IMAGE}
@@ -335,6 +349,10 @@ services:
       timeout: 3s
       retries: 12
       start_period: 10s
+    networks:
+      rcp:
+        aliases:
+          - web
 
   registry:
     image: registry:2.8.3
@@ -355,6 +373,10 @@ services:
     depends_on:
       auth-init:
         condition: service_completed_successfully
+    networks:
+      rcp:
+        aliases:
+          - registry
 
 volumes:
   app-data:
@@ -362,6 +384,10 @@ volumes:
   auth-private-data:
   auth-public-data:
   registry-config-data:
+
+networks:
+  rcp:
+    name: \${RCP_NETWORK_NAME:-registry-control-plane}
 EOF
 
 cat >"$RELEASE_DIR/README.md" <<EOF

@@ -93,9 +93,26 @@ test("web healthchecks use the static root page", async () => {
   }
 });
 
+test("release compose files keep internal service DNS aliases explicit", async () => {
+  const [bindCompose, dockerSave] = await Promise.all([
+    readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/docker-save.sh", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of [bindCompose, dockerSave]) {
+    assert.match(source, /REGISTRY_NOTIFICATIONS_TOKEN_PATH: \/data\/registry-events-token/);
+    assert.match(source, /INTERNAL_API_BASE_URL: .*http:\/\/api:8000/);
+    assert.match(source, /aliases:\n\s+- api/);
+    assert.match(source, /aliases:\n\s+- web/);
+    assert.match(source, /aliases:\n\s+- registry/);
+  }
+});
+
 test("server auth skips session API calls when no session cookie exists", async () => {
   const serverApi = await readFile(new URL("../app/lib/server-api.js", import.meta.url), "utf8");
 
+  assert.match(serverApi, /process\.env\.INTERNAL_API_BASE_URL \|\| "http:\/\/127\.0\.0\.1:8000"/);
+  assert.doesNotMatch(serverApi, /process\.env\.INTERNAL_API_BASE_URL \|\| "http:\/\/api:8000"/);
   assert.match(serverApi, /const sessionCookieName = "rcr_session";/);
   assert.match(serverApi, /if \(!store\.has\(sessionCookieName\)\) \{/);
   assert.match(serverApi, /apiFetch\("\/api\/session\/me"\)/);
