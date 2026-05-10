@@ -57,7 +57,7 @@ COPY scripts/auth-init.py ./scripts/auth-init.py
 
 CMD ["./scripts/auth-init.py"]
 
-FROM node:20.18.3-alpine3.20 AS web-builder
+FROM --platform=$BUILDPLATFORM node:20.18.3-alpine3.20 AS web-builder
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
