@@ -43,11 +43,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install arm64 emulation
-        # The runner is amd64; install binfmt so buildx can validate/publish arm64 too.
-        run: |
-          docker run --privileged --rm tonistiigi/binfmt --install arm64
-
       - name: Set up Buildx builder
         shell: bash
         run: |
@@ -116,6 +111,13 @@ jobs:
             echo "version=${ref_name}"
           } >>"${GITHUB_OUTPUT}"
 
+      - name: Install arm64 emulation
+        if: steps.meta.outputs.publish == 'true'
+        # Validation stays native-arch. Publish runs still need binfmt on amd64
+        # runners so buildx can produce the arm64 images too.
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
+
       - name: Log in to registry
         if: steps.meta.outputs.publish == 'true'
         shell: bash
@@ -133,19 +135,33 @@ jobs:
 
           printf '%s' "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" --username "${REGISTRY_USERNAME}" --password-stdin
 
-      - name: Validate multi-arch build
+      - name: Validate native-arch build
         if: steps.meta.outputs.publish != 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          # Validation should exercise the multi-arch build graph without pushing images.
+          case "$(uname -m)" in
+            x86_64|amd64)
+              platform="linux/amd64"
+              ;;
+            arm64|aarch64)
+              platform="linux/arm64"
+              ;;
+            *)
+              echo "Unsupported runner architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+
+          # Validation intentionally stays on the runner's native architecture.
           export REVISION="${GITHUB_SHA}"
           export VERSION="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
           export IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}"
           export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
+          export PLATFORM="${platform}"
 
-          docker buildx bake --allow=fs=/tmp validate-multiarch
+          docker buildx bake --allow=fs=/tmp validate-native
 
       - name: Publish multi-arch images
         if: steps.meta.outputs.publish == 'true'

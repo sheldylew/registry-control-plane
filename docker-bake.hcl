@@ -32,7 +32,7 @@ variable "IMAGE_TAG_ALT" {
 }
 
 group "default" {
-  targets = ["validate-multiarch"]
+  targets = ["validate-native"]
 }
 
 # Local image export path. This intentionally stays single-platform because
@@ -41,9 +41,9 @@ group "local-export" {
   targets = ["api-local", "auth-init-local", "web-local", "nginx-local"]
 }
 
-# Pull request path. Builds every runtime image for each supported platform
-# without loading local images or pushing to the registry.
-group "validate-multiarch" {
+# Pull request path. Builds each runtime image for the runner's native
+# architecture without loading local images or pushing to the registry.
+group "validate-native" {
   targets = ["api-validate", "auth-init-validate", "web-validate", "nginx-validate"]
 }
 
@@ -71,6 +71,13 @@ target "local" {
   inherits = ["common"]
   platforms = ["${PLATFORM}"]
   output = ["type=docker"]
+}
+
+# Shared settings for native-arch validation builds.
+target "validate" {
+  inherits = ["common"]
+  platforms = ["${PLATFORM}"]
+  output = ["type=cacheonly"]
 }
 
 # Shared settings for multi-arch validation builds.
@@ -127,19 +134,19 @@ target "nginx-local" {
 
 # Multi-arch validation targets used by pull requests.
 target "api-validate" {
-  inherits = ["api-base", "multiarch-validate"]
+  inherits = ["api-base", "validate"]
 }
 
 target "auth-init-validate" {
-  inherits = ["auth-init-base", "multiarch-validate"]
+  inherits = ["auth-init-base", "validate"]
 }
 
 target "web-validate" {
-  inherits = ["web-base", "multiarch-validate"]
+  inherits = ["web-base", "validate"]
 }
 
 target "nginx-validate" {
-  inherits = ["nginx-base", "multiarch-validate"]
+  inherits = ["nginx-base", "validate"]
 }
 
 # Multi-arch publish targets used by push, tag, and manual workflow runs.
