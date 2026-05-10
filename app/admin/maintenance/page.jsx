@@ -55,11 +55,30 @@ export default async function AdminMaintenancePage({ searchParams }) {
     throw new Error(payload.detail || "Failed to load maintenance status.");
   }
 
+  const cacheSummaryDetail = payload.cache.summaries_total
+    ? `${payload.cache.repositories_total} repositories. First cached ${formatDateTime(payload.cache.oldest_cached_at, { timeZone, fallback: "Unknown" })}.`
+    : "No cached manifest summaries yet.";
+  const cacheFreshnessDetail = payload.cache.newest_last_seen_at
+    ? `Newest hit ${formatDateTime(payload.cache.newest_last_seen_at, { timeZone, fallback: "Unknown" })}.`
+    : "No cache hits recorded yet.";
+
   return (
     <div className="space-y-6">
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Registry status" value={payload.registry_status} />
         <StatCard label="Storage usage" value={formatBytes(payload.storage_usage_bytes)} />
+        <StatCard
+          label="Cached digests"
+          value={payload.cache.summaries_total}
+          detail={cacheSummaryDetail}
+          tone="cyan"
+        />
+        <StatCard
+          label="Seen in 24h"
+          value={payload.cache.seen_last_24h}
+          detail={cacheFreshnessDetail}
+          tone="emerald"
+        />
         <StatCard
           label="Last job"
           value={payload.last_job ? payload.last_job.status : "None"}

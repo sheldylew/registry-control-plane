@@ -1,6 +1,6 @@
 import stat
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -2783,6 +2783,78 @@ def test_admin_dashboard_returns_stats_and_activity(settings) -> None:
     assert "rbt001" not in activity_details
     assert "Token hidden for non-admin account" in activity_details
     assert "Token hidden for automation account" in activity_details
+
+
+def test_admin_maintenance_returns_cache_stats(settings) -> None:
+    app = create_app(settings)
+    now = datetime.now(timezone.utc)
+    older_cached = now - timedelta(days=3)
+    recent_cached = now - timedelta(hours=12)
+    stale_seen = now - timedelta(days=2)
+    newest_seen = now - timedelta(hours=1)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add_all(
+                [
+                    CachedManifestSummary(
+                        repository_name="sheldylew/app",
+                        manifest_digest="sha256:one",
+                        media_type="application/vnd.oci.image.manifest.v1+json",
+                        config_digest="sha256:cfg-one",
+                        total_size=10,
+                        created_at=None,
+                        architectures=["linux/amd64"],
+                        history_count=1,
+                        children_truncated=False,
+                        history_truncated=False,
+                        cached_at=older_cached,
+                        last_seen_at=stale_seen,
+                    ),
+                    CachedManifestSummary(
+                        repository_name="sheldylew/app",
+                        manifest_digest="sha256:two",
+                        media_type="application/vnd.oci.image.manifest.v1+json",
+                        config_digest="sha256:cfg-two",
+                        total_size=11,
+                        created_at=None,
+                        architectures=["linux/arm64"],
+                        history_count=2,
+                        children_truncated=False,
+                        history_truncated=False,
+                        cached_at=recent_cached,
+                        last_seen_at=now - timedelta(hours=2),
+                    ),
+                    CachedManifestSummary(
+                        repository_name="sheldylew/worker",
+                        manifest_digest="sha256:three",
+                        media_type="application/vnd.oci.image.index.v1+json",
+                        config_digest="sha256:cfg-three",
+                        total_size=12,
+                        created_at=None,
+                        architectures=["linux/amd64", "linux/arm64"],
+                        history_count=3,
+                        children_truncated=False,
+                        history_truncated=False,
+                        cached_at=now - timedelta(hours=6),
+                        last_seen_at=newest_seen,
+                    ),
+                ]
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/admin/maintenance")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["cache"]["summaries_total"] == 3
+    assert body["cache"]["repositories_total"] == 2
+    assert body["cache"]["seen_last_24h"] == 2
+    assert body["cache"]["oldest_cached_at"] == older_cached.isoformat()
+    assert body["cache"]["newest_cached_at"] == (now - timedelta(hours=6)).isoformat()
+    assert body["cache"]["newest_last_seen_at"] == newest_seen.isoformat()
 
 
 def test_admin_dashboard_skips_stale_registry_entries(settings) -> None:

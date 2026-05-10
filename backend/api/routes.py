@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import hmac
 from pathlib import Path
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import monotonic
 from typing import Optional
 from urllib.parse import urlsplit
@@ -296,6 +296,37 @@ def _format_cached_created_at(value: Optional[datetime]) -> Optional[str]:
         return None
     normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
     return normalized.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _serialize_optional_datetime(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(timezone.utc).isoformat()
+
+
+def _cached_manifest_summary_stats(db: Session) -> dict[str, Optional[object]]:
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    totals = db.execute(
+        select(
+            func.count(CachedManifestSummary.id),
+            func.count(func.distinct(CachedManifestSummary.repository_name)),
+            func.min(CachedManifestSummary.cached_at),
+            func.max(CachedManifestSummary.cached_at),
+            func.max(CachedManifestSummary.last_seen_at),
+        )
+    ).one()
+    seen_last_24h = db.scalar(
+        select(func.count(CachedManifestSummary.id)).where(CachedManifestSummary.last_seen_at >= recent_cutoff)
+    )
+    return {
+        "summaries_total": int(totals[0] or 0),
+        "repositories_total": int(totals[1] or 0),
+        "seen_last_24h": int(seen_last_24h or 0),
+        "oldest_cached_at": _serialize_optional_datetime(totals[2]),
+        "newest_cached_at": _serialize_optional_datetime(totals[3]),
+        "newest_last_seen_at": _serialize_optional_datetime(totals[4]),
+    }
 
 
 def _build_tag_summary_from_cache(row: CachedManifestSummary, *, tag: str) -> TagSummary:
@@ -1983,10 +2014,12 @@ def maintenance_summary(
     maintenance: MaintenanceService = Depends(get_maintenance_service),
 ):
     summary = maintenance.maintenance_summary(db, page=page)
+    cache_stats = _cached_manifest_summary_stats(db)
     return {
         "registry_status": summary["registry_status"],
         "registry_gate_enabled": summary["registry_status"] == "maintenance",
         "storage_usage_bytes": summary["storage_usage_bytes"],
+        "cache": cache_stats,
         "log_retention_days": summary["log_retention_days"],
         "active_job": _serialize_gc_job(summary["active_job"]) if summary["active_job"] else None,
         "last_job": _serialize_gc_job(summary["last_job"]) if summary["last_job"] else None,
