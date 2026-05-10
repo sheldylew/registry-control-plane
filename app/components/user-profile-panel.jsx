@@ -163,7 +163,8 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
                     <Switch
                       checked={user.is_active}
                       onChange={setUserActive}
-                      disabled={statusPending || (user.id === currentUserId && user.is_active)}
+                      disabled={user.id === currentUserId && user.is_active}
+                      loading={statusPending}
                       label={user.is_active ? "Enabled" : "Disabled"}
                       description={user.id === currentUserId ? "Current signed-in operator" : "Toggle access"}
                       align="start"

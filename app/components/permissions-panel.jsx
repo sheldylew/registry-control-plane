@@ -78,6 +78,8 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [savePending, setSavePending] = useState(false);
+  const [deletePendingId, setDeletePendingId] = useState(null);
   const hasValidRepositoryPattern = hasNonEmptyValue(repositoryPattern);
   const canSavePermission =
     Boolean(subjectId) &&
@@ -117,6 +119,9 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
   }
 
   function closeDialog() {
+    if (savePending) {
+      return;
+    }
     setDialogOpen(false);
     setError("");
     resetForm(subjectType);
@@ -155,6 +160,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
       return;
     }
     setError("");
+    setSavePending(true);
 
     const response = await fetch("/api/admin/permissions", {
       method: "POST",
@@ -175,15 +181,18 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       setError(readApiErrorDetail(payload, "Could not save permission."));
+      setSavePending(false);
       return;
     }
 
+    setSavePending(false);
     closeDialog();
     router.refresh();
   }
 
   async function removePermission(permissionId) {
     setError("");
+    setDeletePendingId(permissionId);
     const response = await fetch(`/api/admin/permissions/${permissionId}/delete`, {
       method: "POST",
       headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
@@ -191,11 +200,13 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       setError(payload.detail || "Could not delete permission.");
+      setDeletePendingId(null);
       return;
     }
     if (editingId === permissionId) {
       closeDialog();
     }
+    setDeletePendingId(null);
     router.refresh();
   }
 
@@ -258,8 +269,9 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
                           <ActionMenu
                             items={[
                               {
-                                label: "Delete permission",
+                                label: deletePendingId === permission.id ? "Deleting..." : "Delete permission",
                                 onSelect: () => removePermission(permission.id),
+                                loading: deletePendingId === permission.id,
                               },
                             ]}
                             label={`Actions for ${subjectLabel(permission)}`}
@@ -304,6 +316,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
         onSubmit={savePermission}
         submitLabel={editingId ? "Save permission" : "Add permission"}
         submitPendingLabel={editingId ? "Saving..." : "Adding..."}
+        pending={savePending}
         disabled={!canSavePermission}
         error={error}
         maxWidth="max-w-2xl"
@@ -313,6 +326,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
             label="Subject type"
             value={selectedSubjectType}
             options={subjectTypeOptions}
+            disabled={savePending}
             onChange={(option) => {
               resetForm(option.value);
               setDialogOpen(true);
@@ -322,6 +336,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
             label="Subject"
             value={selectedSubject}
             options={subjectListboxOptions}
+            disabled={savePending}
             onChange={(option) => setSubjectId(option.value)}
           />
           <label className="space-y-2 md:col-span-2">

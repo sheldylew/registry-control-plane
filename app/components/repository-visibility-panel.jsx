@@ -74,7 +74,7 @@ export default function RepositoryVisibilityPanel({ repositoryName, initialVisib
         <Switch
           checked={isPublic}
           onChange={updateVisibility}
-          disabled={saving}
+          loading={saving}
           label={isPublic ? "Public read enabled" : "Private repository"}
           description={isPublic ? "Anonymous pull tokens are allowed." : "All pulls require authenticated access."}
           align="start"

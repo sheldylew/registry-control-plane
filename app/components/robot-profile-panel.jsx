@@ -33,6 +33,7 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity, 
   const [error, setError] = useState("");
   const [statusPending, setStatusPending] = useState(false);
   const [statusError, setStatusError] = useState("");
+  const [pendingTokenId, setPendingTokenId] = useState(null);
   const canCreateToken = hasNonEmptyValue(tokenName);
   const activeTokenCount = robot.tokens.filter((token) => !token.revoked_at).length;
 
@@ -82,6 +83,7 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity, 
 
   async function revokeRobotToken(tokenId) {
     setStatusError("");
+    setPendingTokenId(tokenId);
     const response = await fetch(`/api/admin/robots/${robot.id}/tokens/${tokenId}/revoke`, {
       method: "POST",
       headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
@@ -89,8 +91,10 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity, 
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       setStatusError(payload.detail || "Could not revoke robot token.");
+      setPendingTokenId(null);
       return;
     }
+    setPendingTokenId(null);
     router.refresh();
   }
 
@@ -150,7 +154,7 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity, 
                     <Switch
                       checked={robot.is_active}
                       onChange={setRobotActive}
-                      disabled={statusPending}
+                      loading={statusPending}
                       label={robot.is_active ? "Enabled" : "Disabled"}
                       description="Toggle robot access"
                       align="start"
@@ -190,7 +194,13 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity, 
                   {token.revoked_at ? (
                     <Badge tone="amber" dot>Revoked</Badge>
                   ) : (
-                    <Button type="button" onClick={() => revokeRobotToken(token.id)} variant="warning" size="xs">
+                    <Button
+                      type="button"
+                      onClick={() => revokeRobotToken(token.id)}
+                      variant="warning"
+                      size="xs"
+                      loading={pendingTokenId === token.id}
+                    >
                       Revoke
                     </Button>
                   )}

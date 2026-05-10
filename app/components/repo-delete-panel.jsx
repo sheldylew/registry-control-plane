@@ -148,6 +148,7 @@ export default function RepoDeletePanel({
             <Button
               type="submit"
               disabled={pending || !canSubmit}
+              loading={pending}
               variant="danger"
             >
               {pending ? successLabel : buttonLabel}

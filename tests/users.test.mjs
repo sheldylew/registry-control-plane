@@ -14,6 +14,7 @@ test("users panel omits disable control for the signed-in admin row", async () =
 
   assert.match(panel, /user\.id === currentUserId && !nextActive/);
   assert.match(panel, /user\.id === currentUserId && user\.is_active/);
+  assert.match(panel, /loading=\{pendingStatusUserId === user\.id\}/);
   assert.match(panel, /<Pagination/);
   assert.match(panel, /function buildPageHref\(page\)/);
 });

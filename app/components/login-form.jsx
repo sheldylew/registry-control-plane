@@ -99,6 +99,7 @@ export default function LoginForm() {
       <Button
         type="submit"
         disabled={pending || !canSubmit}
+        loading={pending}
         className="mt-6 w-full"
         size="lg"
       >

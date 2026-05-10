@@ -142,6 +142,7 @@ export default function SessionsPanel({ initialSessions, summary, pagination, ti
                         variant={session.is_current ? "warning" : "danger"}
                         size="sm"
                         disabled={!canRevokeSession || pendingAction === revokeSessionAction}
+                        loading={pendingAction === revokeSessionAction}
                         onClick={() =>
                           postAction(`/api/admin/sessions/${session.id}/revoke`, revokeSessionAction, {
                             currentSession: session.is_current,
@@ -155,6 +156,7 @@ export default function SessionsPanel({ initialSessions, summary, pagination, ti
                         variant="secondary"
                         size="sm"
                         disabled={pendingAction === revokeUserAction}
+                        loading={pendingAction === revokeUserAction}
                         onClick={() =>
                           postAction(`/api/admin/users/${session.user.id}/sessions/revoke`, revokeUserAction, {
                             currentSession: revokeUserIncludesCurrentSession,

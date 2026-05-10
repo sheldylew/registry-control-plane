@@ -279,7 +279,8 @@ export default function UsersPanel({
                     <Switch
                       checked={user.is_active}
                       onChange={(nextActive) => setUserActive(user, nextActive)}
-                      disabled={pendingStatusUserId === user.id || (user.id === currentUserId && user.is_active)}
+                      disabled={user.id === currentUserId && user.is_active}
+                      loading={pendingStatusUserId === user.id}
                       srLabel={`Set ${user.username} ${user.is_active ? "inactive" : "active"}`}
                       label={user.is_active ? "Enabled" : "Disabled"}
                       description={user.id === currentUserId ? "Current operator" : "Access toggle"}

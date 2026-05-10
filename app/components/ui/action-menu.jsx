@@ -7,10 +7,12 @@ import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import Button from "@/app/components/ui/button";
 
 export default function ActionMenu({ items, label = "Actions" }) {
+  const loading = items.some((item) => item.loading);
+
   return (
     <Menu as="div" className="relative inline-block text-left">
-      <MenuButton as={Button} variant="secondary" size="iconSm" aria-label={label}>
-        <EllipsisHorizontalIcon className="h-4 w-4" />
+      <MenuButton as={Button} variant="secondary" size="iconSm" aria-label={label} loading={loading}>
+        {loading ? null : <EllipsisHorizontalIcon className="h-4 w-4" />}
       </MenuButton>
       <Transition
         as={Fragment}
@@ -23,7 +25,7 @@ export default function ActionMenu({ items, label = "Actions" }) {
       >
         <MenuItems anchor="bottom end" className="z-20 mt-2 w-52 rounded-lg border border-white/10 bg-slate-950 p-1 shadow-2xl shadow-slate-950/40 focus:outline-none">
           {items.map((item) => (
-            <MenuItem key={item.label} disabled={item.disabled}>
+            <MenuItem key={item.label} disabled={item.disabled || item.loading}>
               {({ focus, disabled }) => (
                 item.href ? (
                   <a
@@ -38,10 +40,16 @@ export default function ActionMenu({ items, label = "Actions" }) {
                   <button
                     type="button"
                     onClick={item.onSelect}
-                    className={`flex w-full items-center rounded-md px-3 py-2 text-left text-sm ${
+                    className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm ${
                       focus ? "bg-white/10 text-white" : "text-slate-200"
                     } ${disabled ? "opacity-50" : ""}`}
                   >
+                    {item.loading ? (
+                      <span
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+                      />
+                    ) : null}
                     {item.label}
                   </button>
                 )

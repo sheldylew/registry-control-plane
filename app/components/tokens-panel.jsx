@@ -26,6 +26,8 @@ export default function TokensPanel({ initialTokens, pagination }) {
   const [latestToken, setLatestToken] = useState("");
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [pendingRevokeTokenId, setPendingRevokeTokenId] = useState(null);
   const canCreateToken = hasNonEmptyValue(name);
 
   function openDialog() {
@@ -34,6 +36,9 @@ export default function TokensPanel({ initialTokens, pagination }) {
   }
 
   function closeDialog() {
+    if (pending) {
+      return;
+    }
     setOpen(false);
     setError("");
   }
@@ -47,6 +52,7 @@ export default function TokensPanel({ initialTokens, pagination }) {
     }
 
     setError("");
+    setPending(true);
     const response = await fetch("/api/admin/tokens", {
       method: "POST",
       headers: {
@@ -60,17 +66,28 @@ export default function TokensPanel({ initialTokens, pagination }) {
       setLatestToken(payload.raw_token);
       setName("");
       setOpen(false);
+      setPending(false);
       router.refresh();
       return;
     }
     setError(readApiErrorDetail(payload, "Could not create token."));
+    setPending(false);
   }
 
   async function revokeToken(tokenId) {
-    await fetch(`/api/admin/tokens/${tokenId}/revoke`, {
+    setError("");
+    setPendingRevokeTokenId(tokenId);
+    const response = await fetch(`/api/admin/tokens/${tokenId}/revoke`, {
       method: "POST",
       headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
     });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      setError(readApiErrorDetail(payload, "Could not revoke token."));
+      setPendingRevokeTokenId(null);
+      return;
+    }
+    setPendingRevokeTokenId(null);
     router.refresh();
   }
 
@@ -128,6 +145,7 @@ export default function TokensPanel({ initialTokens, pagination }) {
                     onClick={() => revokeToken(token.id)}
                     variant="warning"
                     size="xs"
+                    loading={pendingRevokeTokenId === token.id}
                   >
                     Revoke
                   </Button>
@@ -167,6 +185,7 @@ export default function TokensPanel({ initialTokens, pagination }) {
         onSubmit={createToken}
         submitLabel="Create token"
         submitPendingLabel="Creating..."
+        pending={pending}
         disabled={!canCreateToken}
         error={error}
       >

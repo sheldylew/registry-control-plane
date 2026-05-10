@@ -48,6 +48,7 @@ export default function LogoutButton() {
         onClick={onLogout}
         variant="secondary"
         disabled={pending}
+        loading={pending}
       >
         {pending ? "Logging out..." : "Log out"}
       </Button>

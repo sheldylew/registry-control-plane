@@ -1,5 +1,6 @@
 import "./globals.css";
 
+import ApiBusyOverlay from "@/app/components/ui/api-busy-overlay";
 import { ToastProvider } from "@/app/components/ui/toast-provider";
 
 export const metadata = {
@@ -12,7 +13,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          {children}
+          <ApiBusyOverlay />
+        </ToastProvider>
       </body>
     </html>
   );

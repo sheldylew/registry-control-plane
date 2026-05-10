@@ -39,6 +39,7 @@ export default function FormDialog({
           <Button
             type="submit"
             disabled={pending || disabled}
+            loading={pending}
           >
             {pending ? submitPendingLabel : submitLabel}
           </Button>

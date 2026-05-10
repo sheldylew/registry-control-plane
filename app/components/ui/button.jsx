@@ -32,12 +32,29 @@ export default function Button({
   variant = "primary",
   size = "md",
   className = "",
+  loading = false,
+  disabled = false,
+  children,
   ...props
 }) {
+  const interactiveProps = Component === "button"
+    ? { disabled: disabled || loading }
+    : {};
+
   return (
     <Component
       className={buttonClassName({ variant, size, className })}
+      aria-busy={loading || undefined}
+      {...interactiveProps}
       {...props}
-    />
+    >
+      {loading ? (
+        <span
+          aria-hidden="true"
+          className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+        />
+      ) : null}
+      {children}
+    </Component>
   );
 }

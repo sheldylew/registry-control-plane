@@ -19,6 +19,7 @@ test("login form enables submit only after username and password input", async (
 
   assert.match(form, /hasNonEmptyValue\(username\) && isValidPassword\(password, 1\)/);
   assert.match(form, /disabled=\{pending \|\| !canSubmit\}/);
+  assert.match(form, /loading=\{pending\}/);
   assert.match(form, /Username is required\./);
   assert.match(form, /Password is required\./);
 });

@@ -42,6 +42,7 @@ export default function RobotsPanel({ initialRobots }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [pendingRobotId, setPendingRobotId] = useState(null);
+  const [pendingTokenId, setPendingTokenId] = useState(null);
   const canCreateRobot = hasNonEmptyValue(name);
   const canCreateRobotToken = hasNonEmptyValue(tokenName);
 
@@ -146,6 +147,7 @@ export default function RobotsPanel({ initialRobots }) {
 
   async function revokeRobotToken(robotId, tokenId) {
     setStatusError("");
+    setPendingTokenId(tokenId);
     const response = await fetch(`/api/admin/robots/${robotId}/tokens/${tokenId}/revoke`, {
       method: "POST",
       headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
@@ -153,8 +155,10 @@ export default function RobotsPanel({ initialRobots }) {
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       setStatusError(payload.detail || "Could not revoke robot token.");
+      setPendingTokenId(null);
       return;
     }
+    setPendingTokenId(null);
     router.refresh();
   }
 
@@ -254,7 +258,7 @@ export default function RobotsPanel({ initialRobots }) {
                           <Switch
                             checked={robot.is_active}
                             onChange={(nextActive) => setRobotActive(robot, nextActive)}
-                            disabled={pendingRobotId === robot.id}
+                            loading={pendingRobotId === robot.id}
                             label={robot.is_active ? "Enabled" : "Disabled"}
                             description="Toggle robot access"
                             align="start"
@@ -289,6 +293,7 @@ export default function RobotsPanel({ initialRobots }) {
                           onClick={() => revokeRobotToken(robot.id, token.id)}
                           variant="warning"
                           size="xs"
+                          loading={pendingTokenId === token.id}
                         >
                           Revoke
                         </Button>

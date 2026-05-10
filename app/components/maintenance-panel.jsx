@@ -137,6 +137,7 @@ export default function MaintenancePanel({ logRetentionDays }) {
         <Button
           type="submit"
           disabled={pending}
+          loading={pending}
           variant="soft"
           className="mt-5"
         >
@@ -157,6 +158,7 @@ export default function MaintenancePanel({ logRetentionDays }) {
           type="button"
           onClick={onPruneLogs}
           disabled={prunePending}
+          loading={prunePending}
           variant="secondary"
           className="mt-5"
         >
