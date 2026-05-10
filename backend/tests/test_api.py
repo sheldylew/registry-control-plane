@@ -1523,6 +1523,8 @@ class FakeRegistryClient:
         self.repo_pages_truncated = repo_pages_truncated
         self.deleted_manifests = []
         self.list_tags_calls = []
+        self.list_tag_summaries_for_tags_calls = []
+        self.get_manifest_details_calls = []
         self.list_repositories_bounded_calls = 0
         self.list_tag_summaries_bounded_calls = 0
 
@@ -1542,6 +1544,38 @@ class FakeRegistryClient:
         summaries, _meta = self.list_tag_summaries_bounded(repository_name)
         return summaries
 
+    def list_tag_summaries_for_tags(
+        self,
+        repository_name: str,
+        tags: list[str],
+        *,
+        max_manifest_children=None,
+        max_history_entries=None,
+    ) -> list[TagSummary]:
+        self.list_tag_summaries_for_tags_calls.append((repository_name, list(tags)))
+        summaries = []
+        for tag in tags:
+            details = self.get_manifest_details(
+                repository_name,
+                tag,
+                max_manifest_children=max_manifest_children,
+                max_history_entries=max_history_entries,
+            )
+            summaries.append(
+                TagSummary(
+                    tag=tag,
+                    digest=details.digest,
+                    media_type=details.media_type,
+                    total_size=details.total_size,
+                    architectures=details.architectures,
+                    created_at=details.created_at,
+                    history_count=details.history_count,
+                    children_truncated=details.children_truncated,
+                    history_truncated=details.history_truncated,
+                )
+            )
+        return summaries
+
     def list_tag_summaries_bounded(
         self,
         repository_name: str,
@@ -1555,9 +1589,15 @@ class FakeRegistryClient:
             raise RegistryNotFoundError(repository_name)
         tags = self.tags.get(repository_name, [])
         limited = tags[:max_tags] if max_tags is not None else tags
-        return limited, {
+        summaries = self.list_tag_summaries_for_tags(
+            repository_name,
+            limited,
+            max_manifest_children=max_manifest_children,
+            max_history_entries=max_history_entries,
+        )
+        return summaries, {
             "truncated": max_tags is not None and len(tags) > max_tags,
-            "returned": len(limited),
+            "returned": len(summaries),
             "available": len(tags),
         }
 
@@ -1569,6 +1609,7 @@ class FakeRegistryClient:
         max_manifest_children=None,
         max_history_entries=None,
     ) -> ManifestDetails:
+        self.get_manifest_details_calls.append((repository_name, tag))
         if repository_name in self.missing_repos:
             raise RegistryNotFoundError(repository_name)
         payload = self.manifests[(repository_name, tag)]
@@ -1905,11 +1946,26 @@ def test_repo_tag_manifest_returns_details(settings) -> None:
     assert response.json()["public_registry_origin"] == settings.public_registry_origin
 
 
-def test_repo_tags_return_lightweight_rows(settings) -> None:
+def test_repo_tags_return_paginated_summary_rows(settings) -> None:
     app = create_app(settings)
     fake_registry = FakeRegistryClient(
         tags={
             "sheldylew/app": ["release"]
+        },
+        manifests={
+            ("sheldylew/app", "release"): {
+                "name": "sheldylew/app",
+                "tag": "release",
+                "digest": "sha256:abc",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 1048576,
+                "architectures": ["linux/amd64", "linux/arm64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 5,
+            }
         }
     )
     app.state.registry_client_factory = lambda: fake_registry
@@ -1946,7 +2002,19 @@ def test_repo_tags_return_lightweight_rows(settings) -> None:
     assert response.json()["visibility"] == "private"
     assert response.json()["public_registry_origin"] == settings.public_registry_origin
     assert response.json()["can_manage_visibility"] is False
-    assert response.json()["tags"] == [{"tag": "release"}]
+    assert response.json()["tags"] == [
+        {
+            "tag": "release",
+            "digest": "sha256:abc",
+            "media_type": "application/vnd.oci.image.manifest.v1+json",
+            "total_size": 1048576,
+            "architectures": ["linux/amd64", "linux/arm64"],
+            "created_at": "2026-05-04T10:20:30Z",
+            "history_count": 5,
+            "children_truncated": False,
+            "history_truncated": False,
+        }
+    ]
     assert response.json()["pagination"] == {
         "page": 1,
         "page_size": settings.repository_tags_max_items,
@@ -1956,6 +2024,8 @@ def test_repo_tags_return_lightweight_rows(settings) -> None:
     }
     assert fake_registry.list_tags_calls == ["sheldylew/app"]
     assert fake_registry.list_tag_summaries_bounded_calls == 0
+    assert fake_registry.list_tag_summaries_for_tags_calls == [("sheldylew/app", ["release"])]
+    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "release")]
 
 
 def test_admin_repo_tags_include_repository_visibility(settings) -> None:
@@ -1963,6 +2033,21 @@ def test_admin_repo_tags_include_repository_visibility(settings) -> None:
     fake_registry = FakeRegistryClient(
         tags={
             "public/app": ["latest"]
+        },
+        manifests={
+            ("public/app", "latest"): {
+                "name": "public/app",
+                "tag": "latest",
+                "digest": "sha256:manifest",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
         }
     )
     app.state.registry_client_factory = lambda: fake_registry
@@ -2008,6 +2093,34 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
     fake_registry = FakeRegistryClient(
         tags={
             "sheldylew/app": ["one", "two"]
+        },
+        manifests={
+            ("sheldylew/app", "one"): {
+                "name": "sheldylew/app",
+                "tag": "one",
+                "digest": "sha256:one",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-one",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 11,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            },
+            ("sheldylew/app", "two"): {
+                "name": "sheldylew/app",
+                "tag": "two",
+                "digest": "sha256:two",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-two",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 22,
+                "architectures": ["linux/arm64"],
+                "created_at": "2026-05-05T10:20:30Z",
+                "history_count": 2,
+            },
         }
     )
     app.state.registry_client_factory = lambda: fake_registry
@@ -2041,7 +2154,8 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
 
     assert response.status_code == 200
     assert len(response.json()["tags"]) == 1
-    assert response.json()["tags"] == [{"tag": "two"}]
+    assert response.json()["tags"][0]["tag"] == "two"
+    assert response.json()["tags"][0]["digest"] == "sha256:two"
     assert response.json()["truncation"] == {"truncated": True, "returned": 1, "available": 2}
     assert response.json()["pagination"] == {
         "page": 2,
@@ -2050,6 +2164,8 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
         "has_prev": True,
         "has_next": False,
     }
+    assert fake_registry.list_tag_summaries_for_tags_calls == [("sheldylew/app", ["two"])]
+    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "two")]
 
 
 def test_repo_tag_history_returns_variants(settings) -> None:

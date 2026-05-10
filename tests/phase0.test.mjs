@@ -70,6 +70,10 @@ test("repository tag page shows the paginated total count", async () => {
   const repoPage = await readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8");
 
   assert.match(repoPage, /payload\.pagination\.total/);
+  assert.match(repoPage, /formatRelativeTime/);
+  assert.match(repoPage, /formatDigest/);
+  assert.match(repoPage, /tag\.architectures/);
+  assert.match(repoPage, /ClockIcon/);
   assert.doesNotMatch(repoPage, /payload\.tags\.length} total/);
 });
 

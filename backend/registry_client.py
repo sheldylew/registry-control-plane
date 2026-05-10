@@ -333,18 +333,16 @@ class RegistryClient:
         summaries, _meta = self.list_tag_summaries_bounded(repository_name)
         return summaries
 
-    def list_tag_summaries_bounded(
+    def list_tag_summaries_for_tags(
         self,
         repository_name: str,
+        tags: list[str],
         *,
-        max_tags: Optional[int] = None,
         max_manifest_children: Optional[int] = None,
         max_history_entries: Optional[int] = None,
-    ) -> tuple[list[TagSummary], dict]:
-        tags = self.list_tags(repository_name)
-        limited_tags = tags[:max_tags] if max_tags is not None else tags
+    ) -> list[TagSummary]:
         summaries: list[TagSummary] = []
-        for tag in limited_tags:
+        for tag in tags:
             try:
                 details = self.get_manifest_details(
                     repository_name,
@@ -367,6 +365,24 @@ class RegistryClient:
                     history_truncated=details.history_truncated,
                 )
             )
+        return summaries
+
+    def list_tag_summaries_bounded(
+        self,
+        repository_name: str,
+        *,
+        max_tags: Optional[int] = None,
+        max_manifest_children: Optional[int] = None,
+        max_history_entries: Optional[int] = None,
+    ) -> tuple[list[TagSummary], dict]:
+        tags = self.list_tags(repository_name)
+        limited_tags = tags[:max_tags] if max_tags is not None else tags
+        summaries = self.list_tag_summaries_for_tags(
+            repository_name,
+            limited_tags,
+            max_manifest_children=max_manifest_children,
+            max_history_entries=max_history_entries,
+        )
         return summaries, {
             "truncated": max_tags is not None and len(tags) > max_tags,
             "returned": len(summaries),

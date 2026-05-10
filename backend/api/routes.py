@@ -272,10 +272,6 @@ def _serialize_tag_summary(summary: TagSummary) -> dict:
     }
 
 
-def _serialize_tag_list_item(tag: str) -> dict:
-    return {"tag": tag}
-
-
 def _serialize_history_variant(variant: HistoryVariant) -> dict:
     return {
         "platform": variant.platform,
@@ -1936,7 +1932,13 @@ def list_repository_tags(
         total_tags = len(all_tags)
         page_start = (safe_page - 1) * page_size
         page_end = page_start + page_size
-        tags = all_tags[page_start:page_end]
+        page_tags = all_tags[page_start:page_end]
+        tags = registry.list_tag_summaries_for_tags(
+            repo_name,
+            page_tags,
+            max_manifest_children=settings.manifest_children_max_items,
+            max_history_entries=settings.history_entries_max_items,
+        )
         truncation = {
             "truncated": total_tags > page_size,
             "returned": len(tags),
@@ -1954,7 +1956,7 @@ def list_repository_tags(
         "can_manage_visibility": user.is_admin,
         "can_delete_tag": can_delete_tag,
         "can_prune_repository": can_prune_repository,
-        "tags": [_serialize_tag_list_item(tag) for tag in tags],
+        "tags": [_serialize_tag_summary(tag) for tag in tags],
         "truncation": truncation,
         "pagination": {
             "page": safe_page,
