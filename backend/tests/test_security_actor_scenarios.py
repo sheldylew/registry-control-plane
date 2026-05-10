@@ -12,7 +12,7 @@ from sqlalchemy import select
 from backend.auth.passwords import hash_password
 from backend.main import create_app
 from backend.models import Repository, RepositoryPermission, User
-from backend.registry_client import ManifestDetails
+from backend.registry_client import ManifestDetails, ResolvedManifestDescriptor
 
 
 def _basic_auth(username: str, secret: str) -> dict[str, str]:
@@ -75,7 +75,20 @@ class FakeRegistry:
             return ["latest"]
         return []
 
-    def get_manifest_details(self, repo_name: str, tag: str) -> ManifestDetails:
+    def resolve_manifest_descriptor(self, repo_name: str, reference: str) -> ResolvedManifestDescriptor:
+        return ResolvedManifestDescriptor(
+            digest="sha256:abc",
+            media_type="application/vnd.oci.image.manifest.v1+json",
+        )
+
+    def get_manifest_details(
+        self,
+        repo_name: str,
+        tag: str,
+        *,
+        max_manifest_children=None,
+        max_history_entries=None,
+    ) -> ManifestDetails:
         return ManifestDetails(
             name=repo_name,
             tag=tag,
@@ -137,6 +150,21 @@ def test_unauthenticated_user_cannot_access_admin_or_repo_api(app_with_fake_regi
 
     assert admin.status_code == 401
     assert repos.status_code == 401
+
+
+def test_repo_tag_summary_access_matches_actor_permissions(app_with_fake_registry) -> None:
+    with TestClient(app_with_fake_registry) as client:
+        _seed_actor_data(app_with_fake_registry)
+        anonymous = client.get("/api/repos/team/app/tags")
+        login = _login(client, "low-user", "low-user-pass")
+        assert login.status_code == 200
+        allowed = client.get("/api/repos/team/app/tags")
+        denied = client.get("/api/repos/secret/app/tags")
+
+    assert anonymous.status_code == 401
+    assert allowed.status_code == 200
+    assert allowed.json()["tags"][0]["digest"] == "sha256:abc"
+    assert denied.status_code == 403
 
 
 def test_low_privilege_user_cannot_delete_tag(app_with_fake_registry) -> None:

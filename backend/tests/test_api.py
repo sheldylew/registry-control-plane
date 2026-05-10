@@ -11,9 +11,9 @@ from backend.auth.passwords import hash_password
 from backend.config import Settings
 from backend.main import create_app
 from backend.metrics import snapshot as metrics_snapshot
-from backend.models import AppSetting, AuditEvent, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
+from backend.models import AppSetting, AuditEvent, CachedManifestSummary, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
 from backend.rate_limit import FixedWindowRateLimiter
-from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, TagSummary
+from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
 from backend.setup import PUBLIC_REGISTRY_ORIGIN_KEY, ensure_setup_token
 
 
@@ -1511,6 +1511,8 @@ class FakeRegistryClient:
         repositories=None,
         tags=None,
         manifests=None,
+        descriptors=None,
+        descriptor_sequences=None,
         histories=None,
         missing_repos=None,
         repo_pages_truncated=False,
@@ -1518,11 +1520,16 @@ class FakeRegistryClient:
         self.repositories = repositories or []
         self.tags = tags or {}
         self.manifests = manifests or {}
+        self.descriptors = descriptors or {}
+        self.descriptor_sequences = {
+            key: list(values) for key, values in (descriptor_sequences or {}).items()
+        }
         self.histories = histories or {}
         self.missing_repos = missing_repos or set()
         self.repo_pages_truncated = repo_pages_truncated
         self.deleted_manifests = []
         self.list_tags_calls = []
+        self.resolve_manifest_descriptor_calls = []
         self.list_tag_summaries_for_tags_calls = []
         self.get_manifest_details_calls = []
         self.list_repositories_bounded_calls = 0
@@ -1543,6 +1550,30 @@ class FakeRegistryClient:
     def list_tag_summaries(self, repository_name: str) -> list[TagSummary]:
         summaries, _meta = self.list_tag_summaries_bounded(repository_name)
         return summaries
+
+    def resolve_manifest_descriptor(self, repository_name: str, reference: str) -> ResolvedManifestDescriptor:
+        self.resolve_manifest_descriptor_calls.append((repository_name, reference))
+        if repository_name in self.missing_repos:
+            raise RegistryNotFoundError(repository_name)
+        key = (repository_name, reference)
+        if key in self.descriptor_sequences:
+            sequence = self.descriptor_sequences[key]
+            if not sequence:
+                raise RegistryNotFoundError(reference)
+            digest, media_type = sequence[0]
+            if len(sequence) > 1:
+                self.descriptor_sequences[key] = sequence[1:]
+            return ResolvedManifestDescriptor(digest=digest, media_type=media_type)
+        if key in self.descriptors:
+            digest, media_type = self.descriptors[key]
+            return ResolvedManifestDescriptor(digest=digest, media_type=media_type)
+        payload = self.manifests.get(key)
+        if payload is None:
+            raise RegistryNotFoundError(reference)
+        return ResolvedManifestDescriptor(
+            digest=payload.get("digest"),
+            media_type=payload.get("media_type"),
+        )
 
     def list_tag_summaries_for_tags(
         self,
@@ -1612,7 +1643,14 @@ class FakeRegistryClient:
         self.get_manifest_details_calls.append((repository_name, tag))
         if repository_name in self.missing_repos:
             raise RegistryNotFoundError(repository_name)
-        payload = self.manifests[(repository_name, tag)]
+        payload = self.manifests.get((repository_name, tag))
+        if payload is None:
+            for (candidate_repo, _candidate_tag), candidate_payload in self.manifests.items():
+                if candidate_repo == repository_name and candidate_payload.get("digest") == tag:
+                    payload = candidate_payload
+                    break
+        if payload is None:
+            raise RegistryNotFoundError(tag)
         return ManifestDetails(**payload)
 
     def get_tag_history(self, repository_name: str, tag: str) -> list[HistoryVariant]:
@@ -2023,9 +2061,13 @@ def test_repo_tags_return_paginated_summary_rows(settings) -> None:
         "has_next": False,
     }
     assert fake_registry.list_tags_calls == ["sheldylew/app"]
-    assert fake_registry.list_tag_summaries_bounded_calls == 0
-    assert fake_registry.list_tag_summaries_for_tags_calls == [("sheldylew/app", ["release"])]
-    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "release")]
+    assert fake_registry.resolve_manifest_descriptor_calls == [("sheldylew/app", "release")]
+    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:abc")]
+    with app.state.session_factory() as session:
+        cached = session.scalars(select(CachedManifestSummary)).all()
+    assert len(cached) == 1
+    assert cached[0].repository_name == "sheldylew/app"
+    assert cached[0].manifest_digest == "sha256:abc"
 
 
 def test_admin_repo_tags_include_repository_visibility(settings) -> None:
@@ -2164,8 +2206,289 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
         "has_prev": True,
         "has_next": False,
     }
-    assert fake_registry.list_tag_summaries_for_tags_calls == [("sheldylew/app", ["two"])]
-    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "two")]
+    assert fake_registry.resolve_manifest_descriptor_calls == [("sheldylew/app", "two")]
+    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:two")]
+
+
+def test_repo_tags_cache_hit_skips_repeated_manifest_detail_fetch(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        tags={"sheldylew/app": ["release"]},
+        manifests={
+            ("sheldylew/app", "release"): {
+                "name": "sheldylew/app",
+                "tag": "release",
+                "digest": "sha256:cached",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-cached",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 77,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 3,
+            }
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="cache-reader",
+                email="cache-reader@example.com",
+                password_hash=hash_password("cache-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "cache-reader", "cache-reader-pass")
+        assert login.status_code == 200
+        first = client.get("/api/repos/sheldylew/app/tags")
+        second = client.get("/api/repos/sheldylew/app/tags")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["tags"] == second.json()["tags"]
+    assert fake_registry.resolve_manifest_descriptor_calls == [
+        ("sheldylew/app", "release"),
+        ("sheldylew/app", "release"),
+    ]
+    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:cached")]
+
+
+def test_repo_tags_retagged_digest_populates_new_cache_row(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        tags={"sheldylew/app": ["release"]},
+        manifests={
+            ("sheldylew/app", "release-v1"): {
+                "name": "sheldylew/app",
+                "tag": "release-v1",
+                "digest": "sha256:one",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-one",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 11,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            },
+            ("sheldylew/app", "release-v2"): {
+                "name": "sheldylew/app",
+                "tag": "release-v2",
+                "digest": "sha256:two",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-two",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 22,
+                "architectures": ["linux/arm64"],
+                "created_at": "2026-05-05T10:20:30Z",
+                "history_count": 2,
+            },
+        },
+        descriptor_sequences={
+            ("sheldylew/app", "release"): [
+                ("sha256:one", "application/vnd.oci.image.manifest.v1+json"),
+                ("sha256:two", "application/vnd.oci.image.manifest.v1+json"),
+            ]
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="retag-reader",
+                email="retag-reader@example.com",
+                password_hash=hash_password("retag-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "retag-reader", "retag-reader-pass")
+        assert login.status_code == 200
+        first = client.get("/api/repos/sheldylew/app/tags")
+        second = client.get("/api/repos/sheldylew/app/tags")
+        with app.state.session_factory() as session:
+            cached_rows = session.scalars(
+                select(CachedManifestSummary).order_by(CachedManifestSummary.manifest_digest.asc())
+            ).all()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["tags"][0]["digest"] == "sha256:one"
+    assert second.json()["tags"][0]["digest"] == "sha256:two"
+    assert [row.manifest_digest for row in cached_rows] == ["sha256:one", "sha256:two"]
+    assert fake_registry.get_manifest_details_calls == [
+        ("sheldylew/app", "sha256:one"),
+        ("sheldylew/app", "sha256:two"),
+    ]
+
+
+def test_repo_tags_shared_digest_uses_single_cold_fetch(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        tags={"sheldylew/app": ["edge", "release"]},
+        descriptors={
+            ("sheldylew/app", "edge"): ("sha256:shared", "application/vnd.oci.image.manifest.v1+json"),
+            ("sheldylew/app", "release"): ("sha256:shared", "application/vnd.oci.image.manifest.v1+json"),
+        },
+        manifests={
+            ("sheldylew/app", "release"): {
+                "name": "sheldylew/app",
+                "tag": "release",
+                "digest": "sha256:shared",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-shared",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 44,
+                "architectures": ["linux/amd64", "linux/arm64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 5,
+            }
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="shared-reader",
+                email="shared-reader@example.com",
+                password_hash=hash_password("shared-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "shared-reader", "shared-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags")
+
+    assert response.status_code == 200
+    assert [tag["tag"] for tag in response.json()["tags"]] == ["edge", "release"]
+    assert fake_registry.resolve_manifest_descriptor_calls == [
+        ("sheldylew/app", "edge"),
+        ("sheldylew/app", "release"),
+    ]
+    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:shared")]
+
+
+def test_repo_tags_skip_stale_tags_when_manifest_resolution_fails(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        tags={"sheldylew/app": ["gone", "latest"]},
+        descriptors={
+            ("sheldylew/app", "latest"): ("sha256:live", "application/vnd.oci.image.manifest.v1+json"),
+        },
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:live",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg-live",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 55,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
+        },
+        descriptor_sequences={
+            ("sheldylew/app", "gone"): [],
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="stale-reader",
+                email="stale-reader@example.com",
+                password_hash=hash_password("stale-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            session.add(
+                RepositoryPermission(
+                    subject_type="user",
+                    subject_id=user.id,
+                    repository_pattern="sheldylew/*",
+                    can_pull=True,
+                    can_push=False,
+                    can_delete=False,
+                )
+            )
+            session.commit()
+
+        login = _login(client, "stale-reader", "stale-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags")
+
+    assert response.status_code == 200
+    assert response.json()["tags"] == [
+        {
+            "tag": "latest",
+            "digest": "sha256:live",
+            "media_type": "application/vnd.oci.image.manifest.v1+json",
+            "total_size": 55,
+            "architectures": ["linux/amd64"],
+            "created_at": "2026-05-04T10:20:30Z",
+            "history_count": 1,
+            "children_truncated": False,
+            "history_truncated": False,
+        }
+    ]
 
 
 def test_repo_tag_history_returns_variants(settings) -> None:

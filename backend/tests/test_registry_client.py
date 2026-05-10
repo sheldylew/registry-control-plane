@@ -132,6 +132,33 @@ def test_registry_client_reads_manifest_details(temp_workspace) -> None:
     assert details.history_count == 2
 
 
+def test_registry_client_resolves_manifest_descriptor_with_head_only(temp_workspace) -> None:
+    settings = _settings(temp_workspace)
+    requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.path))
+        if request.method == "HEAD" and request.url.path.endswith("/manifests/latest"):
+            return httpx.Response(
+                200,
+                headers={
+                    "Docker-Content-Digest": "sha256:resolved",
+                    "Content-Type": "application/vnd.oci.image.manifest.v1+json",
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = RegistryClient(settings=settings, transport=httpx.MockTransport(handler))
+    try:
+        descriptor = client.resolve_manifest_descriptor("sheldylew/app", "latest")
+    finally:
+        client.close()
+
+    assert descriptor.digest == "sha256:resolved"
+    assert descriptor.media_type == "application/vnd.oci.image.manifest.v1+json"
+    assert requests == [("HEAD", "/v2/sheldylew/app/manifests/latest")]
+
+
 def test_registry_client_truncates_manifest_list_children(temp_workspace) -> None:
     settings = _settings(temp_workspace)
     manifest_list_body = {

@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import shutil
 from datetime import datetime, timezone
@@ -25,8 +26,8 @@ from backend.config import Settings
 from backend.maintenance import MaintenanceService
 from backend.metrics import increment as increment_metric
 from backend.metrics import snapshot as metrics_snapshot
-from backend.models import AuditEvent, GcJob, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
-from backend.registry_client import HistoryVariant, ManifestDetails, RegistryClient, RegistryNotFoundError, TagSummary
+from backend.models import AuditEvent, CachedManifestSummary, GcJob, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
+from backend.registry_client import HistoryVariant, ManifestDetails, RegistryClient, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
 from backend.setup import (
     DEFAULT_UI_TIMEZONE,
     RESTART_COMMAND,
@@ -270,6 +271,116 @@ def _serialize_tag_summary(summary: TagSummary) -> dict:
         "children_truncated": summary.children_truncated,
         "history_truncated": summary.history_truncated,
     }
+
+
+def _parse_cached_created_at(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_cached_created_at(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_tag_summary_from_cache(row: CachedManifestSummary, *, tag: str) -> TagSummary:
+    return TagSummary(
+        tag=tag,
+        digest=row.manifest_digest,
+        media_type=row.media_type,
+        total_size=row.total_size,
+        architectures=list(row.architectures or []),
+        created_at=_format_cached_created_at(row.created_at),
+        history_count=row.history_count,
+        children_truncated=row.children_truncated,
+        history_truncated=row.history_truncated,
+    )
+
+
+def _build_tag_summary_from_manifest(details: ManifestDetails, *, tag: str, digest: Optional[str]) -> TagSummary:
+    return TagSummary(
+        tag=tag,
+        digest=digest or details.digest,
+        media_type=details.media_type,
+        total_size=details.total_size,
+        architectures=details.architectures,
+        created_at=details.created_at,
+        history_count=details.history_count,
+        children_truncated=details.children_truncated,
+        history_truncated=details.history_truncated,
+    )
+
+
+def _upsert_cached_manifest_summary(
+    db: Session,
+    *,
+    repository_name: str,
+    manifest_digest: str,
+    details: ManifestDetails,
+    seen_at: datetime,
+) -> CachedManifestSummary:
+    row = db.scalar(
+        select(CachedManifestSummary).where(
+            CachedManifestSummary.repository_name == repository_name,
+            CachedManifestSummary.manifest_digest == manifest_digest,
+        )
+    )
+    if row is None:
+        row = CachedManifestSummary(
+            repository_name=repository_name,
+            manifest_digest=manifest_digest,
+            media_type=details.media_type,
+            config_digest=details.config_digest,
+            total_size=details.total_size,
+            created_at=_parse_cached_created_at(details.created_at),
+            architectures=list(details.architectures),
+            history_count=details.history_count,
+            children_truncated=details.children_truncated,
+            history_truncated=details.history_truncated,
+            cached_at=seen_at,
+            last_seen_at=seen_at,
+        )
+        db.add(row)
+        return row
+
+    row.media_type = details.media_type
+    row.config_digest = details.config_digest
+    row.total_size = details.total_size
+    row.created_at = _parse_cached_created_at(details.created_at)
+    row.architectures = list(details.architectures)
+    row.history_count = details.history_count
+    row.children_truncated = details.children_truncated
+    row.history_truncated = details.history_truncated
+    row.cached_at = seen_at
+    row.last_seen_at = seen_at
+    return row
+
+
+def _load_manifest_details_for_summary(
+    request: Request,
+    *,
+    repository_name: str,
+    reference: str,
+    max_manifest_children: int,
+    max_history_entries: int,
+) -> ManifestDetails:
+    registry = request.app.state.registry_client_factory()
+    try:
+        return registry.get_manifest_details(
+            repository_name,
+            reference,
+            max_manifest_children=max_manifest_children,
+            max_history_entries=max_history_entries,
+        )
+    finally:
+        registry.close()
 
 
 def _serialize_history_variant(variant: HistoryVariant) -> dict:
@@ -1910,6 +2021,7 @@ def list_repositories(
 
 @router.get("/repos/{repo_name:path}/tags")
 def list_repository_tags(
+    request: Request,
     repo_name: str,
     user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
@@ -1933,21 +2045,109 @@ def list_repository_tags(
         page_start = (safe_page - 1) * page_size
         page_end = page_start + page_size
         page_tags = all_tags[page_start:page_end]
-        tags = registry.list_tag_summaries_for_tags(
-            repo_name,
-            page_tags,
-            max_manifest_children=settings.manifest_children_max_items,
-            max_history_entries=settings.history_entries_max_items,
-        )
+        resolved_descriptors: list[tuple[str, ResolvedManifestDescriptor]] = []
+        for tag in page_tags:
+            try:
+                resolved_descriptors.append((tag, registry.resolve_manifest_descriptor(repo_name, tag)))
+            except RegistryNotFoundError:
+                continue
         truncation = {
             "truncated": total_tags > page_size,
-            "returned": len(tags),
+            "returned": len(resolved_descriptors),
             "available": total_tags,
         }
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.") from exc
     finally:
         registry.close()
+
+    now = datetime.now(timezone.utc)
+    tags: list[TagSummary] = []
+    cache_mutated = False
+    cache_rows_by_digest: dict[str, CachedManifestSummary] = {}
+
+    resolved_digests = sorted(
+        {
+            descriptor.digest
+            for _tag, descriptor in resolved_descriptors
+            if descriptor.digest
+        }
+    )
+    if resolved_digests:
+        cached_rows = db.scalars(
+            select(CachedManifestSummary).where(
+                CachedManifestSummary.repository_name == repo_name,
+                CachedManifestSummary.manifest_digest.in_(resolved_digests),
+            )
+        ).all()
+        cache_rows_by_digest = {row.manifest_digest: row for row in cached_rows}
+        for row in cached_rows:
+            row.last_seen_at = now
+        cache_mutated = bool(cached_rows)
+
+    cache_miss_references: dict[str, str] = {}
+    tag_summaries_by_tag: dict[str, TagSummary] = {}
+    for tag, descriptor in resolved_descriptors:
+        digest = descriptor.digest
+        if digest and digest in cache_rows_by_digest:
+            tag_summaries_by_tag[tag] = _build_tag_summary_from_cache(cache_rows_by_digest[digest], tag=tag)
+            continue
+        if digest:
+            cache_miss_references.setdefault(digest, digest)
+        else:
+            cache_miss_references.setdefault(tag, tag)
+
+    fresh_details_by_reference: dict[str, ManifestDetails] = {}
+    if cache_miss_references:
+        max_workers = min(8, len(cache_miss_references))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_reference = {
+                executor.submit(
+                    _load_manifest_details_for_summary,
+                    request,
+                    repository_name=repo_name,
+                    reference=reference,
+                    max_manifest_children=settings.manifest_children_max_items,
+                    max_history_entries=settings.history_entries_max_items,
+                ): reference
+                for reference in cache_miss_references.values()
+            }
+            for future in as_completed(future_to_reference):
+                reference = future_to_reference[future]
+                try:
+                    fresh_details_by_reference[reference] = future.result()
+                except RegistryNotFoundError:
+                    continue
+
+    for tag, descriptor in resolved_descriptors:
+        digest = descriptor.digest
+        if tag in tag_summaries_by_tag:
+            tags.append(tag_summaries_by_tag[tag])
+            continue
+
+        cache_reference = digest or tag
+        details = fresh_details_by_reference.get(cache_reference)
+        if details is None:
+            continue
+        if digest:
+            cached_row = cache_rows_by_digest.get(digest)
+            if cached_row is None:
+                cached_row = _upsert_cached_manifest_summary(
+                    db,
+                    repository_name=repo_name,
+                    manifest_digest=digest,
+                    details=details,
+                    seen_at=now,
+                )
+                cache_rows_by_digest[digest] = cached_row
+                cache_mutated = True
+            tags.append(_build_tag_summary_from_cache(cached_row, tag=tag))
+            continue
+        tags.append(_build_tag_summary_from_manifest(details, tag=tag, digest=digest))
+
+    if cache_mutated:
+        db.commit()
+    truncation["returned"] = len(tags)
 
     return {
         "repo": repo_name,

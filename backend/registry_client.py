@@ -59,6 +59,12 @@ class TagSummary:
 
 
 @dataclass(frozen=True)
+class ResolvedManifestDescriptor:
+    digest: Optional[str]
+    media_type: Optional[str]
+
+
+@dataclass(frozen=True)
 class HistoryVariant:
     platform: Optional[str]
     manifest_digest: Optional[str]
@@ -194,6 +200,22 @@ class RegistryClient:
         platform = manifest_entry.get("platform") or {}
         return _format_platform_label(platform.get("os"), platform.get("architecture"))
 
+    def resolve_manifest_descriptor(
+        self,
+        repository_name: str,
+        reference: str,
+    ) -> ResolvedManifestDescriptor:
+        response = self._request(
+            "HEAD",
+            f"/v2/{repository_name}/manifests/{reference}",
+            scopes=[{"type": "repository", "name": repository_name, "actions": ["pull"]}],
+            headers={"Accept": MANIFEST_ACCEPT},
+        )
+        return ResolvedManifestDescriptor(
+            digest=response.headers.get("Docker-Content-Digest"),
+            media_type=response.headers.get("Content-Type"),
+        )
+
     def _variant_from_manifest(
         self,
         repository_name: str,
@@ -240,12 +262,7 @@ class RegistryClient:
     ) -> ManifestDetails:
         headers = {"Accept": MANIFEST_ACCEPT}
         scopes = [{"type": "repository", "name": repository_name, "actions": ["pull"]}]
-        head = self._request(
-            "HEAD",
-            f"/v2/{repository_name}/manifests/{reference}",
-            scopes=scopes,
-            headers=headers,
-        )
+        resolved_descriptor = self.resolve_manifest_descriptor(repository_name, reference)
         manifest_response = self._request(
             "GET",
             f"/v2/{repository_name}/manifests/{reference}",
@@ -253,7 +270,7 @@ class RegistryClient:
             headers=headers,
         )
         payload = manifest_response.json()
-        media_type = head.headers.get("Content-Type") or payload.get("mediaType")
+        media_type = resolved_descriptor.media_type or payload.get("mediaType")
         layers = payload.get("layers") or []
         manifests = payload.get("manifests") or []
         config = payload.get("config") or {}
@@ -316,7 +333,7 @@ class RegistryClient:
         return ManifestDetails(
             name=repository_name,
             tag=reference,
-            digest=head.headers.get("Docker-Content-Digest"),
+            digest=resolved_descriptor.digest,
             media_type=media_type,
             config_digest=config.get("digest"),
             config_media_type=config.get("mediaType"),

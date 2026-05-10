@@ -105,6 +105,28 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class CachedManifestSummary(Base):
+    __tablename__ = "cached_manifest_summaries"
+    __table_args__ = (
+        UniqueConstraint("repository_name", "manifest_digest", name="uq_cached_manifest_summary_repo_digest"),
+        Index("ix_cached_manifest_summaries_repo_last_seen_at", "repository_name", "last_seen_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    repository_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[Optional[str]] = mapped_column(String(255))
+    config_digest: Mapped[Optional[str]] = mapped_column(String(255))
+    total_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    architectures: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    history_count: Mapped[Optional[int]] = mapped_column(Integer)
+    children_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    history_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class RepositoryPermission(Base):
     __tablename__ = "repository_permissions"
     __table_args__ = (
