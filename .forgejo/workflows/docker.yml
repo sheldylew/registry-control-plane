@@ -160,7 +160,12 @@ jobs:
           export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
           export IMAGE_TAG_ALT="${{ steps.meta.outputs.image_tag_alt }}"
 
-          docker buildx bake --allow=fs=/tmp publish
+          # Push each image repo separately. Parallel publish across these repos can
+          # trigger registry-side blob lock contention and cross-repo mount auth
+          # failures even after a successful docker login.
+          for target in api-publish auth-init-publish web-publish nginx-publish; do
+            docker buildx bake --allow=fs=/tmp "${target}"
+          done
 
       - name: Prune expired BuildKit cache
         if: always()

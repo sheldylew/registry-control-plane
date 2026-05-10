@@ -4,7 +4,8 @@ The repository includes a workflow at `.forgejo/workflows/docker.yml` that valid
 
 Pull requests build the `api`, `auth-init`, `web`, and `nginx` Dockerfile targets through `docker buildx bake validate-multiarch` without pushing images.
 
-Pushes to `master`, `development`, `release`, `v*` tags, and manual dispatches log in to `registry.sheldylew.com` and publish the same four targets through `docker buildx bake publish`.
+Pushes to `master`, `development`, `release`, `v*` tags, and manual dispatches log in to `registry.sheldylew.com` and publish the same four targets one at a time with `docker buildx bake`.
+The serialized publish loop avoids registry-side layer lock contention and cross-repo blob mount authorization failures that can happen when all four repos push in one parallel Buildx graph.
 
 Published branch tags are:
 
