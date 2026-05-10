@@ -79,3 +79,11 @@ test("web healthchecks use the static root page", async () => {
     assert.doesNotMatch(source, /3000\/login/);
   }
 });
+
+test("server auth skips session API calls when no session cookie exists", async () => {
+  const serverApi = await readFile(new URL("../app/lib/server-api.js", import.meta.url), "utf8");
+
+  assert.match(serverApi, /const sessionCookieName = "rcr_session";/);
+  assert.match(serverApi, /if \(!store\.has\(sessionCookieName\)\) \{/);
+  assert.match(serverApi, /apiFetch\("\/api\/session\/me"\)/);
+});

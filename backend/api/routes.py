@@ -272,6 +272,10 @@ def _serialize_tag_summary(summary: TagSummary) -> dict:
     }
 
 
+def _serialize_tag_list_item(tag: str) -> dict:
+    return {"tag": tag}
+
+
 def _serialize_history_variant(variant: HistoryVariant) -> dict:
     return {
         "platform": variant.platform,
@@ -1915,7 +1919,10 @@ def list_repository_tags(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
     registry: RegistryClient = Depends(get_registry_client),
+    page: int = 1,
 ):
+    safe_page = max(page, 1)
+    page_size = settings.repository_tags_max_items
     if not can_access_repository(db, repository_name=repo_name, action="pull", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pull access required.")
 
@@ -1925,12 +1932,16 @@ def list_repository_tags(
     visibility = repository.visibility if repository is not None else "private"
 
     try:
-        tags, truncation = registry.list_tag_summaries_bounded(
-            repo_name,
-            max_tags=settings.repository_tags_max_items,
-            max_manifest_children=settings.manifest_children_max_items,
-            max_history_entries=settings.history_entries_max_items,
-        )
+        all_tags = registry.list_tags(repo_name)
+        total_tags = len(all_tags)
+        page_start = (safe_page - 1) * page_size
+        page_end = page_start + page_size
+        tags = all_tags[page_start:page_end]
+        truncation = {
+            "truncated": total_tags > page_size,
+            "returned": len(tags),
+            "available": total_tags,
+        }
     except RegistryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.") from exc
     finally:
@@ -1943,8 +1954,15 @@ def list_repository_tags(
         "can_manage_visibility": user.is_admin,
         "can_delete_tag": can_delete_tag,
         "can_prune_repository": can_prune_repository,
-        "tags": [_serialize_tag_summary(tag) for tag in tags],
+        "tags": [_serialize_tag_list_item(tag) for tag in tags],
         "truncation": truncation,
+        "pagination": {
+            "page": safe_page,
+            "page_size": page_size,
+            "total": total_tags,
+            "has_prev": safe_page > 1,
+            "has_next": page_end < total_tags,
+        },
     }
 
 

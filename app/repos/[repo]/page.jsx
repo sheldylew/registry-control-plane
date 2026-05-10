@@ -1,54 +1,36 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ClockIcon } from "@heroicons/react/24/outline";
 
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
+import Pagination from "@/app/components/ui/pagination";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import { Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
 import RepositoryVisibilityPanel from "@/app/components/repository-visibility-panel";
-import { formatRelativeTime } from "@/app/lib/date-format";
 import { apiFetch } from "@/app/lib/server-api";
-import { getUiTimezone } from "@/app/lib/ui-settings";
 
-function formatBytes(size) {
-  if (!size) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB"];
-  let value = size;
-  let unit = units[0];
-  for (const candidate of units) {
-    unit = candidate;
-    if (value < 1024 || candidate === units[units.length - 1]) {
-      break;
-    }
-    value /= 1024;
-  }
-  return `${value.toFixed(value >= 10 || unit === "B" ? 0 : 1)} ${unit}`;
+function buildApiPath(repoPath, page) {
+  return `/api/repos/${repoPath}/tags?page=${String(page)}`;
 }
 
-function formatDigest(digest) {
-  if (!digest) {
-    return "Unavailable";
+function buildPageHref(repoPath, page) {
+  const basePath = `/repos/${encodeURIComponent(repoPath)}`;
+  if (page <= 1) {
+    return basePath;
   }
-  if (digest.length <= 24) {
-    return digest;
-  }
-  return `${digest.slice(0, 18)}...${digest.slice(-12)}`;
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  return `${basePath}?${params.toString()}`;
 }
 
-function formatPlatformLabel(value) {
-  return value || "Unknown platform";
-}
-
-export default async function RepoDetailPage({ params }) {
-  const timeZone = await getUiTimezone();
+export default async function RepoDetailPage({ params, searchParams }) {
   const resolvedParams = await params;
+  const resolvedSearchParams = await searchParams;
   const repoPath = decodeURIComponent(resolvedParams.repo);
-  const response = await apiFetch(`/api/repos/${repoPath}/tags`);
+  const page = Math.max(Number(resolvedSearchParams?.page || "1") || 1, 1);
+  const response = await apiFetch(buildApiPath(repoPath, page));
 
   if (response.status === 404) {
     notFound();
@@ -101,60 +83,40 @@ export default async function RepoDetailPage({ params }) {
               <Table>
                 <TableHead>
                   <tr>
-                    <th className="px-4 py-4 font-medium">Created</th>
-                    <th className="px-4 py-4 font-medium">Size</th>
-                    <th className="px-4 py-4 font-medium">Content Digest</th>
-                    <th className="px-4 py-4 text-center font-medium">Tag</th>
-                    <th className="px-4 py-4 font-medium">Arch</th>
-                    <th className="px-4 py-4 font-medium">History</th>
+                    <th className="px-4 py-4 font-medium">Tag</th>
+                    <th className="px-4 py-4 text-right font-medium">Actions</th>
                     {payload.can_delete_tag ? <th className="px-4 py-4 text-right font-medium">Delete</th> : null}
                   </tr>
                 </TableHead>
                 <TableBody>
                   {payload.tags.map((tag) => (
                     <tr key={tag.tag}>
-                      <td className="px-4 py-4 align-top text-slate-300">{formatRelativeTime(tag.created_at, { timeZone })}</td>
-                      <td className="px-4 py-4 align-top text-slate-300">{formatBytes(tag.total_size)}</td>
                       <td className="px-4 py-4 align-top">
-                        <div className="font-mono text-xs text-slate-200" title={tag.digest || "Unavailable"}>
-                          {formatDigest(tag.digest)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 align-top text-center">
                         <Link
                           href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}`}
                           prefetch={false}
-                          className="inline-flex rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 font-medium text-cyan-200 transition hover:border-cyan-300 hover:text-cyan-100"
+                          className="font-medium text-cyan-200 transition hover:text-cyan-100"
                         >
                           {tag.tag}
                         </Link>
                       </td>
-                      <td className="px-4 py-4 align-top">
-                        <div className="flex flex-wrap gap-2">
-                          {tag.architectures.length ? (
-                            tag.architectures.map((arch) => (
-                              <span
-                                key={arch}
-                                className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200"
-                              >
-                                {formatPlatformLabel(arch)}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-slate-500">Unknown platform</span>
-                          )}
+                      <td className="px-4 py-4 align-top text-right">
+                        <div className="flex justify-end gap-2">
+                          <Link
+                            href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}`}
+                            prefetch={false}
+                            className="inline-flex rounded-md border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-200 transition hover:border-cyan-300 hover:text-cyan-100"
+                          >
+                            Details
+                          </Link>
+                          <Link
+                            href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/history`}
+                            prefetch={false}
+                            className="inline-flex rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
+                          >
+                            History
+                          </Link>
                         </div>
-                      </td>
-                      <td className="px-4 py-4 align-top text-slate-300">
-                        <Link
-                          href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/history`}
-                          prefetch={false}
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/5 text-slate-200 transition hover:border-cyan-400/40 hover:text-white"
-                          title={tag.history_count === null ? "View history" : `View ${tag.history_count} history entries`}
-                          aria-label={tag.history_count === null ? "View history" : `View ${tag.history_count} history entries`}
-                        >
-                          <ClockIcon className="h-5 w-5" aria-hidden="true" />
-                        </Link>
                       </td>
                       {payload.can_delete_tag ? (
                         <td className="px-4 py-4 align-top text-right">
@@ -195,6 +157,13 @@ export default async function RepoDetailPage({ params }) {
             ) : null}
           </div>
         )}
+        <Pagination
+          page={payload.pagination.page}
+          pageSize={payload.pagination.page_size}
+          total={payload.pagination.total}
+          label="tags"
+          hrefForPage={(page) => buildPageHref(payload.repo, page)}
+        />
       </Panel>
     </div>
   );
