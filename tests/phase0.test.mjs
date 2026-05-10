@@ -65,3 +65,17 @@ test("protected repo navigation disables automatic prefetch", async () => {
   assert.match(tagPage, /prefetch=\{false\}/);
   assert.match(historyPage, /prefetch=\{false\}/);
 });
+
+test("web healthchecks use the static root page", async () => {
+  const [compose, bindCompose, dockerSave] = await Promise.all([
+    readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/docker-save.sh", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of [compose, bindCompose, dockerSave]) {
+    assert.match(source, /http:\/\/\\?\$\(hostname\):3000\//);
+    assert.match(source, /interval: 1m/);
+    assert.doesNotMatch(source, /3000\/login/);
+  }
+});
