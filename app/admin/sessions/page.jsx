@@ -1,5 +1,6 @@
 import SessionsPanel from "@/app/components/sessions-panel";
 import { apiFetch } from "@/app/lib/server-api";
+import { getUiTimezone } from "@/app/lib/ui-settings";
 
 function buildApiPath(page, pageSize) {
   const params = new URLSearchParams();
@@ -10,6 +11,7 @@ function buildApiPath(page, pageSize) {
 
 export default async function AdminSessionsPage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
+  const timeZone = await getUiTimezone();
   const page = Math.max(Number(resolvedSearchParams?.page || "1") || 1, 1);
   const pageSize = Math.min(Math.max(Number(resolvedSearchParams?.page_size || "10") || 10, 1), 100);
   const response = await apiFetch(buildApiPath(page, pageSize));
@@ -24,6 +26,7 @@ export default async function AdminSessionsPage({ searchParams }) {
       initialSessions={payload.sessions}
       summary={payload.summary}
       pagination={payload.pagination}
+      timeZone={timeZone}
     />
   );
 }

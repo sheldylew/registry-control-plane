@@ -8,23 +8,13 @@ import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
 import Pagination from "@/app/components/ui/pagination";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { formatDateTime } from "@/app/lib/date-format";
 
 function readCookie(name) {
   const match = document.cookie
     .split("; ")
     .find((entry) => entry.startsWith(`${name}=`));
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
-}
-
-function formatDate(value) {
-  if (!value) {
-    return "Not set";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return "Unknown";
-  }
-  return parsed.toLocaleString();
 }
 
 function statusForSession(session) {
@@ -49,7 +39,7 @@ function paginationHref(page, pageSize) {
   return query ? `/admin/sessions?${query}` : "/admin/sessions";
 }
 
-export default function SessionsPanel({ initialSessions, summary, pagination }) {
+export default function SessionsPanel({ initialSessions, summary, pagination, timeZone }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [pendingAction, setPendingAction] = useState("");
@@ -134,15 +124,15 @@ export default function SessionsPanel({ initialSessions, summary, pagination }) 
                       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
                         <div>
                           <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Created</dt>
-                          <dd className="mt-1 text-slate-200">{formatDate(session.created_at)}</dd>
+                          <dd className="mt-1 text-slate-200">{formatDateTime(session.created_at, { timeZone, fallback: "Not set" })}</dd>
                         </div>
                         <div>
                           <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Last seen</dt>
-                          <dd className="mt-1 text-slate-200">{formatDate(session.last_seen_at)}</dd>
+                          <dd className="mt-1 text-slate-200">{formatDateTime(session.last_seen_at, { timeZone, fallback: "Not set" })}</dd>
                         </div>
                         <div>
                           <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Expires</dt>
-                          <dd className="mt-1 text-slate-200">{formatDate(session.expires_at)}</dd>
+                          <dd className="mt-1 text-slate-200">{formatDateTime(session.expires_at, { timeZone, fallback: "Not set" })}</dd>
                         </div>
                       </dl>
                     </div>

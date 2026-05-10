@@ -14,6 +14,7 @@ import { Field, Input } from "@/app/components/ui/form";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import Switch from "@/app/components/ui/switch";
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
+import { formatDateTime } from "@/app/lib/date-format";
 import { hasNonEmptyValue, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
 
 function readCookie(name) {
@@ -23,24 +24,7 @@ function readCookie(name) {
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
 }
 
-function formatDate(value) {
-  if (!value) {
-    return "Unknown";
-  }
-  const target = new Date(value);
-  if (Number.isNaN(target.getTime())) {
-    return "Unknown";
-  }
-  return target.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-export default function RobotProfilePanel({ robot, permissions, recentActivity }) {
+export default function RobotProfilePanel({ robot, permissions, recentActivity, timeZone }) {
   const router = useRouter();
   const [tokenName, setTokenName] = useState("default");
   const [tokenOpen, setTokenOpen] = useState(false);
@@ -211,7 +195,7 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity }
                     </Button>
                   )}
                 </div>
-                <p className="mt-3 text-xs text-slate-500">Issued {formatDate(token.created_at)}</p>
+                <p className="mt-3 text-xs text-slate-500">Issued {formatDateTime(token.created_at, { timeZone })}</p>
               </div>
             )) : (
               <EmptyState title="No robot tokens" description="No robot credentials have been issued yet." />
@@ -246,7 +230,7 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity }
               <div key={event.id} className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4">
                 <div className="flex items-center justify-between gap-4">
                   <p className="text-sm font-medium text-white">{event.action}</p>
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{formatDate(event.created_at)}</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{formatDateTime(event.created_at, { timeZone })}</p>
                 </div>
                 <p className="mt-2 text-sm text-slate-400">
                   Actor: {event.actor_label || event.actor_type}

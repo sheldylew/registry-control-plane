@@ -6,28 +6,9 @@ import Button from '@/app/components/ui/button';
 import EmptyState from '@/app/components/ui/empty-state';
 import { Panel, PanelHeader } from '@/app/components/ui/panel';
 import StatCard from '@/app/components/ui/stat-card';
+import { formatRelativeTime } from '@/app/lib/date-format';
 import { apiFetch } from '@/app/lib/server-api';
-
-function formatRelativeTime(value) {
-  const target = new Date(value);
-  const diffMs = Date.now() - target.getTime();
-  if (Number.isNaN(diffMs)) {
-    return 'Unknown';
-  }
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
-  if (diffMinutes < 1) {
-    return 'Just now';
-  }
-  if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
-  }
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `${diffHours}h ago`;
-  }
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
+import { getUiTimezone } from '@/app/lib/ui-settings';
 
 function maxBucketValue(groups) {
   return Math.max(1, ...groups.flatMap((group) => group.map((bucket) => bucket.count)));
@@ -67,6 +48,7 @@ function TrendBars({ label, buckets, tone }) {
 }
 
 export default async function AdminHomePage() {
+  const timeZone = await getUiTimezone();
   const response = await apiFetch('/api/admin/dashboard');
   let payload;
 
@@ -204,7 +186,7 @@ export default async function AdminHomePage() {
                 <div key={`${event.type}-${event.timestamp}-${event.title}`} className='rounded-lg border border-white/10 bg-slate-950/60 p-4'>
                   <div className='flex items-center justify-between gap-4'>
                     <p className='text-sm font-medium text-white'>{event.title}</p>
-                    <p className='text-xs uppercase tracking-[0.18em] text-slate-500'>{formatRelativeTime(event.timestamp)}</p>
+                    <p className='text-xs uppercase tracking-[0.18em] text-slate-500'>{formatRelativeTime(event.timestamp, { timeZone })}</p>
                   </div>
                   <p className='mt-2 text-sm text-slate-400'>{event.detail}</p>
                 </div>

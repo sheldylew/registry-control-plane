@@ -9,7 +9,9 @@ import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import { Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
 import RepositoryVisibilityPanel from "@/app/components/repository-visibility-panel";
+import { formatRelativeTime } from "@/app/lib/date-format";
 import { apiFetch } from "@/app/lib/server-api";
+import { getUiTimezone } from "@/app/lib/ui-settings";
 
 function formatBytes(size) {
   if (!size) {
@@ -38,34 +40,12 @@ function formatDigest(digest) {
   return `${digest.slice(0, 18)}...${digest.slice(-12)}`;
 }
 
-function formatRelativeTime(value) {
-  if (!value) {
-    return "Unknown";
-  }
-  const target = new Date(value);
-  const diffMs = Date.now() - target.getTime();
-  if (Number.isNaN(diffMs)) {
-    return "Unknown";
-  }
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  if (diffHours < 1) {
-    return "Less than 1h ago";
-  }
-  if (diffHours < 24) {
-    return `${diffHours}h ago`;
-  }
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) {
-    return `${diffDays}d ago`;
-  }
-  return target.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
 function formatPlatformLabel(value) {
   return value || "Unknown platform";
 }
 
 export default async function RepoDetailPage({ params }) {
+  const timeZone = await getUiTimezone();
   const resolvedParams = await params;
   const repoPath = decodeURIComponent(resolvedParams.repo);
   const response = await apiFetch(`/api/repos/${repoPath}/tags`);
@@ -132,7 +112,7 @@ export default async function RepoDetailPage({ params }) {
                 <TableBody>
                   {payload.tags.map((tag) => (
                     <tr key={tag.tag}>
-                      <td className="px-4 py-4 align-top text-slate-300">{formatRelativeTime(tag.created_at)}</td>
+                      <td className="px-4 py-4 align-top text-slate-300">{formatRelativeTime(tag.created_at, { timeZone })}</td>
                       <td className="px-4 py-4 align-top text-slate-300">{formatBytes(tag.total_size)}</td>
                       <td className="px-4 py-4 align-top">
                         <div className="font-mono text-xs text-slate-200" title={tag.digest || "Unavailable"}>

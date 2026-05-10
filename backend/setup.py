@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +23,8 @@ from backend.registry_config import render_registry_config
 
 
 PUBLIC_REGISTRY_ORIGIN_KEY = "public_registry_origin"
+UI_TIMEZONE_KEY = "ui_timezone"
+DEFAULT_UI_TIMEZONE = "America/Los_Angeles"
 RESTART_COMMAND = "docker compose restart registry"
 
 
@@ -83,6 +86,14 @@ def effective_public_registry_origin(session: Session, settings: Settings) -> st
     return saved_public_registry_origin(session) or settings.public_registry_origin
 
 
+def saved_ui_timezone(session: Session) -> Optional[str]:
+    return get_app_setting(session, UI_TIMEZONE_KEY)
+
+
+def effective_ui_timezone(session: Session) -> str:
+    return saved_ui_timezone(session) or DEFAULT_UI_TIMEZONE
+
+
 def env_bootstrap_values(settings: Settings) -> dict[str, Optional[str]]:
     return {
         "admin_username": settings.admin_username,
@@ -120,6 +131,17 @@ def validate_public_registry_origin(origin: str, *, app_env: str) -> str:
         if hostname not in localhost_hosts:
             raise SetupError("HTTP public registry origin is allowed only for localhost development.")
 
+    return normalized
+
+
+def validate_ui_timezone(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise SetupError("UI timezone is required.")
+    try:
+        ZoneInfo(normalized)
+    except ZoneInfoNotFoundError as exc:
+        raise SetupError("UI timezone must be a valid IANA timezone like America/Los_Angeles.") from exc
     return normalized
 
 

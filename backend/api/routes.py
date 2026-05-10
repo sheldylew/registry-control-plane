@@ -27,18 +27,22 @@ from backend.metrics import snapshot as metrics_snapshot
 from backend.models import AuditEvent, GcJob, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryClient, RegistryNotFoundError, TagSummary
 from backend.setup import (
+    DEFAULT_UI_TIMEZONE,
     RESTART_COMMAND,
     SetupError,
     complete_setup,
     effective_public_registry_origin,
+    effective_ui_timezone,
     render_registry_config_to_path,
     saved_public_registry_origin,
     set_app_setting,
     setup_required,
     setup_status,
     validate_public_registry_origin,
+    validate_ui_timezone,
     verify_setup_token,
     PUBLIC_REGISTRY_ORIGIN_KEY,
+    UI_TIMEZONE_KEY,
 )
 
 
@@ -623,11 +627,17 @@ class SetupCompletePayload(BaseModel):
 
 class UpdateSettingsPayload(BaseModel):
     public_registry_origin: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LENGTH)
+    ui_timezone: str = Field(min_length=1, max_length=128)
 
     @field_validator("public_registry_origin")
     @classmethod
     def validate_public_origin_text(cls, value: str) -> str:
         return _normalize_required_text(value, field_name="Public registry origin")
+
+    @field_validator("ui_timezone")
+    @classmethod
+    def validate_ui_timezone_text(cls, value: str) -> str:
+        return _normalize_required_text(value, field_name="UI timezone", max_length=128)
 
 
 def _setup_response(*, setup_complete: bool, registry_restart_required: bool) -> dict:
@@ -1619,7 +1629,17 @@ def admin_settings(
 ):
     return {
         "public_registry_origin": effective_public_registry_origin(db, settings),
+        "ui_timezone": effective_ui_timezone(db),
+        "default_ui_timezone": DEFAULT_UI_TIMEZONE,
         "restart_command": RESTART_COMMAND,
+    }
+
+
+@router.get("/ui-settings")
+def ui_settings(db: Session = Depends(get_db)):
+    return {
+        "ui_timezone": effective_ui_timezone(db),
+        "default_ui_timezone": DEFAULT_UI_TIMEZONE,
     }
 
 
@@ -1634,9 +1654,14 @@ def update_admin_settings(
 ):
     try:
         public_origin = validate_public_registry_origin(payload.public_registry_origin, app_env=settings.app_env)
+        ui_timezone = validate_ui_timezone(payload.ui_timezone)
+        previous_public_origin = effective_public_registry_origin(db, settings)
         set_app_setting(db, PUBLIC_REGISTRY_ORIGIN_KEY, public_origin)
+        set_app_setting(db, UI_TIMEZONE_KEY, ui_timezone)
         db.commit()
-        render_registry_config_to_path(settings, public_registry_origin=public_origin)
+        registry_restart_required = public_origin != previous_public_origin
+        if registry_restart_required:
+            render_registry_config_to_path(settings, public_registry_origin=public_origin)
     except SetupError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1647,12 +1672,12 @@ def update_admin_settings(
         actor=csrf_user,
         action="app_settings_updated",
         target_type="app_setting",
-        metadata_json={"public_registry_origin": public_origin},
+        metadata_json={"public_registry_origin": public_origin, "ui_timezone": ui_timezone},
     )
     return {
-        "settings": {"public_registry_origin": public_origin},
-        "registry_restart_required": True,
-        "restart_command": RESTART_COMMAND,
+        "settings": {"public_registry_origin": public_origin, "ui_timezone": ui_timezone},
+        "registry_restart_required": registry_restart_required,
+        "restart_command": RESTART_COMMAND if registry_restart_required else None,
     }
 
 

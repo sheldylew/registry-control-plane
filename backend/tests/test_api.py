@@ -1614,21 +1614,38 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
         login = _login(client, settings.admin_username, settings.admin_password)
         csrf = login.cookies.get("rcr_csrf")
         response = client.post(
-            "/api/admin/settings",
-            json={"public_registry_origin": "http://localhost:8080"},
-            headers={"X-CSRF-Token": csrf},
-        )
+                "/api/admin/settings",
+                json={
+                    "public_registry_origin": "https://registry.example.com",
+                    "ui_timezone": "America/New_York",
+                },
+                headers={"X-CSRF-Token": csrf},
+            )
         settings_response = client.get("/api/admin/settings")
         with app.state.session_factory() as session:
             origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
+            ui_timezone = session.get(AppSetting, "ui_timezone")
 
     assert response.status_code == 200
     assert response.json()["registry_restart_required"] is True
     assert response.json()["restart_command"] == "docker compose restart registry"
     assert settings_response.status_code == 200
-    assert settings_response.json()["public_registry_origin"] == "http://localhost:8080"
+    assert settings_response.json()["public_registry_origin"] == "https://registry.example.com"
+    assert settings_response.json()["ui_timezone"] == "America/New_York"
     assert origin is not None
-    assert origin.value == "http://localhost:8080"
+    assert origin.value == "https://registry.example.com"
+    assert ui_timezone is not None
+    assert ui_timezone.value == "America/New_York"
+
+
+def test_ui_settings_defaults_to_los_angeles_timezone(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        response = client.get("/api/ui-settings")
+
+    assert response.status_code == 200
+    assert response.json()["ui_timezone"] == "America/Los_Angeles"
 
 
 def test_repo_list_only_shows_visible_repositories(settings) -> None:

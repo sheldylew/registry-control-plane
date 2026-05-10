@@ -1,8 +1,10 @@
 import RobotProfilePanel from "@/app/components/robot-profile-panel";
 import { apiFetch } from "@/app/lib/server-api";
+import { getUiTimezone } from "@/app/lib/ui-settings";
 
 export default async function AdminRobotProfilePage({ params }) {
   const { robotId } = await params;
+  const timeZone = await getUiTimezone();
   const response = await apiFetch(`/api/admin/robots/${robotId}`);
   const payload = await response.json();
 
@@ -15,6 +17,7 @@ export default async function AdminRobotProfilePage({ params }) {
       robot={payload.robot}
       permissions={payload.permissions}
       recentActivity={payload.recent_activity}
+      timeZone={timeZone}
     />
   );
 }

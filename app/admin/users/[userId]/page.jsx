@@ -1,11 +1,13 @@
 import UserProfilePanel from "@/app/components/user-profile-panel";
 import { apiFetch, requireCurrentUser } from "@/app/lib/server-api";
+import { getUiTimezone } from "@/app/lib/ui-settings";
 
 export default async function AdminUserProfilePage({ params, searchParams }) {
   const { userId } = await params;
   const resolvedSearchParams = await searchParams;
   const activityPage = Math.max(Number(resolvedSearchParams?.activity_page || "1") || 1, 1);
   const currentUser = await requireCurrentUser();
+  const timeZone = await getUiTimezone();
   const response = await apiFetch(`/api/admin/users/${userId}?activity_page=${activityPage}`);
   const payload = await response.json();
 
@@ -21,6 +23,7 @@ export default async function AdminUserProfilePage({ params, searchParams }) {
       recentActivity={payload.recent_activity}
       activityPagination={payload.activity_pagination}
       currentUserId={currentUser?.id ?? null}
+      timeZone={timeZone}
     />
   );
 }

@@ -5,22 +5,10 @@ import Button from "@/app/components/ui/button";
 import Disclosure from "@/app/components/ui/disclosure";
 import EmptyState from "@/app/components/ui/empty-state";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { formatDateTime } from "@/app/lib/date-format";
 import Pagination from "@/app/components/ui/pagination";
 import { apiFetch } from "@/app/lib/server-api";
-
-function formatDate(value) {
-  const target = new Date(value);
-  if (Number.isNaN(target.getTime())) {
-    return "Unknown";
-  }
-  return target.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
+import { getUiTimezone } from "@/app/lib/ui-settings";
 
 function buildApiPath(actor, repo, page) {
   const params = new URLSearchParams();
@@ -51,6 +39,7 @@ function buildPageHref({ actor, repo, page }) {
 
 export default async function AdminAuditPage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
+  const timeZone = await getUiTimezone();
   const actor = resolvedSearchParams?.actor || "";
   const repo = resolvedSearchParams?.repo || "";
   const page = Math.max(Number(resolvedSearchParams?.page || "1") || 1, 1);
@@ -93,7 +82,7 @@ export default async function AdminAuditPage({ searchParams }) {
               <article key={event.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-5">
                 <div>
                   <p className="text-sm font-semibold text-white">{event.action}</p>
-                  <p className="mt-2 text-sm text-slate-400">{formatDate(event.created_at)}</p>
+                  <p className="mt-2 text-sm text-slate-400">{formatDateTime(event.created_at, { timeZone })}</p>
                 </div>
                 <div className="mt-4">
                   <Disclosure titleClosed="View details" titleOpen="Hide details">

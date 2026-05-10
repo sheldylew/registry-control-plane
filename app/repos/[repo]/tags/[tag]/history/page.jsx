@@ -5,30 +5,16 @@ import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { formatDateTime } from "@/app/lib/date-format";
 import { apiFetch } from "@/app/lib/server-api";
-
-function formatDate(value) {
-  if (!value) {
-    return "Unknown";
-  }
-  const target = new Date(value);
-  if (Number.isNaN(target.getTime())) {
-    return "Unknown";
-  }
-  return target.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
+import { getUiTimezone } from "@/app/lib/ui-settings";
 
 function formatPlatformLabel(value) {
   return value || "Unknown platform";
 }
 
 export default async function RepoTagHistoryPage({ params }) {
+  const timeZone = await getUiTimezone();
   const resolvedParams = await params;
   const repoPath = decodeURIComponent(resolvedParams.repo);
   const response = await apiFetch(`/api/repos/${repoPath}/tags/${encodeURIComponent(resolvedParams.tag)}/history`);
@@ -68,7 +54,7 @@ export default async function RepoTagHistoryPage({ params }) {
             title={variant.platform ? formatPlatformLabel(variant.platform) : "Single image"}
             action={(
               <div className="flex flex-wrap gap-2">
-                <Badge>Created: {formatDate(variant.created_at)}</Badge>
+                <Badge>Created: {formatDateTime(variant.created_at, { timeZone })}</Badge>
                 <Badge tone="cyan">{variant.entry_count} entries</Badge>
               </div>
             )}
@@ -91,7 +77,7 @@ export default async function RepoTagHistoryPage({ params }) {
                 <li key={entryIndex} className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
                   <div className="flex items-center justify-between gap-4">
                     <p className="text-sm font-medium text-white">Step {entryIndex + 1}</p>
-                    <p className="text-xs text-slate-400">{formatDate(entry.created || null)}</p>
+                    <p className="text-xs text-slate-400">{formatDateTime(entry.created || null, { timeZone })}</p>
                   </div>
                   <p className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-200">
                     {entry.created_by || "No created_by metadata."}

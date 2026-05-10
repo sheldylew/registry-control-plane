@@ -17,18 +17,22 @@ function readCookie(name) {
     ?.split("=")[1];
 }
 
-export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
+export default function SettingsPanel({ initialPublicOrigin, initialTimeZone, restartCommand }) {
   const [publicOrigin, setPublicOrigin] = useState(initialPublicOrigin || "");
   const [draftPublicOrigin, setDraftPublicOrigin] = useState(initialPublicOrigin || "");
+  const [timeZone, setTimeZone] = useState(initialTimeZone || "America/Los_Angeles");
+  const [draftTimeZone, setDraftTimeZone] = useState(initialTimeZone || "America/Los_Angeles");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
   const normalizedOrigin = normalizeTextInput(draftPublicOrigin).replace(/\/$/, "");
-  const canSubmit = isValidPublicOrigin(normalizedOrigin);
+  const normalizedTimeZone = normalizeTextInput(draftTimeZone);
+  const canSubmit = isValidPublicOrigin(normalizedOrigin) && Boolean(normalizedTimeZone);
 
   function openDialog() {
     setDraftPublicOrigin(publicOrigin);
+    setDraftTimeZone(timeZone);
     setError("");
     setOpen(true);
   }
@@ -57,7 +61,7 @@ export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
         "Content-Type": "application/json",
         "X-CSRF-Token": readCookie("rcr_csrf"),
       },
-      body: JSON.stringify({ public_registry_origin: normalizedOrigin }),
+      body: JSON.stringify({ public_registry_origin: normalizedOrigin, ui_timezone: normalizedTimeZone }),
     });
     const payload = await response.json().catch(() => ({}));
     setPending(false);
@@ -69,7 +73,9 @@ export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
 
     setPublicOrigin(payload.settings.public_registry_origin);
     setDraftPublicOrigin(payload.settings.public_registry_origin);
-    setMessage(payload.restart_command || restartCommand);
+    setTimeZone(payload.settings.ui_timezone);
+    setDraftTimeZone(payload.settings.ui_timezone);
+    setMessage(payload.restart_command || "");
     setOpen(false);
   }
 
@@ -98,8 +104,12 @@ export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
                 value: <code className="text-sm text-white">{restartCommand}</code>,
               },
               {
+                label: "UI timezone",
+                value: <code className="text-sm text-white">{timeZone}</code>,
+              },
+              {
                 label: "Change behavior",
-                value: "After updating the saved origin, restart only the registry service so Docker clients receive the new token realm.",
+                value: "Origin changes require a registry restart. Timezone changes apply to the UI without restarting services.",
               },
             ]}
           />
@@ -117,8 +127,8 @@ export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
         open={open}
         onClose={closeDialog}
         eyebrow="Settings"
-        title="Edit registry origin"
-        description="Update the external registry origin used in bearer-token challenges and copied pull commands."
+        title="Edit settings"
+        description="Update the external registry origin used in bearer-token challenges and the timezone used for UI timestamps."
         onSubmit={onSubmit}
         submitLabel="Save settings"
         submitPendingLabel="Saving..."
@@ -133,6 +143,14 @@ export default function SettingsPanel({ initialPublicOrigin, restartCommand }) {
             onChange={(event) => setDraftPublicOrigin(event.target.value)}
             required
             maxLength={255}
+          />
+        </Field>
+        <Field label="UI timezone">
+          <Input
+            value={draftTimeZone}
+            onChange={(event) => setDraftTimeZone(event.target.value)}
+            required
+            maxLength={128}
           />
         </Field>
       </FormDialog>

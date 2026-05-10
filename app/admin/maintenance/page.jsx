@@ -6,7 +6,9 @@ import EmptyState from "@/app/components/ui/empty-state";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import Pagination from "@/app/components/ui/pagination";
 import StatCard from "@/app/components/ui/stat-card";
+import { formatDateTime } from "@/app/lib/date-format";
 import { apiFetch } from "@/app/lib/server-api";
+import { getUiTimezone } from "@/app/lib/ui-settings";
 
 function formatBytes(size) {
   if (!size) {
@@ -23,23 +25,6 @@ function formatBytes(size) {
     value /= 1024;
   }
   return `${value.toFixed(value >= 10 || unit === "B" ? 0 : 1)} ${unit}`;
-}
-
-function formatDate(value) {
-  if (!value) {
-    return "Pending";
-  }
-  const target = new Date(value);
-  if (Number.isNaN(target.getTime())) {
-    return "Unknown";
-  }
-  return target.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 function summarizeMode(job) {
@@ -61,6 +46,7 @@ function buildPageHref(page) {
 
 export default async function AdminMaintenancePage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
+  const timeZone = await getUiTimezone();
   const page = Math.max(Number(resolvedSearchParams?.page || "1") || 1, 1);
   const response = await apiFetch(`/api/admin/maintenance?page=${page}`);
   const payload = await response.json();
@@ -101,7 +87,7 @@ export default async function AdminMaintenancePage({ searchParams }) {
                       <Badge tone={job.status === "failed" ? "rose" : "slate"}>{job.status}</Badge>
                     </div>
                     <p className="mt-2 text-sm text-slate-400">
-                      Started {formatDate(job.started_at)}. Finished {formatDate(job.finished_at)}.
+                      Started {formatDateTime(job.started_at, { timeZone, fallback: "Pending" })}. Finished {formatDateTime(job.finished_at, { timeZone, fallback: "Pending" })}.
                     </p>
                     <p className="mt-2 text-sm text-slate-400">
                       Before: {formatBytes(job.bytes_before)}. After: {formatBytes(job.bytes_after)}.
