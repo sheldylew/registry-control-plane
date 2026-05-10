@@ -121,7 +121,7 @@ export default function RobotProfilePanel({ robot, permissions, recentActivity, 
             description="This profile keeps the robot state readable while token and access changes stay in focused flows."
             action={(
               <div className="flex flex-wrap justify-end gap-2">
-                <Button as={Link} href="/admin/robots" variant="secondary" size="sm">
+                <Button as={Link} href="/admin/robots" prefetch={false} variant="secondary" size="sm">
                   Back to robots
                 </Button>
                 <Button type="button" onClick={openTokenDialog} size="sm">

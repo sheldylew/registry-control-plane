@@ -209,7 +209,7 @@ export default function RobotsPanel({ initialRobots }) {
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-3">
-                      <Link href={`/admin/robots/${robot.id}`} className="text-lg font-semibold text-white transition hover:text-cyan-200">
+                      <Link prefetch={false} href={`/admin/robots/${robot.id}`} className="text-lg font-semibold text-white transition hover:text-cyan-200">
                         {robot.name}
                       </Link>
                       <Badge tone={robot.is_active ? "emerald" : "amber"} dot>
@@ -219,7 +219,7 @@ export default function RobotsPanel({ initialRobots }) {
                     <p className="mt-2 text-sm text-slate-300">{robot.description || "No description."}</p>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    <Button as={Link} href={`/admin/robots/${robot.id}`} variant="soft" size="xs">
+                    <Button as={Link} href={`/admin/robots/${robot.id}`} prefetch={false} variant="soft" size="xs">
                       View profile
                     </Button>
                     <Button

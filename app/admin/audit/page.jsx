@@ -62,6 +62,7 @@ export default async function AdminAuditPage({ searchParams }) {
           <Button
             as={Link}
             href="/admin/audit"
+            prefetch={false}
             variant="secondary"
           >
             Clear filters
@@ -93,6 +94,7 @@ export default async function AdminAuditPage({ searchParams }) {
                           {event.metadata_json?.repo ? (
                             <Link
                               href={`/admin/audit?repo=${encodeURIComponent(event.metadata_json.repo)}`}
+                              prefetch={false}
                               className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300 transition hover:border-cyan-400/40 hover:text-white"
                             >
                               {event.metadata_json.repo}
@@ -102,6 +104,7 @@ export default async function AdminAuditPage({ searchParams }) {
                         {event.actor_label && event.actor_label !== event.actor_type ? (
                           <Link
                             href={`/admin/audit?actor=${encodeURIComponent(event.actor_label)}`}
+                            prefetch={false}
                             className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 transition hover:border-cyan-400/40 hover:text-white"
                           >
                             Filter actor

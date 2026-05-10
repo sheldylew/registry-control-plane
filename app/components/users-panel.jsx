@@ -264,7 +264,7 @@ export default function UsersPanel({
                       <Badge tone={user.is_active ? "emerald" : "amber"} dot>
                         {user.is_active ? "Active" : "Disabled"}
                       </Badge>
-                      <Link href={`/admin/users/${user.id}`} className="font-medium text-white transition hover:text-cyan-200">
+                      <Link prefetch={false} href={`/admin/users/${user.id}`} className="font-medium text-white transition hover:text-cyan-200">
                         {user.username}
                       </Link>
                     </div>
@@ -291,6 +291,7 @@ export default function UsersPanel({
                       <Button
                         as={Link}
                         href={`/admin/users/${user.id}`}
+                        prefetch={false}
                         variant="soft"
                         size="xs"
                       >

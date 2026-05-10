@@ -1835,17 +1835,27 @@ def list_repositories(
             **_subject_for_user(user),
         )
         visible_repositories = sorted(visible_repositories)
-        paged_repositories = visible_repositories[(safe_page - 1) * page_size : safe_page * page_size]
-        resolvable_repositories: list[str] = []
+        page_start = (safe_page - 1) * page_size
+        page_end = page_start + page_size
+        resolvable_before_page = 0
+        visible_and_resolvable: list[str] = []
+        has_next_resolvable = False
         for repository_name in visible_repositories:
             try:
                 registry.list_tags(repository_name)
             except RegistryNotFoundError:
                 continue
-            resolvable_repositories.append(repository_name)
-        resolvable_set = set(resolvable_repositories)
+            if resolvable_before_page < page_start:
+                resolvable_before_page += 1
+                continue
+            if len(visible_and_resolvable) < page_size:
+                visible_and_resolvable.append(repository_name)
+                continue
+            has_next_resolvable = True
+            break
+        scanned_all_visible_repositories = not has_next_resolvable
         repository_rows = db.scalars(
-            select(Repository).where(Repository.name.in_(paged_repositories))
+            select(Repository).where(Repository.name.in_(visible_and_resolvable))
         ).all()
         repository_visibility = {
             repository.name: repository.visibility for repository in repository_rows
@@ -1853,10 +1863,10 @@ def list_repositories(
     finally:
         registry.close()
 
-    visible_and_resolvable = [
-        repository_name for repository_name in paged_repositories if repository_name in resolvable_set
-    ]
-    total_visible = sum(1 for name in visible_repositories if name in resolvable_set)
+    if scanned_all_visible_repositories and not truncation.get("truncated"):
+        total_visible = resolvable_before_page + len(visible_and_resolvable)
+    else:
+        total_visible = len(visible_repositories)
     return {
         "repos": [
             {"name": repository_name, "visibility": repository_visibility.get(repository_name, "private")}
@@ -1868,7 +1878,7 @@ def list_repositories(
             "page_size": page_size,
             "total": total_visible,
             "has_prev": safe_page > 1,
-            "has_next": bool(truncation.get("truncated")) or safe_page * page_size < total_visible,
+            "has_next": bool(truncation.get("truncated")) or has_next_resolvable or page_end < total_visible,
         },
         "user": _serialize_user(user),
     }

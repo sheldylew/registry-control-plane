@@ -144,6 +144,7 @@ export default async function AdminHomePage() {
             <Button
               as={Link}
               href='/repos'
+              prefetch={false}
               variant="secondary"
             >
               Open browser
@@ -211,6 +212,7 @@ export default async function AdminHomePage() {
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className='block rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-white'
               >
                 {label}

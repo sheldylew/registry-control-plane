@@ -38,6 +38,7 @@ export default function Pagination({ page, pageSize, total, hrefForPage, label =
       <div className="flex flex-1 justify-between sm:hidden">
         <Link
           href={hrefForPage(Math.max(currentPage - 1, 1))}
+          prefetch={false}
           aria-disabled={currentPage <= 1}
           className={`relative inline-flex items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
             currentPage <= 1 ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
@@ -47,6 +48,7 @@ export default function Pagination({ page, pageSize, total, hrefForPage, label =
         </Link>
         <Link
           href={hrefForPage(Math.min(currentPage + 1, totalPages))}
+          prefetch={false}
           aria-disabled={currentPage >= totalPages}
           className={`relative ml-3 inline-flex items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
             currentPage >= totalPages ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
@@ -64,6 +66,7 @@ export default function Pagination({ page, pageSize, total, hrefForPage, label =
         <nav aria-label="Pagination" className="isolate inline-flex -space-x-px rounded-md">
           <Link
             href={hrefForPage(Math.max(currentPage - 1, 1))}
+            prefetch={false}
             aria-disabled={currentPage <= 1}
             className={`relative inline-flex items-center rounded-l-md px-2 py-2 ring-1 ring-inset ring-white/10 ${
               currentPage <= 1 ? "pointer-events-none text-slate-600 opacity-50" : "text-slate-400 hover:bg-white/5"
@@ -92,6 +95,7 @@ export default function Pagination({ page, pageSize, total, hrefForPage, label =
               <Link
                 key={item}
                 href={hrefForPage(item)}
+                prefetch={false}
                 className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-slate-200 ring-1 ring-inset ring-white/10 hover:bg-white/5"
               >
                 {item}
@@ -100,6 +104,7 @@ export default function Pagination({ page, pageSize, total, hrefForPage, label =
           )}
           <Link
             href={hrefForPage(Math.min(currentPage + 1, totalPages))}
+            prefetch={false}
             aria-disabled={currentPage >= totalPages}
             className={`relative inline-flex items-center rounded-r-md px-2 py-2 ring-1 ring-inset ring-white/10 ${
               currentPage >= totalPages ? "pointer-events-none text-slate-600 opacity-50" : "text-slate-400 hover:bg-white/5"

@@ -139,7 +139,7 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
             description="This profile keeps presentation data visible while mutations stay in focused controls."
             action={(
               <div className="flex flex-wrap justify-end gap-2">
-                <Button as={Link} href="/admin/users" variant="secondary" size="sm">
+                <Button as={Link} href="/admin/users" prefetch={false} variant="secondary" size="sm">
                   Back to users
                 </Button>
                 <Button type="button" onClick={openPasswordReset} size="sm">
