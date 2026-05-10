@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -212,6 +213,31 @@ def _subject_for_user(user: User) -> dict[str, object]:
         "subject_id": user.id,
         "is_admin": user.is_admin,
     }
+
+
+def _list_repositories_cached(
+    request: Request,
+    registry: RegistryClient,
+    settings: Settings,
+) -> tuple[list[str], dict]:
+    cache_ttl = settings.registry_catalog_cache_seconds
+    if cache_ttl <= 0:
+        return registry.list_repositories_bounded(max_pages=settings.registry_catalog_max_pages)
+
+    now = monotonic()
+    cached = getattr(request.app.state, "repository_catalog_cache", None)
+    if cached and cached.get("expires_at", 0.0) > now:
+        return cached["repositories"], cached["truncation"]
+
+    repositories, truncation = registry.list_repositories_bounded(
+        max_pages=settings.registry_catalog_max_pages
+    )
+    request.app.state.repository_catalog_cache = {
+        "expires_at": now + cache_ttl,
+        "repositories": repositories,
+        "truncation": truncation,
+    }
+    return repositories, truncation
 
 
 def _serialize_manifest(details: ManifestDetails) -> dict:
@@ -1561,6 +1587,7 @@ def delete_robot(
 
 @router.get("/admin/dashboard")
 def admin_dashboard(
+    request: Request,
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
     registry: RegistryClient = Depends(get_registry_client),
@@ -1576,9 +1603,7 @@ def admin_dashboard(
     total_tags = 0
     repo_truncation = {"truncated": False, "pages_fetched": 0, "returned": 0}
     try:
-        repositories, repo_truncation = registry.list_repositories_bounded(
-            max_pages=settings.registry_catalog_max_pages
-        )
+        repositories, repo_truncation = _list_repositories_cached(request, registry, settings)
         for repository_name in repositories[: settings.dashboard_max_repositories]:
             try:
                 tags = registry.list_tags(repository_name)
@@ -1817,6 +1842,7 @@ def prune_maintenance_logs(
 
 @router.get("/repos")
 def list_repositories(
+    request: Request,
     user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -1826,9 +1852,7 @@ def list_repositories(
     safe_page = max(page, 1)
     page_size = 10
     try:
-        all_repositories, truncation = registry.list_repositories_bounded(
-            max_pages=settings.registry_catalog_max_pages
-        )
+        all_repositories, truncation = _list_repositories_cached(request, registry, settings)
         visible_repositories = filter_visible_repositories(
             db,
             repository_names=all_repositories,

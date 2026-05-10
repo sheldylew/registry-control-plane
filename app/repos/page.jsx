@@ -45,21 +45,26 @@ export default async function ReposPage({ searchParams }) {
         />
 
         {payload.repos.length ? (
-          <ul className="mt-4 grid gap-4 md:grid-cols-2">
+          <ul className="mt-4 divide-y divide-white/10 overflow-hidden rounded-lg border border-white/10 bg-slate-950/50">
             {payload.repos.map((repo) => (
               <li key={repo.name}>
                 <Link
                   href={`/repos/${encodeURIComponent(repo.name)}`}
                   prefetch={false}
-                  className="block rounded-lg border border-white/10 bg-slate-950/70 px-5 py-5 transition hover:border-cyan-400/40 hover:bg-slate-950"
+                  className="block px-5 py-4 transition hover:bg-white/5"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <p className="min-w-0 break-words text-lg font-semibold text-white">{repo.name}</p>
-                    <Badge tone={repo.visibility === "public" ? "emerald" : "slate"} dot>
-                      {repo.visibility === "public" ? "Public" : "Private"}
-                    </Badge>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="break-words text-base font-semibold text-white">{repo.name}</p>
+                      <p className="mt-1 text-sm text-slate-400">Open tags and manifest details</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <Badge tone={repo.visibility === "public" ? "emerald" : "slate"} dot>
+                        {repo.visibility === "public" ? "Public" : "Private"}
+                      </Badge>
+                      <span className="text-sm text-cyan-200">Open</span>
+                    </div>
                   </div>
-                  <p className="mt-2 text-sm text-slate-400">Open tags and manifest details</p>
                 </Link>
               </li>
             ))}

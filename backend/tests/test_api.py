@@ -1523,6 +1523,7 @@ class FakeRegistryClient:
         self.repo_pages_truncated = repo_pages_truncated
         self.deleted_manifests = []
         self.list_tags_calls = []
+        self.list_repositories_bounded_calls = 0
 
     def close(self) -> None:
         return None
@@ -1594,6 +1595,7 @@ class FakeRegistryClient:
         }
 
     def list_repositories_bounded(self, *, max_pages=None) -> tuple[list[str], dict]:
+        self.list_repositories_bounded_calls += 1
         return self.repositories, {
             "truncated": self.repo_pages_truncated,
             "pages_fetched": 1,
@@ -1747,6 +1749,22 @@ def test_repo_list_only_resolves_current_page_window(settings) -> None:
 
     assert response.status_code == 200
     assert fake_registry.list_tags_calls == [f"repo/{n:02d}" for n in range(1, 12)]
+
+
+def test_repo_catalog_listing_is_cached_across_requests(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 26)])
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        first = client.get("/api/repos?page=1")
+        second = client.get("/api/repos?page=1")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert fake_registry.list_repositories_bounded_calls == 1
 
 
 def test_repo_list_skips_stale_catalog_entries(settings) -> None:
