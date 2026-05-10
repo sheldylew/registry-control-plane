@@ -11,6 +11,8 @@ storage:
 
 http:
   addr: 0.0.0.0:5000
+  host: {public_registry_origin}
+  relativeurls: true
   headers:
     X-Content-Type-Options:
       - nosniff

@@ -8,6 +8,8 @@ def test_render_registry_config_uses_configured_public_origin(settings) -> None:
 
     rendered = render_registry_config(template, settings)
 
+    assert "host: http://localhost:8080" in rendered
+    assert "relativeurls: true" in rendered
     assert "realm: http://localhost:8080/auth/token" in rendered
     assert f"service: {settings.token_service}" in rendered
     assert f"issuer: {settings.token_issuer}" in rendered
