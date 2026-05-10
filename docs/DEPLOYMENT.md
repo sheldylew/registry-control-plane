@@ -31,7 +31,7 @@ Deployment shape:
 - `SESSION_COOKIE_SECURE`: must stay `true` in production.
 - `SESSION_LIFETIME_SECONDS`: browser session lifetime in seconds. Defaults to `28800`.
 - `CSRF_TRUSTED_ORIGINS`: comma-separated trusted origins for browser requests when the app sits behind a public origin or proxy.
-- `FORWARDED_ALLOW_IPS`: forwarded-header trust setting passed to the API runtime.
+- `FORWARDED_ALLOW_IPS`: forwarded-header trust setting passed to the API runtime. The built-in nginx overwrites inbound `X-Forwarded-For` with its direct peer address before proxying to the API; keep that behavior unless your outer proxy also strips spoofed forwarding headers before traffic reaches this stack.
 - `LOGIN_RATE_LIMIT_ATTEMPTS` and `LOGIN_RATE_LIMIT_WINDOW_SECONDS`: browser login rate-limit settings.
 - `AUTH_TOKEN_RATE_LIMIT_ATTEMPTS` and `AUTH_TOKEN_RATE_LIMIT_WINDOW_SECONDS`: registry bearer-token issuance rate-limit settings.
 - `SETUP_RATE_LIMIT_ATTEMPTS` and `SETUP_RATE_LIMIT_WINDOW_SECONDS`: first-boot setup token retry limits.

@@ -13,6 +13,8 @@ test("nginx routes app, auth, and registry paths to the expected upstreams", asy
   assert.match(nginxConf, /proxy_pass http:\/\/registry:5000;/);
   assert.match(nginxConf, /location \/api\/ \{/);
   assert.match(nginxConf, /proxy_pass http:\/\/api:8000\/api\/;/);
+  assert.doesNotMatch(nginxConf, /\$proxy_add_x_forwarded_for/);
+  assert.match(nginxConf, /proxy_set_header X-Forwarded-For \$remote_addr;/);
   assert.match(nginxConf, /location \/healthz \{/);
   assert.match(nginxConf, /proxy_pass http:\/\/api:8000\/healthz;/);
   assert.match(nginxConf, /location \/auth\/token \{/);
