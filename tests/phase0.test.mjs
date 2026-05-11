@@ -96,6 +96,21 @@ test("web healthchecks use the static root page", async () => {
   }
 });
 
+test("repository tags default page size stays at 10", async () => {
+  const [config, compose, bindCompose, dockerSave] = await Promise.all([
+    readFile(new URL("../backend/config.py", import.meta.url), "utf8"),
+    readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/docker-save.sh", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(config, /repository_tags_max_items: int = 10/);
+  assert.match(config, /REPOSITORY_TAGS_MAX_ITEMS", "10"/);
+  for (const source of [compose, bindCompose, dockerSave]) {
+    assert.match(source, /REPOSITORY_TAGS_MAX_ITEMS: .*:-10/);
+  }
+});
+
 test("release compose files keep internal service DNS aliases explicit", async () => {
   const [bindCompose, dockerSave] = await Promise.all([
     readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
