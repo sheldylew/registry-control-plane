@@ -56,6 +56,15 @@ def _render_registry_config(settings) -> None:
     os.chown(REGISTRY_RENDERED_CONFIG_PATH, APP_UID, APP_GID)
 
 
+def _normalize_registry_config_permissions() -> None:
+    REGISTRY_RENDERED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    os.chown(REGISTRY_RENDERED_CONFIG_PATH.parent, APP_UID, APP_GID)
+    os.chmod(REGISTRY_RENDERED_CONFIG_PATH.parent, 0o755)
+    if REGISTRY_RENDERED_CONFIG_PATH.exists():
+        os.chown(REGISTRY_RENDERED_CONFIG_PATH, APP_UID, APP_GID)
+        os.chmod(REGISTRY_RENDERED_CONFIG_PATH, 0o644)
+
+
 def _normalize_signing_material_permissions(settings) -> None:
     private_key = Path(settings.auth_private_key_path)
     public_cert = Path(settings.auth_public_cert_path)
@@ -105,8 +114,10 @@ def main() -> None:
     _chown_tree(Path("/var/lib/registry"), uid=APP_UID, gid=APP_GID)
     _chown_tree(Path(settings.auth_private_key_path).parent, uid=APP_UID, gid=APP_GID)
     _chown_tree(Path(settings.auth_public_cert_path).parent, uid=APP_UID, gid=APP_GID)
+    _normalize_registry_config_permissions()
     if not setup_complete_marker.exists() or not REGISTRY_RENDERED_CONFIG_PATH.exists():
         _render_registry_config(settings)
+    _normalize_registry_config_permissions()
     _normalize_signing_material_permissions(settings)
     bootstrap_signing_material(settings)
     raw_setup_token = _ensure_setup_token(
