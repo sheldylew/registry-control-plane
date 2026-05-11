@@ -179,7 +179,7 @@ export default function MaintenancePanel({ logRetentionDays }) {
         <Panel as="article" className="p-6">
           <PanelHeader
             eyebrow="Registry state"
-            title="Rebuild repository cache"
+            title="Rebuild registry state"
             description="Walk the registry catalog, refresh repository/tag state, and repair missed notification updates."
           />
           {rebuildMessage ? <Alert tone="emerald" className="mt-4">{rebuildMessage}</Alert> : null}
