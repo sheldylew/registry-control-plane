@@ -134,6 +134,7 @@ export default function SettingsPanel({
   initialPublicOrigin,
   initialTimeZone,
   initialAutomaticRegistryStateRebuild = false,
+  initialStorageUsageRefreshIntervalSeconds = 3600,
   restartCommand,
 }) {
   const [publicOrigin, setPublicOrigin] = useState(initialPublicOrigin || "");
@@ -142,18 +143,30 @@ export default function SettingsPanel({
   const [draftTimeZone, setDraftTimeZone] = useState(initialTimeZone || "America/Los_Angeles");
   const [automaticRebuild, setAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
   const [draftAutomaticRebuild, setDraftAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
+  const [storageUsageRefreshIntervalSeconds, setStorageUsageRefreshIntervalSeconds] = useState(
+    Number(initialStorageUsageRefreshIntervalSeconds) || 0,
+  );
+  const [draftStorageUsageRefreshIntervalSeconds, setDraftStorageUsageRefreshIntervalSeconds] = useState(
+    String(Number(initialStorageUsageRefreshIntervalSeconds) || 0),
+  );
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
   const normalizedOrigin = normalizeTextInput(draftPublicOrigin).replace(/\/$/, "");
   const normalizedTimeZone = normalizeTextInput(draftTimeZone);
-  const canSubmit = isValidPublicOrigin(normalizedOrigin) && Boolean(normalizedTimeZone);
+  const parsedStorageUsageRefreshIntervalSeconds = Number(draftStorageUsageRefreshIntervalSeconds);
+  const hasValidStorageUsageInterval =
+    Number.isInteger(parsedStorageUsageRefreshIntervalSeconds) &&
+    parsedStorageUsageRefreshIntervalSeconds >= 0 &&
+    parsedStorageUsageRefreshIntervalSeconds <= 86400;
+  const canSubmit = isValidPublicOrigin(normalizedOrigin) && Boolean(normalizedTimeZone) && hasValidStorageUsageInterval;
 
   function openDialog() {
     setDraftPublicOrigin(publicOrigin);
     setDraftTimeZone(timeZone);
     setDraftAutomaticRebuild(automaticRebuild);
+    setDraftStorageUsageRefreshIntervalSeconds(String(storageUsageRefreshIntervalSeconds));
     setError("");
     setOpen(true);
   }
@@ -186,6 +199,7 @@ export default function SettingsPanel({
         public_registry_origin: normalizedOrigin,
         ui_timezone: normalizedTimeZone,
         automatic_registry_state_rebuild: draftAutomaticRebuild,
+        storage_usage_refresh_interval_seconds: parsedStorageUsageRefreshIntervalSeconds,
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -202,6 +216,8 @@ export default function SettingsPanel({
     setDraftTimeZone(payload.settings.ui_timezone);
     setAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setDraftAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
+    setStorageUsageRefreshIntervalSeconds(payload.settings.storage_usage_refresh_interval_seconds);
+    setDraftStorageUsageRefreshIntervalSeconds(String(payload.settings.storage_usage_refresh_interval_seconds));
     setMessage(payload.restart_command || "");
     setOpen(false);
   }
@@ -239,8 +255,14 @@ export default function SettingsPanel({
                 value: automaticRebuild ? "Enabled on API startup" : "Disabled",
               },
               {
+                label: "Storage usage refresh",
+                value: storageUsageRefreshIntervalSeconds
+                  ? `Every ${storageUsageRefreshIntervalSeconds} seconds`
+                  : "Disabled",
+              },
+              {
                 label: "Change behavior",
-                value: "Origin changes require a registry restart. Timezone changes apply immediately; rebuild scheduling is used on the next API startup.",
+                value: "Origin changes require a registry restart. Timezone and refresh interval changes apply without restarting services.",
               },
             ]}
           />
@@ -259,7 +281,7 @@ export default function SettingsPanel({
         onClose={closeDialog}
         eyebrow="Settings"
         title="Edit settings"
-        description="Update the external registry origin, the timezone used for UI timestamps, and whether the API should rebuild registry state on startup."
+        description="Update the external registry origin, UI timezone, startup rebuild behavior, and storage usage refresh interval."
         onSubmit={onSubmit}
         submitLabel="Save settings"
         submitPendingLabel="Saving..."
@@ -294,6 +316,20 @@ export default function SettingsPanel({
             align="start"
           />
         </div>
+        <Field label="Storage usage refresh interval">
+          <Input
+            value={draftStorageUsageRefreshIntervalSeconds}
+            onChange={(event) => setDraftStorageUsageRefreshIntervalSeconds(event.target.value)}
+            required
+            min={0}
+            max={86400}
+            step={1}
+            type="number"
+          />
+          <span className="mt-2 block text-xs text-slate-400">
+            Seconds between background storage measurements. Use 0 to disable periodic refresh.
+          </span>
+        </Field>
       </FormDialog>
     </>
   );

@@ -13,6 +13,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.log_retention import prune_expired_logs, prune_expired_operational_records
 from backend.models import AuditEvent, GcJob, User
+from backend.setup import (
+    REGISTRY_STORAGE_USAGE_BYTES_KEY,
+    REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
+    get_app_setting,
+    set_app_setting,
+)
 
 
 def utcnow() -> datetime:
@@ -28,6 +34,43 @@ def compute_storage_usage_bytes(storage_root: Path) -> int:
         if path.is_file():
             total += path.stat().st_size
     return total
+
+
+def _serialize_datetime(value: datetime) -> str:
+    normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(timezone.utc).isoformat()
+
+
+def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def record_storage_usage_snapshot(session: Session, *, usage_bytes: int, measured_at: Optional[datetime] = None) -> None:
+    measured = measured_at or utcnow()
+    set_app_setting(session, REGISTRY_STORAGE_USAGE_BYTES_KEY, str(max(int(usage_bytes), 0)))
+    set_app_setting(session, REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY, _serialize_datetime(measured))
+
+
+def read_storage_usage_snapshot(session: Session) -> dict[str, Optional[object]]:
+    raw_bytes = get_app_setting(session, REGISTRY_STORAGE_USAGE_BYTES_KEY)
+    raw_measured_at = get_app_setting(session, REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY)
+    try:
+        usage_bytes = max(int(raw_bytes), 0) if raw_bytes is not None else 0
+    except ValueError:
+        usage_bytes = 0
+    return {
+        "bytes": usage_bytes,
+        "measured_at": _parse_datetime(raw_measured_at),
+    }
 
 
 def prune_empty_directories(storage_root: Path, *, allowed_root: Optional[Path] = None) -> list[str]:
@@ -153,6 +196,13 @@ class MaintenanceService:
     def current_storage_usage(self) -> int:
         return compute_storage_usage_bytes(self.storage_root())
 
+    def refresh_storage_usage_snapshot(self, session: Session) -> dict[str, Optional[object]]:
+        usage_bytes = self.current_storage_usage()
+        measured_at = utcnow()
+        record_storage_usage_snapshot(session, usage_bytes=usage_bytes, measured_at=measured_at)
+        session.commit()
+        return {"bytes": usage_bytes, "measured_at": measured_at}
+
     def minimum_gate_seconds(self) -> float:
         return max(float(getattr(self._settings, "maintenance_min_gate_seconds", 0.0)), 0.0)
 
@@ -266,6 +316,7 @@ class MaintenanceService:
             logs: list[str] = []
             bytes_before = self.current_storage_usage()
             job.bytes_before = bytes_before
+            record_storage_usage_snapshot(session, usage_bytes=bytes_before, measured_at=utcnow())
             session.commit()
 
             try:
@@ -291,6 +342,7 @@ class MaintenanceService:
                         sleep(remaining_gate_time)
 
                 job.bytes_after = self.current_storage_usage()
+                record_storage_usage_snapshot(session, usage_bytes=job.bytes_after, measured_at=utcnow())
                 job.status = "succeeded"
                 job.finished_at = utcnow()
                 job.log_output = "\n\n".join(logs)
@@ -314,6 +366,7 @@ class MaintenanceService:
                 job.error = str(exc)
                 job.finished_at = utcnow()
                 job.bytes_after = self.current_storage_usage()
+                record_storage_usage_snapshot(session, usage_bytes=job.bytes_after, measured_at=utcnow())
                 job.log_output = "\n\n".join(logs)
                 session.commit()
                 _record_audit_event(
@@ -344,9 +397,11 @@ class MaintenanceService:
         ).all()
         active_job = next((job for job in jobs if job.status in {"queued", "running"}), None)
         last_job = session.scalar(select(GcJob).order_by(GcJob.created_at.desc()).limit(1))
+        storage_usage = read_storage_usage_snapshot(session)
         return {
             "registry_status": "maintenance" if self.registry_gate_enabled(session) else "running",
-            "storage_usage_bytes": self.current_storage_usage(),
+            "storage_usage_bytes": storage_usage["bytes"],
+            "storage_usage_measured_at": storage_usage["measured_at"],
             "log_retention_days": self.log_retention_days(),
             "active_job": active_job,
             "last_job": last_job,

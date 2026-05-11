@@ -31,7 +31,15 @@ from backend.models import (
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
 from backend.runtime_secrets import ensure_registry_notifications_token
-from backend.setup import AUTOMATIC_REGISTRY_STATE_REBUILD_KEY, PUBLIC_REGISTRY_ORIGIN_KEY, ensure_setup_token
+from backend.setup import (
+    AUTOMATIC_REGISTRY_STATE_REBUILD_KEY,
+    REGISTRY_STORAGE_USAGE_BYTES_KEY,
+    REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
+    STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY,
+    PUBLIC_REGISTRY_ORIGIN_KEY,
+    ensure_setup_token,
+    set_app_setting,
+)
 
 
 def test_healthz_returns_ok(settings) -> None:
@@ -1812,6 +1820,7 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
                 "public_registry_origin": "https://registry.example.com",
                 "ui_timezone": "America/New_York",
                 "automatic_registry_state_rebuild": True,
+                "storage_usage_refresh_interval_seconds": 120,
             },
             headers={"X-CSRF-Token": csrf},
         )
@@ -1820,6 +1829,7 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
             origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
             ui_timezone = session.get(AppSetting, "ui_timezone")
             automatic_rebuild = session.get(AppSetting, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY)
+            storage_interval = session.get(AppSetting, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY)
 
     assert response.status_code == 200
     assert response.json()["registry_restart_required"] is True
@@ -1828,12 +1838,15 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
     assert settings_response.json()["public_registry_origin"] == "https://registry.example.com"
     assert settings_response.json()["ui_timezone"] == "America/New_York"
     assert settings_response.json()["automatic_registry_state_rebuild"] is True
+    assert settings_response.json()["storage_usage_refresh_interval_seconds"] == 120
     assert origin is not None
     assert origin.value == "https://registry.example.com"
     assert ui_timezone is not None
     assert ui_timezone.value == "America/New_York"
     assert automatic_rebuild is not None
     assert automatic_rebuild.value == "true"
+    assert storage_interval is not None
+    assert storage_interval.value == "120"
 
 
 def test_automatic_registry_rebuild_setting_queues_startup_job(settings) -> None:
@@ -1868,6 +1881,29 @@ def test_automatic_registry_rebuild_setting_queues_startup_job(settings) -> None
     assert job.status == "queued"
     assert audit is not None
     assert audit.metadata_json["reason"] == "automatic_startup"
+
+
+def test_maintenance_summary_uses_cached_storage_usage(settings, monkeypatch) -> None:
+    app = create_app(settings)
+    measured_at = datetime(2026, 5, 11, 12, 30, tzinfo=timezone.utc)
+
+    with TestClient(app) as client:
+        _login(client, settings.admin_username, settings.admin_password)
+        with app.state.session_factory() as session:
+            set_app_setting(session, REGISTRY_STORAGE_USAGE_BYTES_KEY, "12345")
+            set_app_setting(session, REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY, measured_at.isoformat())
+            set_app_setting(session, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY, "0")
+            session.commit()
+
+        def fail_storage_walk(_storage_root):
+            raise AssertionError("maintenance summary should not walk registry storage")
+
+        monkeypatch.setattr("backend.maintenance.compute_storage_usage_bytes", fail_storage_walk)
+        response = client.get("/api/admin/maintenance")
+
+    assert response.status_code == 200
+    assert response.json()["storage_usage_bytes"] == 12345
+    assert response.json()["storage_usage_measured_at"] == measured_at.isoformat()
 
 
 def test_admin_can_update_public_registry_origin_after_external_domain_changes(settings) -> None:

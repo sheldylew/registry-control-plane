@@ -50,12 +50,15 @@ from backend.registry_state import (
 )
 from backend.setup import (
     AUTOMATIC_REGISTRY_STATE_REBUILD_KEY,
+    DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
     DEFAULT_UI_TIMEZONE,
     RESTART_COMMAND,
     SetupError,
+    STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY,
     automatic_registry_state_rebuild_enabled,
     complete_setup,
     effective_public_registry_origin,
+    effective_storage_usage_refresh_interval_seconds,
     effective_ui_timezone,
     render_registry_config_to_path,
     saved_public_registry_origin,
@@ -63,6 +66,7 @@ from backend.setup import (
     setup_required,
     setup_status,
     validate_public_registry_origin,
+    validate_storage_usage_refresh_interval_seconds,
     validate_ui_timezone,
     verify_setup_token,
     PUBLIC_REGISTRY_ORIGIN_KEY,
@@ -844,6 +848,11 @@ class UpdateSettingsPayload(BaseModel):
     public_registry_origin: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LENGTH)
     ui_timezone: str = Field(min_length=1, max_length=128)
     automatic_registry_state_rebuild: bool = False
+    storage_usage_refresh_interval_seconds: int = Field(
+        default=DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
+        ge=0,
+        le=86400,
+    )
 
     @field_validator("public_registry_origin")
     @classmethod
@@ -1854,6 +1863,8 @@ def admin_settings(
         "public_registry_origin": effective_public_registry_origin(db, settings),
         "ui_timezone": effective_ui_timezone(db),
         "automatic_registry_state_rebuild": automatic_registry_state_rebuild_enabled(db),
+        "storage_usage_refresh_interval_seconds": effective_storage_usage_refresh_interval_seconds(db),
+        "default_storage_usage_refresh_interval_seconds": DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
         "default_ui_timezone": DEFAULT_UI_TIMEZONE,
         "restart_command": RESTART_COMMAND,
     }
@@ -1880,10 +1891,14 @@ def update_admin_settings(
         public_origin = validate_public_registry_origin(payload.public_registry_origin, app_env=settings.app_env)
         ui_timezone = validate_ui_timezone(payload.ui_timezone)
         automatic_rebuild = bool(payload.automatic_registry_state_rebuild)
+        storage_interval = validate_storage_usage_refresh_interval_seconds(
+            payload.storage_usage_refresh_interval_seconds
+        )
         previous_public_origin = effective_public_registry_origin(db, settings)
         set_app_setting(db, PUBLIC_REGISTRY_ORIGIN_KEY, public_origin)
         set_app_setting(db, UI_TIMEZONE_KEY, ui_timezone)
         set_app_setting(db, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY, "true" if automatic_rebuild else "false")
+        set_app_setting(db, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY, str(storage_interval))
         db.commit()
         registry_restart_required = public_origin != previous_public_origin
         if registry_restart_required:
@@ -1902,6 +1917,7 @@ def update_admin_settings(
             "public_registry_origin": public_origin,
             "ui_timezone": ui_timezone,
             "automatic_registry_state_rebuild": automatic_rebuild,
+            "storage_usage_refresh_interval_seconds": storage_interval,
         },
     )
     return {
@@ -1909,6 +1925,7 @@ def update_admin_settings(
             "public_registry_origin": public_origin,
             "ui_timezone": ui_timezone,
             "automatic_registry_state_rebuild": automatic_rebuild,
+            "storage_usage_refresh_interval_seconds": storage_interval,
         },
         "registry_restart_required": registry_restart_required,
         "restart_command": RESTART_COMMAND if registry_restart_required else None,
@@ -1934,6 +1951,7 @@ def maintenance_summary(
         "registry_status": summary["registry_status"],
         "registry_gate_enabled": summary["registry_status"] == "maintenance",
         "storage_usage_bytes": summary["storage_usage_bytes"],
+        "storage_usage_measured_at": _serialize_optional_datetime(summary["storage_usage_measured_at"]),
         "cache": cache_stats,
         "registry_state": {
             "active_repositories": state_stats["active_repositories"],

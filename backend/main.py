@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -24,6 +25,7 @@ from backend.runtime_secrets import ensure_registry_notifications_token
 from backend.setup import (
     automatic_registry_state_rebuild_enabled,
     complete_setup_from_environment,
+    effective_storage_usage_refresh_interval_seconds,
     render_registry_config_to_path,
     saved_public_registry_origin,
     setup_required,
@@ -41,6 +43,29 @@ def _token_rate_limit_key(request: Request) -> str:
     except HTTPException:
         pass
     return f"{_client_ip(request)}:{username.casefold()}"
+
+
+async def _storage_usage_refresh_loop(app: FastAPI, session_factory) -> None:
+    while True:
+        interval_seconds = 0
+        with session_factory() as session:
+            if not setup_required(session):
+                interval_seconds = effective_storage_usage_refresh_interval_seconds(session)
+        if interval_seconds > 0:
+            try:
+                await asyncio.to_thread(
+                    lambda: _refresh_storage_usage_snapshot(app, session_factory)
+                )
+            except Exception:
+                pass
+            await asyncio.sleep(interval_seconds)
+        else:
+            await asyncio.sleep(60)
+
+
+def _refresh_storage_usage_snapshot(app: FastAPI, session_factory) -> None:
+    with session_factory() as session:
+        app.state.maintenance_service_factory().refresh_storage_usage_snapshot(session)
 
 
 def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
@@ -100,6 +125,7 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
             )
 
         auto_rebuild_job_id = None
+        storage_usage_task = None
         with session_factory() as session:
             if not setup_required(session) and automatic_registry_state_rebuild_enabled(session):
                 auto_rebuild_job = queue_automatic_rebuild_job(
@@ -117,7 +143,16 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
                     auto_rebuild_job_id,
                 )
             )
-        yield
+        with session_factory() as session:
+            if not setup_required(session):
+                storage_usage_task = asyncio.create_task(_storage_usage_refresh_loop(app, session_factory))
+        try:
+            yield
+        finally:
+            if storage_usage_task is not None:
+                storage_usage_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await storage_usage_task
 
     app = FastAPI(title="Registry Control Plane API", lifespan=lifespan)
 

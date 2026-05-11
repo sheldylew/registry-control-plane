@@ -26,7 +26,11 @@ from backend.runtime_secrets import ensure_registry_notifications_token
 PUBLIC_REGISTRY_ORIGIN_KEY = "public_registry_origin"
 UI_TIMEZONE_KEY = "ui_timezone"
 AUTOMATIC_REGISTRY_STATE_REBUILD_KEY = "automatic_registry_state_rebuild"
+STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY = "storage_usage_refresh_interval_seconds"
+REGISTRY_STORAGE_USAGE_BYTES_KEY = "registry_storage_usage_bytes"
+REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY = "registry_storage_usage_measured_at"
 DEFAULT_UI_TIMEZONE = "America/Los_Angeles"
+DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS = 3600
 RESTART_COMMAND = "docker compose restart registry"
 REGISTRY_EVENTS_PATH = "/api/internal/registry-events"
 
@@ -100,6 +104,26 @@ def effective_ui_timezone(session: Session) -> str:
 def automatic_registry_state_rebuild_enabled(session: Session) -> bool:
     value = get_app_setting(session, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY)
     return value is not None and value.strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def validate_storage_usage_refresh_interval_seconds(value: int) -> int:
+    try:
+        interval = int(value)
+    except (TypeError, ValueError) as exc:
+        raise SetupError("Storage usage refresh interval must be a whole number of seconds.") from exc
+    if interval < 0 or interval > 86400:
+        raise SetupError("Storage usage refresh interval must be between 0 and 86400 seconds.")
+    return interval
+
+
+def effective_storage_usage_refresh_interval_seconds(session: Session) -> int:
+    value = get_app_setting(session, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY)
+    if value is None:
+        return DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS
+    try:
+        return validate_storage_usage_refresh_interval_seconds(int(value.strip()))
+    except (SetupError, ValueError):
+        return DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS
 
 
 def env_bootstrap_values(settings: Settings) -> dict[str, Optional[str]]:
