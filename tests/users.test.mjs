@@ -71,14 +71,21 @@ test("repositories page shows visibility badges", async () => {
 });
 
 test("maintenance panel exposes registry state rebuild action", async () => {
-  const [page, panel] = await Promise.all([
+  const [page, dashboard, panel] = await Promise.all([
     readFile(new URL("../app/admin/maintenance/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/maintenance-dashboard-client.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/maintenance-panel.jsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /payload\.registry_state\.active_repositories/);
-  assert.match(page, /payload\.registry_state\.inbox_failed/);
-  assert.match(page, /payload\.rebuild_jobs/);
+  assert.match(page, /<MaintenanceDashboardClient key=\{page\} initialPage=\{page\} timeZone=\{timeZone\} \/>/);
+  assert.doesNotMatch(page, /\/api\/admin\/maintenance/);
+  assert.match(dashboard, /sessionStorage\.getItem\(key\)/);
+  assert.match(dashboard, /sessionStorage\.setItem\(key, JSON\.stringify\(cached\)\)/);
+  assert.match(dashboard, /fetch\(`\/api\/admin\/maintenance\?page=\$\{initialPage\}`/);
+  assert.match(dashboard, /payload\.registry_state\.active_repositories/);
+  assert.match(dashboard, /payload\.registry_state\.inbox_failed/);
+  assert.match(dashboard, /payload\.rebuild_jobs/);
+  assert.match(panel, /onAfterMutation\?/);
   assert.match(panel, /\/api\/admin\/maintenance\/cache\/rebuild/);
   assert.match(panel, /Rebuild registry state/);
   assert.match(panel, /X-CSRF-Token/);

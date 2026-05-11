@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { ArrowPathIcon } from "@heroicons/react/20/solid";
 
@@ -17,8 +16,7 @@ function readCookie(name) {
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
 }
 
-export default function MaintenancePanel({ logRetentionDays }) {
-  const router = useRouter();
+export default function MaintenancePanel({ logRetentionDays, onAfterMutation }) {
   const [mode, setMode] = useState("analyze");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -57,8 +55,8 @@ export default function MaintenancePanel({ logRetentionDays }) {
       return;
     }
 
-    router.refresh();
     setPending(false);
+    onAfterMutation?.();
   }
 
   async function onPruneLogs() {
@@ -84,8 +82,8 @@ export default function MaintenancePanel({ logRetentionDays }) {
     setPruneMessage(
       `Removed ${body.pruned.audit_events_deleted} audit events, ${body.pruned.gc_jobs_deleted} completed maintenance jobs, ${body.pruned.web_sessions_deleted} browser sessions, ${body.pruned.personal_access_tokens_deleted} PAT records, and ${body.pruned.robot_tokens_deleted} robot token records past retention.`,
     );
-    router.refresh();
     setPrunePending(false);
+    onAfterMutation?.();
   }
 
   async function onRebuildCache() {
@@ -109,8 +107,8 @@ export default function MaintenancePanel({ logRetentionDays }) {
 
     const body = await response.json();
     setRebuildMessage(`Rebuild job #${body.job.id} ${body.job.status}.`);
-    router.refresh();
     setRebuildPending(false);
+    onAfterMutation?.();
   }
 
   return (
