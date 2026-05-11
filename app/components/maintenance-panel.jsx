@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { ArrowPathIcon } from "@heroicons/react/20/solid";
+
 import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
@@ -23,6 +25,9 @@ export default function MaintenancePanel({ logRetentionDays }) {
   const [prunePending, setPrunePending] = useState(false);
   const [pruneError, setPruneError] = useState("");
   const [pruneMessage, setPruneMessage] = useState("");
+  const [rebuildPending, setRebuildPending] = useState(false);
+  const [rebuildError, setRebuildError] = useState("");
+  const [rebuildMessage, setRebuildMessage] = useState("");
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -81,6 +86,31 @@ export default function MaintenancePanel({ logRetentionDays }) {
     );
     router.refresh();
     setPrunePending(false);
+  }
+
+  async function onRebuildCache() {
+    setRebuildPending(true);
+    setRebuildError("");
+    setRebuildMessage("");
+
+    const response = await fetch("/api/admin/maintenance/cache/rebuild", {
+      method: "POST",
+      headers: {
+        "X-CSRF-Token": readCookie("rcr_csrf"),
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      setRebuildError(body.detail || "Unable to start registry state rebuild.");
+      setRebuildPending(false);
+      return;
+    }
+
+    const body = await response.json();
+    setRebuildMessage(`Rebuild job #${body.job.id} ${body.job.status}.`);
+    router.refresh();
+    setRebuildPending(false);
   }
 
   return (
@@ -145,26 +175,49 @@ export default function MaintenancePanel({ logRetentionDays }) {
         </Button>
       </Panel>
 
-      <Panel as="article" className="p-6">
-        <PanelHeader
-          eyebrow="Log retention"
-          title="Prune retained logs"
-          description={`Delete audit events and completed maintenance jobs older than ${logRetentionDays} days without scheduling a registry maintenance run.`}
-          action={<Badge tone="cyan">{logRetentionDays} days</Badge>}
-        />
-        {pruneMessage ? <Alert tone="emerald" className="mt-4">{pruneMessage}</Alert> : null}
-        {pruneError ? <Alert tone="rose" className="mt-4">{pruneError}</Alert> : null}
-        <Button
-          type="button"
-          onClick={onPruneLogs}
-          disabled={prunePending}
-          loading={prunePending}
-          variant="secondary"
-          className="mt-5"
-        >
-          {prunePending ? "Pruning..." : "Prune old logs now"}
-        </Button>
-      </Panel>
+      <div className="space-y-6">
+        <Panel as="article" className="p-6">
+          <PanelHeader
+            eyebrow="Registry state"
+            title="Rebuild repository cache"
+            description="Walk the registry catalog, refresh repository/tag state, and repair missed notification updates."
+          />
+          {rebuildMessage ? <Alert tone="emerald" className="mt-4">{rebuildMessage}</Alert> : null}
+          {rebuildError ? <Alert tone="rose" className="mt-4">{rebuildError}</Alert> : null}
+          <Button
+            type="button"
+            onClick={onRebuildCache}
+            disabled={rebuildPending}
+            loading={rebuildPending}
+            variant="soft"
+            className="mt-5"
+          >
+            {rebuildPending ? null : <ArrowPathIcon className="h-4 w-4" />}
+            {rebuildPending ? "Starting..." : "Rebuild registry state"}
+          </Button>
+        </Panel>
+
+        <Panel as="article" className="p-6">
+          <PanelHeader
+            eyebrow="Log retention"
+            title="Prune retained logs"
+            description={`Delete audit events and completed maintenance jobs older than ${logRetentionDays} days without scheduling a registry maintenance run.`}
+            action={<Badge tone="cyan">{logRetentionDays} days</Badge>}
+          />
+          {pruneMessage ? <Alert tone="emerald" className="mt-4">{pruneMessage}</Alert> : null}
+          {pruneError ? <Alert tone="rose" className="mt-4">{pruneError}</Alert> : null}
+          <Button
+            type="button"
+            onClick={onPruneLogs}
+            disabled={prunePending}
+            loading={prunePending}
+            variant="secondary"
+            className="mt-5"
+          >
+            {prunePending ? "Pruning..." : "Prune old logs now"}
+          </Button>
+        </Panel>
+      </div>
     </section>
   );
 }

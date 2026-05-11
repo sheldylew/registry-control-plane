@@ -141,7 +141,12 @@ def _public_repository_names(session: Session, repository_names: list[str]) -> s
 
 
 def is_repository_public(session: Session, repository_name: str) -> bool:
-    repository = session.scalar(select(Repository).where(Repository.name == repository_name))
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.name == repository_name,
+            Repository.deleted_at.is_(None),
+        )
+    )
     return repository is not None and repository.visibility == "public"
 
 

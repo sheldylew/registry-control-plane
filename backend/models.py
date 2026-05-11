@@ -95,6 +95,79 @@ class Repository(Base):
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     visibility: Mapped[str] = mapped_column(String(32), nullable=False, default="private")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    tags: Mapped[list["RepositoryTag"]] = relationship(back_populates="repository")
+
+
+class RepositoryTag(Base):
+    __tablename__ = "repository_tags"
+    __table_args__ = (
+        UniqueConstraint("repository_id", "name", name="uq_repository_tags_repo_name"),
+        Index("ix_repository_tags_repo_deleted_name", "repository_id", "deleted_at", "name"),
+        Index("ix_repository_tags_digest", "manifest_digest"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[Optional[str]] = mapped_column(String(255))
+    pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    repository: Mapped[Repository] = relationship(back_populates="tags")
+
+
+class RegistryEventInbox(Base):
+    __tablename__ = "registry_event_inbox"
+    __table_args__ = (
+        Index("ix_registry_event_inbox_status_received_at", "status", "received_at"),
+        Index("ix_registry_event_inbox_dedupe_key", "dedupe_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    repository_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tag: Mapped[Optional[str]] = mapped_column(String(255))
+    digest: Mapped[Optional[str]] = mapped_column(String(255))
+    media_type: Mapped[Optional[str]] = mapped_column(String(255))
+    raw_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    dedupe_key: Mapped[str] = mapped_column(String(1024), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class RegistryStateRebuildJob(Base):
+    __tablename__ = "registry_state_rebuild_jobs"
+    __table_args__ = (
+        Index("ix_registry_state_rebuild_jobs_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    repositories_scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    repositories_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    repositories_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tags_scanned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tags_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tags_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    manifest_summaries_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    log_output: Mapped[Optional[str]] = mapped_column(Text)
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class AppSetting(Base):

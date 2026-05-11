@@ -61,6 +61,9 @@ export default async function AdminMaintenancePage({ searchParams }) {
   const cacheFreshnessDetail = payload.cache.newest_last_seen_at
     ? `Newest hit ${formatDateTime(payload.cache.newest_last_seen_at, { timeZone, fallback: "Unknown" })}.`
     : "No cache hits recorded yet.";
+  const lastRebuildDetail = payload.registry_state.last_rebuild
+    ? `Finished ${formatDateTime(payload.registry_state.last_rebuild.finished_at, { timeZone, fallback: "Pending" })}.`
+    : "No rebuild jobs yet.";
 
   return (
     <div className="space-y-6">
@@ -83,6 +86,37 @@ export default async function AdminMaintenancePage({ searchParams }) {
           label="Last job"
           value={payload.last_job ? payload.last_job.status : "None"}
           detail={payload.last_job ? summarizeMode(payload.last_job) : "No maintenance jobs yet"}
+        />
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <StatCard
+          label="Active repositories"
+          value={payload.registry_state.active_repositories}
+          detail="Backed by the app database."
+          tone="cyan"
+        />
+        <StatCard
+          label="Active tags"
+          value={payload.registry_state.active_tags}
+          detail="Available without registry scans."
+          tone="emerald"
+        />
+        <StatCard
+          label="Inbox queued"
+          value={payload.registry_state.inbox_queued}
+          detail="Registry events awaiting processing."
+        />
+        <StatCard
+          label="Inbox failed"
+          value={payload.registry_state.inbox_failed}
+          detail="Needs rebuild or retry review."
+          tone={payload.registry_state.inbox_failed ? "rose" : "slate"}
+        />
+        <StatCard
+          label="Last rebuild"
+          value={payload.registry_state.last_rebuild ? payload.registry_state.last_rebuild.status : "None"}
+          detail={lastRebuildDetail}
         />
       </section>
 
@@ -145,6 +179,57 @@ export default async function AdminMaintenancePage({ searchParams }) {
           label="jobs"
           hrefForPage={buildPageHref}
         />
+      </Panel>
+
+      <Panel as="section" className="p-6">
+        <PanelHeader
+          eyebrow="Registry state"
+          title="Recent cache rebuild jobs"
+          action={<Badge>{payload.rebuild_jobs.length} shown</Badge>}
+        />
+        <div className="mt-6 space-y-4">
+          {payload.rebuild_jobs.length ? (
+            payload.rebuild_jobs.map((job) => (
+              <article key={job.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <p className="text-sm font-semibold text-white">Rebuild #{job.id}</p>
+                      <Badge tone={job.status === "failed" ? "rose" : "slate"}>{job.status}</Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-400">
+                      Repositories: {job.repositories_scanned}. Tags: {job.tags_scanned}. Deleted tags: {job.tags_deleted}.
+                    </p>
+                    <p className="mt-2 text-sm text-slate-400">
+                      Started {formatDateTime(job.started_at, { timeZone, fallback: "Pending" })}. Finished {formatDateTime(job.finished_at, { timeZone, fallback: "Pending" })}.
+                    </p>
+                  </div>
+                  {job.error ? (
+                    <Alert tone="rose">{job.error}</Alert>
+                  ) : null}
+                </div>
+                {job.log_output ? (
+                  <div className="mt-4">
+                    <Disclosure
+                      titleClosed="View output"
+                      titleOpen="Hide output"
+                      meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
+                    >
+                      <pre className="overflow-x-auto border-t border-white/10 px-4 py-4 text-xs text-slate-200">
+                        {job.log_output}
+                      </pre>
+                    </Disclosure>
+                  </div>
+                ) : null}
+              </article>
+            ))
+          ) : (
+            <EmptyState
+              title="No rebuild jobs"
+              description="No registry state rebuild jobs recorded yet."
+            />
+          )}
+        </div>
       </Panel>
     </div>
   );

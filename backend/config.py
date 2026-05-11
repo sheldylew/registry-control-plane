@@ -39,9 +39,6 @@ class Settings:
     registry_config_template_path: str = "docker/registry-config.yml.tmpl"
     registry_rendered_config_path: str = ".local-data/registry-config.yml"
     maintenance_min_gate_seconds: float = 1.0
-    registry_catalog_cache_seconds: float = 5.0
-    repository_list_cache_seconds: float = 5.0
-    repository_tag_probe_cache_seconds: float = 5.0
     registry_catalog_max_pages: int = 10
     dashboard_max_repositories: int = 50
     repository_tags_max_items: int = 100
@@ -78,12 +75,6 @@ class Settings:
             raise ValueError("TOKEN_RECORD_RETENTION_DAYS must be at least 1.")
         if self.registry_catalog_max_pages < 1:
             raise ValueError("REGISTRY_CATALOG_MAX_PAGES must be at least 1.")
-        if self.registry_catalog_cache_seconds < 0:
-            raise ValueError("REGISTRY_CATALOG_CACHE_SECONDS must be 0 or greater.")
-        if self.repository_list_cache_seconds < 0:
-            raise ValueError("REPOSITORY_LIST_CACHE_SECONDS must be 0 or greater.")
-        if self.repository_tag_probe_cache_seconds < 0:
-            raise ValueError("REPOSITORY_TAG_PROBE_CACHE_SECONDS must be 0 or greater.")
         if self.dashboard_max_repositories < 1:
             raise ValueError("DASHBOARD_MAX_REPOSITORIES must be at least 1.")
         if self.repository_tags_max_items < 1:
@@ -107,9 +98,6 @@ def load_settings() -> Settings:
         registry_service_name=os.getenv("REGISTRY_SERVICE_NAME", "registry"),
         registry_gc_config_path=os.getenv("REGISTRY_GC_CONFIG_PATH", "/etc/docker/registry/config.yml"),
         maintenance_min_gate_seconds=float(os.getenv("MAINTENANCE_MIN_GATE_SECONDS", "1.0")),
-        registry_catalog_cache_seconds=float(os.getenv("REGISTRY_CATALOG_CACHE_SECONDS", "5.0")),
-        repository_list_cache_seconds=float(os.getenv("REPOSITORY_LIST_CACHE_SECONDS", "5.0")),
-        repository_tag_probe_cache_seconds=float(os.getenv("REPOSITORY_TAG_PROBE_CACHE_SECONDS", "5.0")),
         token_issuer=os.getenv("TOKEN_ISSUER", "sheldylew-registry"),
         token_service=os.getenv("TOKEN_SERVICE", "sheldylew-registry"),
         token_ttl_seconds=int(os.getenv("TOKEN_TTL_SECONDS", "900")),

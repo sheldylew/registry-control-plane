@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from backend.auth.passwords import hash_password
 from backend.main import create_app
-from backend.models import Repository, RepositoryPermission, User
+from backend.models import CachedManifestSummary, Repository, RepositoryPermission, RepositoryTag, User
 from backend.registry_client import ManifestDetails, ResolvedManifestDescriptor
 
 
@@ -118,7 +118,41 @@ def _seed_actor_data(app) -> None:
     with app.state.session_factory() as session:
         if session.scalar(select(User).where(User.username == "low-user")) is not None:
             return
-        session.add(Repository(name="public/app", visibility="public"))
+        public_repo = Repository(name="public/app", visibility="public")
+        team_repo = Repository(name="team/app", visibility="private")
+        secret_repo = Repository(name="secret/app", visibility="private")
+        session.add_all([public_repo, team_repo, secret_repo])
+        session.flush()
+        session.add(
+            RepositoryTag(
+                repository_id=team_repo.id,
+                name="latest",
+                manifest_digest="sha256:abc",
+                media_type="application/vnd.oci.image.manifest.v1+json",
+            )
+        )
+        session.add(
+            RepositoryTag(
+                repository_id=secret_repo.id,
+                name="latest",
+                manifest_digest="sha256:secret",
+                media_type="application/vnd.oci.image.manifest.v1+json",
+            )
+        )
+        session.add(
+            CachedManifestSummary(
+                repository_name="team/app",
+                manifest_digest="sha256:abc",
+                media_type="application/vnd.oci.image.manifest.v1+json",
+                config_digest="sha256:def",
+                total_size=1,
+                created_at=None,
+                architectures=["linux/amd64"],
+                history_count=1,
+                children_truncated=False,
+                history_truncated=False,
+            )
+        )
         low = User(
             username="low-user",
             email="low-user@example.com",

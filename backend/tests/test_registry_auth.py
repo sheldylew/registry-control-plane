@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 
 import jwt
 from cryptography import x509
@@ -118,6 +119,28 @@ def test_auth_token_allows_anonymous_pull_for_public_repository(settings) -> Non
     assert events[-1].actor_type == "anonymous"
     assert events[-1].actor_id is None
     assert metrics_snapshot()["registry_public_pull_tokens_issued_total"] == 1
+
+
+def test_auth_token_denies_anonymous_pull_for_soft_deleted_public_repository(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(
+                Repository(
+                    name="public/app",
+                    visibility="public",
+                    deleted_at=datetime.now(timezone.utc),
+                )
+            )
+            session.commit()
+
+        response = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:public/app:pull"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Basic authentication is required."
 
 
 def test_auth_token_requires_basic_auth_for_anonymous_push_on_public_repository(settings) -> None:

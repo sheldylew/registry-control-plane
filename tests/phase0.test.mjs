@@ -6,6 +6,8 @@ test("nginx routes app, auth, and registry paths to the expected upstreams", asy
   const nginxConf = await readFile(new URL("../docker/nginx.conf", import.meta.url), "utf8");
 
   assert.match(nginxConf, /client_max_body_size 300m;/);
+  assert.match(nginxConf, /map \$http_x_forwarded_proto \$rcp_forwarded_proto \{/);
+  assert.match(nginxConf, /"" \$scheme;/);
   assert.match(nginxConf, /location = \/_internal\/registry-maintenance \{/);
   assert.match(nginxConf, /proxy_pass_request_body off;/);
   assert.match(nginxConf, /proxy_set_header Content-Length "";/);
@@ -15,6 +17,7 @@ test("nginx routes app, auth, and registry paths to the expected upstreams", asy
   assert.match(nginxConf, /proxy_pass http:\/\/api:8000\/api\/;/);
   assert.doesNotMatch(nginxConf, /\$proxy_add_x_forwarded_for/);
   assert.match(nginxConf, /proxy_set_header X-Forwarded-For \$remote_addr;/);
+  assert.match(nginxConf, /proxy_set_header X-Forwarded-Proto \$rcp_forwarded_proto;/);
   assert.match(nginxConf, /location \/healthz \{/);
   assert.match(nginxConf, /proxy_pass http:\/\/api:8000\/healthz;/);
   assert.match(nginxConf, /location \/auth\/token \{/);

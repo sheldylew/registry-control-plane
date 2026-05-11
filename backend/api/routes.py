@@ -1,15 +1,13 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import hmac
 from pathlib import Path
 import shutil
 from datetime import datetime, timedelta, timezone
-from time import monotonic
 from typing import Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import String, func, select
+from sqlalchemy import String, and_, func, literal, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,7 +16,6 @@ from backend.auth.passwords import hash_password, verify_password
 from backend.auth.pats import authenticate_personal_access_token, issue_personal_access_token, issue_robot_token
 from backend.auth.permissions import (
     can_access_repository,
-    filter_visible_repositories,
     validate_repository_name,
     validate_repository_pattern,
 )
@@ -27,8 +24,30 @@ from backend.config import Settings
 from backend.maintenance import MaintenanceService
 from backend.metrics import increment as increment_metric
 from backend.metrics import snapshot as metrics_snapshot
-from backend.models import AuditEvent, CachedManifestSummary, GcJob, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
-from backend.registry_client import HistoryVariant, ManifestDetails, RegistryClient, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
+from backend.models import (
+    AuditEvent,
+    CachedManifestSummary,
+    GcJob,
+    PersonalAccessToken,
+    RegistryStateRebuildJob,
+    Repository,
+    RepositoryPermission,
+    RepositoryTag,
+    RobotAccount,
+    RobotToken,
+    User,
+    WebSession,
+)
+from backend.registry_client import HistoryVariant, ManifestDetails, RegistryClient, RegistryNotFoundError, TagSummary
+from backend.registry_state import (
+    create_rebuild_job,
+    create_registry_event_rows,
+    mark_repository_deleted,
+    mark_repository_tag_deleted,
+    process_registry_event_inbox_entry,
+    registry_state_stats,
+    run_registry_state_rebuild_job,
+)
 from backend.setup import (
     DEFAULT_UI_TIMEZONE,
     RESTART_COMMAND,
@@ -170,6 +189,55 @@ def _serialize_repository(repository: Repository) -> dict:
     }
 
 
+def _visible_repository_condition(user: User):
+    if user.is_admin:
+        return None
+
+    subject_type = "user"
+    subject_id = user.id
+    public_repository = Repository.visibility == "public"
+    exact_permission_exists = (
+        select(RepositoryPermission.id)
+        .where(
+            RepositoryPermission.subject_type == subject_type,
+            RepositoryPermission.subject_id == subject_id,
+            RepositoryPermission.repository_pattern == Repository.name,
+        )
+        .exists()
+    )
+    exact_pull_exists = (
+        select(RepositoryPermission.id)
+        .where(
+            RepositoryPermission.subject_type == subject_type,
+            RepositoryPermission.subject_id == subject_id,
+            RepositoryPermission.repository_pattern == Repository.name,
+            RepositoryPermission.can_pull.is_(True),
+        )
+        .exists()
+    )
+    wildcard_prefix = func.substr(
+        RepositoryPermission.repository_pattern,
+        1,
+        func.length(RepositoryPermission.repository_pattern) - 2,
+    )
+    wildcard_pull_exists = (
+        select(RepositoryPermission.id)
+        .where(
+            RepositoryPermission.subject_type == subject_type,
+            RepositoryPermission.subject_id == subject_id,
+            RepositoryPermission.repository_pattern.like("%/*"),
+            RepositoryPermission.can_pull.is_(True),
+            Repository.name.like(wildcard_prefix + literal("/%")),
+        )
+        .exists()
+    )
+    return or_(
+        public_repository,
+        exact_pull_exists,
+        and_(not_(exact_permission_exists), wildcard_pull_exists),
+    )
+
+
 def _serialize_entity_activity(events: list[AuditEvent], actor_names: dict[int, str]) -> list[dict]:
     return [
         _serialize_audit_event(
@@ -225,127 +293,6 @@ def _subject_for_user(user: User) -> dict[str, object]:
     }
 
 
-def _list_repositories_cached(
-    request: Request,
-    registry: RegistryClient,
-    settings: Settings,
-) -> tuple[list[str], dict]:
-    cache_ttl = settings.registry_catalog_cache_seconds
-    if cache_ttl <= 0:
-        return registry.list_repositories_bounded(max_pages=settings.registry_catalog_max_pages)
-
-    now = monotonic()
-    cached = getattr(request.app.state, "repository_catalog_cache", None)
-    if cached and cached.get("expires_at", 0.0) > now:
-        return cached["repositories"], cached["truncation"]
-
-    repositories, truncation = registry.list_repositories_bounded(
-        max_pages=settings.registry_catalog_max_pages
-    )
-    request.app.state.repository_catalog_cache = {
-        "expires_at": now + cache_ttl,
-        "repositories": repositories,
-        "truncation": truncation,
-    }
-    return repositories, truncation
-
-
-def _clear_repository_list_page_cache(request: Request) -> None:
-    request.app.state.repository_list_page_cache = {}
-
-
-def _clear_repository_tag_probe_cache(request: Request) -> None:
-    request.app.state.repository_tag_probe_cache = {}
-
-
-def _clear_repository_read_caches(request: Request, *, include_catalog: bool = False) -> None:
-    _clear_repository_list_page_cache(request)
-    _clear_repository_tag_probe_cache(request)
-    if include_catalog:
-        request.app.state.repository_catalog_cache = None
-
-
-def _repository_list_page_cache_key(user: User, *, page: int, page_size: int) -> tuple[int, bool, int, int]:
-    return (user.id, user.is_admin, page, page_size)
-
-
-def _cached_repository_list_payload(
-    request: Request,
-    settings: Settings,
-    *,
-    cache_key: tuple[int, bool, int, int],
-) -> Optional[dict]:
-    cache_ttl = settings.repository_list_cache_seconds
-    if cache_ttl <= 0:
-        return None
-
-    now = monotonic()
-    cache = getattr(request.app.state, "repository_list_page_cache", {})
-    cached = cache.get(cache_key)
-    if cached and cached.get("expires_at", 0.0) > now:
-        return cached["payload"]
-    if cached:
-        cache.pop(cache_key, None)
-    return None
-
-
-def _store_repository_list_payload(
-    request: Request,
-    settings: Settings,
-    *,
-    cache_key: tuple[int, bool, int, int],
-    payload: dict,
-) -> None:
-    cache_ttl = settings.repository_list_cache_seconds
-    if cache_ttl <= 0:
-        return
-
-    cache = getattr(request.app.state, "repository_list_page_cache", {})
-    cache[cache_key] = {
-        "expires_at": monotonic() + cache_ttl,
-        "payload": payload,
-    }
-    request.app.state.repository_list_page_cache = cache
-
-
-def _repository_tags_resolvable_cached(
-    request: Request,
-    registry: RegistryClient,
-    settings: Settings,
-    *,
-    repository_name: str,
-) -> bool:
-    cache_ttl = settings.repository_tag_probe_cache_seconds
-    if cache_ttl <= 0:
-        try:
-            registry.list_tags(repository_name)
-        except RegistryNotFoundError:
-            return False
-        return True
-
-    now = monotonic()
-    cache = getattr(request.app.state, "repository_tag_probe_cache", {})
-    cached = cache.get(repository_name)
-    if cached and cached.get("expires_at", 0.0) > now:
-        return bool(cached["resolvable"])
-    if cached:
-        cache.pop(repository_name, None)
-
-    try:
-        registry.list_tags(repository_name)
-    except RegistryNotFoundError:
-        resolvable = False
-    else:
-        resolvable = True
-
-    cache[repository_name] = {
-        "expires_at": now + cache_ttl,
-        "resolvable": resolvable,
-    }
-    request.app.state.repository_tag_probe_cache = cache
-    return resolvable
-
-
 def _serialize_manifest(details: ManifestDetails) -> dict:
     return {
         "name": details.name,
@@ -376,16 +323,6 @@ def _serialize_tag_summary(summary: TagSummary) -> dict:
         "children_truncated": summary.children_truncated,
         "history_truncated": summary.history_truncated,
     }
-
-
-def _parse_cached_created_at(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    normalized = value.replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 def _format_cached_created_at(value: Optional[datetime]) -> Optional[str]:
@@ -440,83 +377,20 @@ def _build_tag_summary_from_cache(row: CachedManifestSummary, *, tag: str) -> Ta
     )
 
 
-def _build_tag_summary_from_manifest(details: ManifestDetails, *, tag: str, digest: Optional[str]) -> TagSummary:
-    return TagSummary(
-        tag=tag,
-        digest=digest or details.digest,
-        media_type=details.media_type,
-        total_size=details.total_size,
-        architectures=details.architectures,
-        created_at=details.created_at,
-        history_count=details.history_count,
-        children_truncated=details.children_truncated,
-        history_truncated=details.history_truncated,
-    )
-
-
-def _upsert_cached_manifest_summary(
-    db: Session,
-    *,
-    repository_name: str,
-    manifest_digest: str,
-    details: ManifestDetails,
-    seen_at: datetime,
-) -> CachedManifestSummary:
-    row = db.scalar(
-        select(CachedManifestSummary).where(
-            CachedManifestSummary.repository_name == repository_name,
-            CachedManifestSummary.manifest_digest == manifest_digest,
+def _get_active_repository_tag(db: Session, *, repository_name: str, tag_name: str) -> tuple[Repository, RepositoryTag]:
+    row = db.execute(
+        select(Repository, RepositoryTag)
+        .join(RepositoryTag, RepositoryTag.repository_id == Repository.id)
+        .where(
+            Repository.name == repository_name,
+            Repository.deleted_at.is_(None),
+            RepositoryTag.name == tag_name,
+            RepositoryTag.deleted_at.is_(None),
         )
-    )
+    ).one_or_none()
     if row is None:
-        row = CachedManifestSummary(
-            repository_name=repository_name,
-            manifest_digest=manifest_digest,
-            media_type=details.media_type,
-            config_digest=details.config_digest,
-            total_size=details.total_size,
-            created_at=_parse_cached_created_at(details.created_at),
-            architectures=list(details.architectures),
-            history_count=details.history_count,
-            children_truncated=details.children_truncated,
-            history_truncated=details.history_truncated,
-            cached_at=seen_at,
-            last_seen_at=seen_at,
-        )
-        db.add(row)
-        return row
-
-    row.media_type = details.media_type
-    row.config_digest = details.config_digest
-    row.total_size = details.total_size
-    row.created_at = _parse_cached_created_at(details.created_at)
-    row.architectures = list(details.architectures)
-    row.history_count = details.history_count
-    row.children_truncated = details.children_truncated
-    row.history_truncated = details.history_truncated
-    row.cached_at = seen_at
-    row.last_seen_at = seen_at
-    return row
-
-
-def _load_manifest_details_for_summary(
-    request: Request,
-    *,
-    repository_name: str,
-    reference: str,
-    max_manifest_children: int,
-    max_history_entries: int,
-) -> ManifestDetails:
-    registry = request.app.state.registry_client_factory()
-    try:
-        return registry.get_manifest_details(
-            repository_name,
-            reference,
-            max_manifest_children=max_manifest_children,
-            max_history_entries=max_history_entries,
-        )
-    finally:
-        registry.close()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository tag not found.")
+    return row[0], row[1]
 
 
 def _require_registry_notification_auth(request: Request) -> None:
@@ -559,117 +433,10 @@ def _normalize_registry_notification_events(payload: dict) -> list[dict[str, Opt
                 "tag": raw_event.get("tag") or target.get("tag"),
                 "digest": target.get("digest"),
                 "media_type": media_type,
+                "raw_payload": raw_event,
             }
         )
     return normalized_events
-
-
-def _delete_cached_manifest_summary(
-    session_factory,
-    *,
-    repository_name: str,
-    manifest_digest: str,
-) -> None:
-    with session_factory() as db:
-        cached_rows = db.scalars(
-            select(CachedManifestSummary).where(
-                CachedManifestSummary.repository_name == repository_name,
-                CachedManifestSummary.manifest_digest == manifest_digest,
-            )
-        ).all()
-        if not cached_rows:
-            return
-        for row in cached_rows:
-            db.delete(row)
-        db.commit()
-
-
-def _warm_cached_manifest_summary(
-    request: Request,
-    *,
-    repository_name: str,
-    tag: Optional[str],
-    digest: Optional[str],
-) -> None:
-    registry = request.app.state.registry_client_factory()
-    try:
-        reference = digest
-        if tag:
-            try:
-                resolved_descriptor = registry.resolve_manifest_descriptor(repository_name, tag)
-            except RegistryNotFoundError:
-                resolved_descriptor = None
-            else:
-                if resolved_descriptor.digest:
-                    reference = resolved_descriptor.digest
-        if not reference:
-            return
-        details = registry.get_manifest_details(
-            repository_name,
-            reference,
-            max_manifest_children=request.app.state.settings.manifest_children_max_items,
-            max_history_entries=request.app.state.settings.history_entries_max_items,
-        )
-    except RegistryNotFoundError:
-        return
-    finally:
-        registry.close()
-
-    resolved_digest = details.digest or digest or reference
-    if not resolved_digest:
-        return
-
-    seen_at = datetime.now(timezone.utc)
-    with request.app.state.session_factory() as db:
-        _upsert_cached_manifest_summary(
-            db,
-            repository_name=repository_name,
-            manifest_digest=resolved_digest,
-            details=details,
-            seen_at=seen_at,
-        )
-        db.commit()
-
-
-def _process_registry_notification_events(request: Request, events: list[dict[str, Optional[str]]]) -> None:
-    if events:
-        _clear_repository_read_caches(request, include_catalog=True)
-
-    warmed_references: set[tuple[str, Optional[str], Optional[str]]] = set()
-    deleted_digests: set[tuple[str, str]] = set()
-
-    for event in events:
-        repository_name = event.get("repository_name")
-        if not repository_name:
-            continue
-
-        action = event.get("action")
-        digest = event.get("digest")
-        tag = event.get("tag")
-        if action == "delete":
-            if not digest:
-                continue
-            delete_key = (repository_name, digest)
-            if delete_key in deleted_digests:
-                continue
-            _delete_cached_manifest_summary(
-                request.app.state.session_factory,
-                repository_name=repository_name,
-                manifest_digest=digest,
-            )
-            deleted_digests.add(delete_key)
-            continue
-
-        warm_key = (repository_name, tag, digest)
-        if warm_key in warmed_references:
-            continue
-        _warm_cached_manifest_summary(
-            request,
-            repository_name=repository_name,
-            tag=tag,
-            digest=digest,
-        )
-        warmed_references.add(warm_key)
 
 
 def _serialize_history_variant(variant: HistoryVariant) -> dict:
@@ -696,6 +463,27 @@ def _serialize_gc_job(job: GcJob) -> dict:
         "prune_empty_dirs": job.prune_empty_dirs,
         "bytes_before": job.bytes_before,
         "bytes_after": job.bytes_after,
+        "log_output": job.log_output,
+        "error": job.error,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+    }
+
+
+def _serialize_registry_state_rebuild_job(job: RegistryStateRebuildJob) -> dict:
+    return {
+        "id": job.id,
+        "status": job.status,
+        "requested_by": job.requested_by,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "repositories_scanned": job.repositories_scanned,
+        "repositories_updated": job.repositories_updated,
+        "repositories_deleted": job.repositories_deleted,
+        "tags_scanned": job.tags_scanned,
+        "tags_updated": job.tags_updated,
+        "tags_deleted": job.tags_deleted,
+        "manifest_summaries_updated": job.manifest_summaries_updated,
         "log_output": job.log_output,
         "error": job.error,
         "created_at": job.created_at.isoformat(),
@@ -1694,7 +1482,6 @@ def list_permissions(
 @router.post("/admin/permissions")
 def upsert_permission(
     payload: UpsertPermissionPayload,
-    request: Request,
     csrf_user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -1757,14 +1544,12 @@ def upsert_permission(
             "can_delete": permission.can_delete,
         },
     )
-    _clear_repository_list_page_cache(request)
     return {"permission": _serialize_permission(permission, subject_name=subject_name)}
 
 
 @router.post("/admin/permissions/{permission_id}/delete")
 def delete_permission(
     permission_id: int,
-    request: Request,
     csrf_user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -1790,14 +1575,12 @@ def delete_permission(
     )
     db.delete(permission)
     db.commit()
-    _clear_repository_list_page_cache(request)
     return {"ok": True, "permission_id": permission_id}
 
 
 @router.post("/admin/repositories/visibility")
 def upsert_repository_visibility(
     payload: UpsertRepositoryVisibilityPayload,
-    request: Request,
     csrf_user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -1832,7 +1615,6 @@ def upsert_repository_visibility(
             "visibility": repository.visibility,
         },
     )
-    _clear_repository_list_page_cache(request)
     return {"repository": _serialize_repository(repository)}
 
 
@@ -1992,10 +1774,8 @@ def delete_robot(
 
 @router.get("/admin/dashboard")
 def admin_dashboard(
-    request: Request,
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
-    registry: RegistryClient = Depends(get_registry_client),
     settings: Settings = Depends(get_settings),
 ):
     metrics = metrics_snapshot()
@@ -2004,31 +1784,41 @@ def admin_dashboard(
     robots = db.scalars(select(RobotAccount).order_by(RobotAccount.created_at.desc())).all()
     robot_tokens = db.scalars(select(RobotToken).order_by(RobotToken.created_at.desc())).all()
 
-    repo_rows: list[dict] = []
-    total_tags = 0
-    repo_truncation = {"truncated": False, "pages_fetched": 0, "returned": 0}
-    try:
-        repositories, repo_truncation = _list_repositories_cached(request, registry, settings)
-        for repository_name in repositories[: settings.dashboard_max_repositories]:
-            try:
-                tags = registry.list_tags(repository_name)
-            except RegistryNotFoundError:
-                continue
-            total_tags += len(tags)
-            repo_rows.append({"name": repository_name, "tag_count": len(tags)})
-        repo_truncation["truncated"] = repo_truncation["truncated"] or len(repositories) > settings.dashboard_max_repositories
-        repo_truncation["returned"] = len(repo_rows)
-    except Exception:
-        # Handle registry connectivity issues gracefully
-        print("Warning: Registry summary unavailable.")
-        # Return empty repo data instead of failing completely
-        repo_rows = []
-        total_tags = 0
-        repo_truncation = {"truncated": False, "pages_fetched": 0, "returned": 0}
-    finally:
-        registry.close()
-
-    repo_rows.sort(key=lambda item: (-item["tag_count"], item["name"]))
+    total_repositories = db.scalar(
+        select(func.count(func.distinct(Repository.id)))
+        .join(RepositoryTag)
+        .where(
+            Repository.deleted_at.is_(None),
+            RepositoryTag.deleted_at.is_(None),
+        )
+    ) or 0
+    total_tags = db.scalar(
+        select(func.count(RepositoryTag.id))
+        .join(Repository)
+        .where(
+            Repository.deleted_at.is_(None),
+            RepositoryTag.deleted_at.is_(None),
+        )
+    ) or 0
+    repo_rows = [
+        {"name": name, "tag_count": int(tag_count)}
+        for name, tag_count in db.execute(
+            select(Repository.name, func.count(RepositoryTag.id).label("tag_count"))
+            .join(RepositoryTag)
+            .where(
+                Repository.deleted_at.is_(None),
+                RepositoryTag.deleted_at.is_(None),
+            )
+            .group_by(Repository.id, Repository.name)
+            .order_by(func.count(RepositoryTag.id).desc(), Repository.name.asc())
+            .limit(settings.dashboard_max_repositories)
+        ).all()
+    ]
+    repo_truncation = {
+        "truncated": total_repositories > settings.dashboard_max_repositories,
+        "pages_fetched": 0,
+        "returned": len(repo_rows),
+    }
 
     return {
         "stats": {
@@ -2036,8 +1826,8 @@ def admin_dashboard(
             "users_active": sum(1 for user in users if user.is_active),
             "pats_active": _count_active_tokens(pats),
             "robots_active": sum(1 for robot in robots if robot.is_active),
-            "registry_repositories": len(repo_rows),
-            "registry_tags": total_tags,
+            "registry_repositories": int(total_repositories),
+            "registry_tags": int(total_tags),
             "public_pull_tokens_issued": metrics["registry_public_pull_tokens_issued_total"],
         },
         "repo_distribution": repo_rows[:6],
@@ -2120,15 +1910,29 @@ def maintenance_summary(
 ):
     summary = maintenance.maintenance_summary(db, page=page)
     cache_stats = _cached_manifest_summary_stats(db)
+    state_stats = registry_state_stats(db)
+    rebuild_jobs = db.scalars(
+        select(RegistryStateRebuildJob)
+        .order_by(RegistryStateRebuildJob.created_at.desc())
+        .limit(5)
+    ).all()
     return {
         "registry_status": summary["registry_status"],
         "registry_gate_enabled": summary["registry_status"] == "maintenance",
         "storage_usage_bytes": summary["storage_usage_bytes"],
         "cache": cache_stats,
+        "registry_state": {
+            "active_repositories": state_stats["active_repositories"],
+            "active_tags": state_stats["active_tags"],
+            "inbox_queued": state_stats["inbox_queued"],
+            "inbox_failed": state_stats["inbox_failed"],
+            "last_rebuild": _serialize_registry_state_rebuild_job(state_stats["last_rebuild"]) if state_stats["last_rebuild"] else None,
+        },
         "log_retention_days": summary["log_retention_days"],
         "active_job": _serialize_gc_job(summary["active_job"]) if summary["active_job"] else None,
         "last_job": _serialize_gc_job(summary["last_job"]) if summary["last_job"] else None,
         "jobs": [_serialize_gc_job(job) for job in summary["jobs"]],
+        "rebuild_jobs": [_serialize_registry_state_rebuild_job(job) for job in rebuild_jobs],
         "pagination": summary["pagination"],
     }
 
@@ -2148,12 +1952,52 @@ def ingest_registry_events(
     payload: dict,
     request: Request,
     background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     _require_registry_notification_auth(request)
     events = _normalize_registry_notification_events(payload)
     if events:
-        background_tasks.add_task(_process_registry_notification_events, request, events)
-    return {"accepted": len(events)}
+        rows = create_registry_event_rows(db, events)
+        for row in rows:
+            background_tasks.add_task(
+                process_registry_event_inbox_entry,
+                request.app.state.session_factory,
+                request.app.state.registry_client_factory,
+                request.app.state.settings,
+                row.id,
+            )
+    else:
+        rows = []
+    return {"accepted": len(rows)}
+
+
+@router.post("/admin/maintenance/cache/rebuild")
+def create_registry_state_rebuild(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_csrf),
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        job = create_rebuild_job(
+            db,
+            actor=user,
+            retention_days=request.app.state.settings.log_retention_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    if request.app.state.maintenance_auto_run:
+        background_tasks.add_task(
+            run_registry_state_rebuild_job,
+            request.app.state.session_factory,
+            request.app.state.registry_client_factory,
+            request.app.state.settings,
+            job.id,
+        )
+
+    return {"job": _serialize_registry_state_rebuild_job(job)}
 
 
 @router.get("/admin/audit")
@@ -2262,216 +2106,133 @@ def prune_maintenance_logs(
 
 @router.get("/repos")
 def list_repositories(
-    request: Request,
     user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    registry: RegistryClient = Depends(get_registry_client),
     page: int = 1,
 ):
     safe_page = max(page, 1)
     page_size = REPOSITORY_LIST_PAGE_SIZE
-    cache_key = _repository_list_page_cache_key(user, page=safe_page, page_size=page_size)
-    cached_payload = _cached_repository_list_payload(request, settings, cache_key=cache_key)
-    if cached_payload is not None:
-        registry.close()
-        return cached_payload
-
-    try:
-        all_repositories, truncation = _list_repositories_cached(request, registry, settings)
-        visible_repositories = filter_visible_repositories(
-            db,
-            repository_names=all_repositories,
-            **_subject_for_user(user),
+    visible_condition = _visible_repository_condition(user)
+    visible_repositories_query = (
+        select(Repository)
+        .join(RepositoryTag)
+        .where(
+            Repository.deleted_at.is_(None),
+            RepositoryTag.deleted_at.is_(None),
         )
-        visible_repositories = sorted(visible_repositories)
-        page_start = (safe_page - 1) * page_size
-        page_end = page_start + page_size
-        resolvable_before_page = 0
-        visible_and_resolvable: list[str] = []
-        has_next_resolvable = False
-        for repository_name in visible_repositories:
-            if not _repository_tags_resolvable_cached(
-                request,
-                registry,
-                settings,
-                repository_name=repository_name,
-            ):
-                continue
-            if resolvable_before_page < page_start:
-                resolvable_before_page += 1
-                continue
-            if len(visible_and_resolvable) < page_size:
-                visible_and_resolvable.append(repository_name)
-                continue
-            has_next_resolvable = True
-            break
-        scanned_all_visible_repositories = not has_next_resolvable
-        repository_rows = db.scalars(
-            select(Repository).where(Repository.name.in_(visible_and_resolvable))
-        ).all()
-        repository_visibility = {
-            repository.name: repository.visibility for repository in repository_rows
-        }
-    finally:
-        registry.close()
-
-    if scanned_all_visible_repositories and not truncation.get("truncated"):
-        total_visible = resolvable_before_page + len(visible_and_resolvable)
-    else:
-        total_visible = len(visible_repositories)
+        .distinct()
+    )
+    if visible_condition is not None:
+        visible_repositories_query = visible_repositories_query.where(visible_condition)
+    total_visible = db.scalar(
+        select(func.count()).select_from(visible_repositories_query.subquery())
+    ) or 0
+    page_start = (safe_page - 1) * page_size
+    page_end = page_start + page_size
+    repository_rows = db.scalars(
+        visible_repositories_query.order_by(Repository.name.asc()).offset(page_start).limit(page_size)
+    ).all()
     payload = {
         "repos": [
-            {"name": repository_name, "visibility": repository_visibility.get(repository_name, "private")}
-            for repository_name in visible_and_resolvable
+            {"name": repository.name, "visibility": repository.visibility}
+            for repository in repository_rows
         ],
-        "truncation": truncation,
+        "truncation": {"truncated": False, "pages_fetched": 0, "returned": len(repository_rows)},
         "pagination": {
             "page": safe_page,
             "page_size": page_size,
             "total": total_visible,
             "has_prev": safe_page > 1,
-            "has_next": bool(truncation.get("truncated")) or has_next_resolvable or page_end < total_visible,
+            "has_next": page_end < total_visible,
         },
         "user": _serialize_user(user),
     }
-    _store_repository_list_payload(request, settings, cache_key=cache_key, payload=payload)
     return payload
 
 
 @router.get("/repos/{repo_name:path}/tags")
 def list_repository_tags(
-    request: Request,
     repo_name: str,
     user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    registry: RegistryClient = Depends(get_registry_client),
     page: int = 1,
 ):
     safe_page = max(page, 1)
     page_size = settings.repository_tags_max_items
+    repository = db.scalar(
+        select(Repository).where(
+            Repository.name == repo_name,
+            Repository.deleted_at.is_(None),
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+
     if not can_access_repository(db, repository_name=repo_name, action="pull", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pull access required.")
 
     can_delete_tag = can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user))
     can_prune_repository = user.is_admin
-    repository = db.scalar(select(Repository).where(Repository.name == repo_name))
-    visibility = repository.visibility if repository is not None else "private"
+    total_tags = db.scalar(
+        select(func.count(RepositoryTag.id)).where(
+            RepositoryTag.repository_id == repository.id,
+            RepositoryTag.deleted_at.is_(None),
+        )
+    ) or 0
+    page_start = (safe_page - 1) * page_size
+    page_end = page_start + page_size
+    tag_rows = db.scalars(
+        select(RepositoryTag)
+        .where(
+            RepositoryTag.repository_id == repository.id,
+            RepositoryTag.deleted_at.is_(None),
+        )
+        .order_by(RepositoryTag.name.asc())
+        .offset(page_start)
+        .limit(page_size)
+    ).all()
 
-    try:
-        all_tags = registry.list_tags(repo_name)
-        total_tags = len(all_tags)
-        page_start = (safe_page - 1) * page_size
-        page_end = page_start + page_size
-        page_tags = all_tags[page_start:page_end]
-        resolved_descriptors: list[tuple[str, ResolvedManifestDescriptor]] = []
-        for tag in page_tags:
-            try:
-                resolved_descriptors.append((tag, registry.resolve_manifest_descriptor(repo_name, tag)))
-            except RegistryNotFoundError:
-                continue
-        truncation = {
-            "truncated": total_tags > page_size,
-            "returned": len(resolved_descriptors),
-            "available": total_tags,
-        }
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.") from exc
-    finally:
-        registry.close()
-
-    now = datetime.now(timezone.utc)
-    tags: list[TagSummary] = []
-    cache_mutated = False
+    digests = sorted({tag.manifest_digest for tag in tag_rows if tag.manifest_digest})
     cache_rows_by_digest: dict[str, CachedManifestSummary] = {}
-
-    resolved_digests = sorted(
-        {
-            descriptor.digest
-            for _tag, descriptor in resolved_descriptors
-            if descriptor.digest
-        }
-    )
-    if resolved_digests:
+    if digests:
         cached_rows = db.scalars(
             select(CachedManifestSummary).where(
                 CachedManifestSummary.repository_name == repo_name,
-                CachedManifestSummary.manifest_digest.in_(resolved_digests),
+                CachedManifestSummary.manifest_digest.in_(digests),
             )
         ).all()
         cache_rows_by_digest = {row.manifest_digest: row for row in cached_rows}
-        for row in cached_rows:
-            row.last_seen_at = now
-        cache_mutated = bool(cached_rows)
 
-    cache_miss_references: dict[str, str] = {}
-    tag_summaries_by_tag: dict[str, TagSummary] = {}
-    for tag, descriptor in resolved_descriptors:
-        digest = descriptor.digest
-        if digest and digest in cache_rows_by_digest:
-            tag_summaries_by_tag[tag] = _build_tag_summary_from_cache(cache_rows_by_digest[digest], tag=tag)
+    tags: list[TagSummary] = []
+    for tag_row in tag_rows:
+        cached_row = cache_rows_by_digest.get(tag_row.manifest_digest)
+        if cached_row is not None:
+            tags.append(_build_tag_summary_from_cache(cached_row, tag=tag_row.name))
             continue
-        if digest:
-            cache_miss_references.setdefault(digest, digest)
-        else:
-            cache_miss_references.setdefault(tag, tag)
+        tags.append(
+            TagSummary(
+                tag=tag_row.name,
+                digest=tag_row.manifest_digest,
+                media_type=tag_row.media_type,
+                total_size=0,
+                architectures=[],
+                created_at=None,
+                history_count=None,
+                children_truncated=False,
+                history_truncated=False,
+            )
+        )
 
-    fresh_details_by_reference: dict[str, ManifestDetails] = {}
-    if cache_miss_references:
-        max_workers = min(8, len(cache_miss_references))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_reference = {
-                executor.submit(
-                    _load_manifest_details_for_summary,
-                    request,
-                    repository_name=repo_name,
-                    reference=reference,
-                    max_manifest_children=settings.manifest_children_max_items,
-                    max_history_entries=settings.history_entries_max_items,
-                ): reference
-                for reference in cache_miss_references.values()
-            }
-            for future in as_completed(future_to_reference):
-                reference = future_to_reference[future]
-                try:
-                    fresh_details_by_reference[reference] = future.result()
-                except RegistryNotFoundError:
-                    continue
-
-    for tag, descriptor in resolved_descriptors:
-        digest = descriptor.digest
-        if tag in tag_summaries_by_tag:
-            tags.append(tag_summaries_by_tag[tag])
-            continue
-
-        cache_reference = digest or tag
-        details = fresh_details_by_reference.get(cache_reference)
-        if details is None:
-            continue
-        if digest:
-            cached_row = cache_rows_by_digest.get(digest)
-            if cached_row is None:
-                cached_row = _upsert_cached_manifest_summary(
-                    db,
-                    repository_name=repo_name,
-                    manifest_digest=digest,
-                    details=details,
-                    seen_at=now,
-                )
-                cache_rows_by_digest[digest] = cached_row
-                cache_mutated = True
-            tags.append(_build_tag_summary_from_cache(cached_row, tag=tag))
-            continue
-        tags.append(_build_tag_summary_from_manifest(details, tag=tag, digest=digest))
-
-    if cache_mutated:
-        db.commit()
-    truncation["returned"] = len(tags)
+    truncation = {
+        "truncated": total_tags > page_size,
+        "returned": len(tags),
+        "available": int(total_tags),
+    }
 
     return {
         "repo": repo_name,
-        "visibility": visibility,
+        "visibility": repository.visibility,
         "public_registry_origin": effective_public_registry_origin(db, settings),
         "can_manage_visibility": user.is_admin,
         "can_delete_tag": can_delete_tag,
@@ -2481,7 +2242,7 @@ def list_repository_tags(
         "pagination": {
             "page": safe_page,
             "page_size": page_size,
-            "total": total_tags,
+            "total": int(total_tags),
             "has_prev": safe_page > 1,
             "has_next": page_end < total_tags,
         },
@@ -2497,6 +2258,7 @@ def get_repository_tag_details(
     settings: Settings = Depends(get_settings),
     registry: RegistryClient = Depends(get_registry_client),
 ):
+    _repository, _tag_row = _get_active_repository_tag(db, repository_name=repo_name, tag_name=tag)
     if not can_access_repository(db, repository_name=repo_name, action="pull", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pull access required.")
 
@@ -2530,6 +2292,7 @@ def get_repository_tag_history(
     settings: Settings = Depends(get_settings),
     registry: RegistryClient = Depends(get_registry_client),
 ):
+    _repository, _tag_row = _get_active_repository_tag(db, repository_name=repo_name, tag_name=tag)
     if not can_access_repository(db, repository_name=repo_name, action="pull", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pull access required.")
 
@@ -2567,6 +2330,7 @@ def delete_repository_tag(
     expected = f"{repo_name}:{tag}"
     if payload.confirmation != expected:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation text mismatch.")
+    _repository, _tag_row = _get_active_repository_tag(db, repository_name=repo_name, tag_name=tag)
     if not can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delete access required.")
 
@@ -2587,7 +2351,13 @@ def delete_repository_tag(
         target_type="repository_tag",
         metadata_json={"repo": repo_name, "tag": tag, "digest": manifest.digest},
     )
-    _clear_repository_read_caches(request)
+    mark_repository_tag_deleted(
+        db,
+        repository_name=repo_name,
+        tag_name=tag,
+        manifest_digest=manifest.digest,
+    )
+    db.commit()
     return {"ok": True, "repo": repo_name, "tag": tag, "digest": manifest.digest}
 
 
@@ -2595,26 +2365,32 @@ def delete_repository_tag(
 def delete_empty_repository(
     repo_name: str,
     payload: DeleteRepositoryPayload,
-    request: Request,
     user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    registry: RegistryClient = Depends(get_registry_client),
 ):
     if payload.confirmation != repo_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation text mismatch.")
-    try:
-        tags = registry.list_tags(repo_name)
-    except RegistryNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.") from exc
-    finally:
-        registry.close()
+    repo_path = _repository_storage_path(settings, repo_name)
+    repository = db.scalar(
+        select(Repository).where(
+            Repository.name == repo_name,
+            Repository.deleted_at.is_(None),
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
 
-    if tags:
+    active_tags = db.scalar(
+        select(func.count(RepositoryTag.id)).where(
+            RepositoryTag.repository_id == repository.id,
+            RepositoryTag.deleted_at.is_(None),
+        )
+    ) or 0
+    if active_tags:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Repository must be empty before deletion.")
 
-    repo_path = _repository_storage_path(settings, repo_name)
     removed = False
     if repo_path.exists():
         shutil.rmtree(repo_path)
@@ -2627,5 +2403,6 @@ def delete_empty_repository(
         target_type="repository",
         metadata_json={"repo": repo_name, "removed": removed},
     )
-    _clear_repository_read_caches(request, include_catalog=True)
+    mark_repository_deleted(db, repository_name=repo_name)
+    db.commit()
     return {"ok": True, "repo": repo_name, "removed": removed}

@@ -70,6 +70,20 @@ test("repositories page shows visibility badges", async () => {
   assert.match(panel, /Private/);
 });
 
+test("maintenance panel exposes registry state rebuild action", async () => {
+  const [page, panel] = await Promise.all([
+    readFile(new URL("../app/admin/maintenance/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/maintenance-panel.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /payload\.registry_state\.active_repositories/);
+  assert.match(page, /payload\.registry_state\.inbox_failed/);
+  assert.match(page, /payload\.rebuild_jobs/);
+  assert.match(panel, /\/api\/admin\/maintenance\/cache\/rebuild/);
+  assert.match(panel, /Rebuild registry state/);
+  assert.match(panel, /X-CSRF-Token/);
+});
+
 test("admin shell includes settings navigation", async () => {
   const shell = await readFile(new URL("../app/components/admin-shell.jsx", import.meta.url), "utf8");
 

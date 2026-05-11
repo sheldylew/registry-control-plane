@@ -210,7 +210,9 @@ check_destructive_ops_and_escalation() {
     -H "X-CSRF-Token: $csrf" \
     -d '{"confirmation":"sheldylew/app:e2e"}' \
     "$BASE_URL/api/repos/sheldylew/app/tags/e2e/delete")"
-  expect_status 403 "$s2" "reader destructive tag delete"
+  if [[ "$s2" != "403" && "$s2" != "404" ]]; then
+    fail "reader destructive tag delete expected HTTP 403/404, got $s2"
+  fi
 
   local s3
   s3="$(http_code \

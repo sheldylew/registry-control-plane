@@ -11,6 +11,7 @@ set -euo pipefail
 # - seeds the Phase 4 permission matrix inside the running API container
 # - exercises Docker CLI authz with real push/pull allow+deny cases
 # - verifies live tag delete and empty-repository delete flows
+# - verifies manual registry state rebuild repair flow
 # - verifies a live GC job and the registry maintenance gate
 
 ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
@@ -213,6 +214,51 @@ raise SystemExit("GC job not found in maintenance summary")
   return 1
 }
 
+poll_rebuild_job() {
+  local job_id="$1"
+  local attempt
+
+  for attempt in {1..120}; do
+    local v2_status
+    v2_status="$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/v2/" || true)"
+    if [[ "$v2_status" == "503" ]]; then
+      echo "Registry state rebuild unexpectedly enabled the maintenance gate." >&2
+      return 1
+    fi
+
+    local summary
+    summary="$(curl -fsS -b "$admin_cookie_jar" "$BASE_URL/api/admin/maintenance")"
+    local job_status
+    job_status="$(print -r -- "$summary" | /usr/bin/python3 -c '
+import json
+import sys
+
+job_id = int(sys.argv[1])
+payload = json.load(sys.stdin)
+for job in payload["rebuild_jobs"]:
+    if job["id"] == job_id:
+        print(job["status"])
+        raise SystemExit(0)
+raise SystemExit("Registry state rebuild job not found in maintenance summary")
+' "$job_id")"
+
+    if [[ "$job_status" == "succeeded" ]]; then
+      return 0
+    fi
+
+    if [[ "$job_status" == "failed" ]]; then
+      echo "Registry state rebuild job failed." >&2
+      print -r -- "$summary" >&2
+      return 1
+    fi
+
+    sleep 0.25
+  done
+
+  echo "Timed out waiting for registry state rebuild job $job_id to finish." >&2
+  return 1
+}
+
 cd "$workdir"
 
 compose() {
@@ -310,6 +356,17 @@ curl -fsS \
   -d '{"confirmation":"sheldylew/delete-me"}' \
   "$BASE_URL/api/repos/sheldylew/delete-me/delete" >/dev/null
 compose exec -T api sh -lc '[ ! -d "/var/lib/registry/docker/registry/v2/repositories/sheldylew/delete-me" ]'
+
+echo "==> Verifying manual registry state rebuild"
+rebuild_response="$(
+  curl -fsS \
+    -b "$admin_cookie_jar" \
+    -H "X-CSRF-Token: $csrf_token" \
+    -X POST \
+    "$BASE_URL/api/admin/maintenance/cache/rebuild"
+)"
+rebuild_job_id="$(print -r -- "$rebuild_response" | json_get job.id)"
+poll_rebuild_job "$rebuild_job_id"
 
 echo "==> Preparing GC candidate"
 build_local_image "$GC_IMAGE"

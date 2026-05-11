@@ -12,7 +12,22 @@ from backend.auth.passwords import hash_password
 from backend.config import Settings
 from backend.main import create_app
 from backend.metrics import snapshot as metrics_snapshot
-from backend.models import AppSetting, AuditEvent, CachedManifestSummary, PersonalAccessToken, Repository, RepositoryPermission, RobotAccount, RobotToken, User, WebSession
+from backend.models import (
+    AppSetting,
+    AuditEvent,
+    CachedManifestSummary,
+    GcJob,
+    PersonalAccessToken,
+    RegistryEventInbox,
+    RegistryStateRebuildJob,
+    Repository,
+    RepositoryPermission,
+    RepositoryTag,
+    RobotAccount,
+    RobotToken,
+    User,
+    WebSession,
+)
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
 from backend.runtime_secrets import ensure_registry_notifications_token
@@ -1312,11 +1327,9 @@ def test_public_repository_is_visible_without_explicit_permission(settings) -> N
                 is_admin=False,
                 is_active=True,
             )
-            session.add_all([user, Repository(name="public/app", visibility="public")])
+            session.add(user)
+            _seed_repository_state(session, "public/app", visibility="public")
             session.commit()
-
-        fake_registry = FakeRegistryClient(repositories=["public/app"], tags={"public/app": ["latest"]})
-        app.state.registry_client_factory = lambda: fake_registry
 
         login = client.post(
             "/api/session/login",
@@ -1534,6 +1547,7 @@ class FakeRegistryClient:
         self.resolve_manifest_descriptor_calls = []
         self.list_tag_summaries_for_tags_calls = []
         self.get_manifest_details_calls = []
+        self.get_tag_history_bounded_calls = []
         self.list_repositories_bounded_calls = 0
         self.list_tag_summaries_bounded_calls = 0
 
@@ -1667,6 +1681,7 @@ class FakeRegistryClient:
         max_manifest_children=None,
         max_history_entries=None,
     ) -> tuple[list[HistoryVariant], dict]:
+        self.get_tag_history_bounded_calls.append((repository_name, tag))
         if repository_name in self.missing_repos:
             raise RegistryNotFoundError(repository_name)
         variants = self.histories[(repository_name, tag)]
@@ -1694,6 +1709,95 @@ def _login(client: TestClient, username: str, password: str):
 
 def _registry_event_headers(app) -> dict[str, str]:
     return {"Authorization": f"Bearer {ensure_registry_notifications_token(app.state.settings)}"}
+
+
+def _seed_repository_state(
+    session,
+    repository_name: str,
+    *,
+    tags: tuple[str, ...] = ("latest",),
+    visibility: str = "private",
+    deleted: bool = False,
+) -> Repository:
+    now = datetime.now(timezone.utc)
+    repository = Repository(
+        name=repository_name,
+        visibility=visibility,
+        created_at=now,
+        updated_at=now,
+        last_seen_at=now,
+        deleted_at=now if deleted else None,
+    )
+    session.add(repository)
+    session.flush()
+    for tag in tags:
+        session.add(
+            RepositoryTag(
+                repository_id=repository.id,
+                name=tag,
+                manifest_digest=f"sha256:{repository_name.replace('/', '-')}-{tag}",
+                media_type="application/vnd.oci.image.manifest.v1+json",
+                pushed_at=now,
+                last_seen_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    session.flush()
+    return repository
+
+
+def _grant_reader(session, *, username: str, password: str = "reader-pass", pattern: str = "sheldylew/*") -> User:
+    user = User(
+        username=username,
+        email=f"{username}@example.com",
+        password_hash=hash_password(password),
+        is_admin=False,
+        is_active=True,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    session.add(
+        RepositoryPermission(
+            subject_type="user",
+            subject_id=user.id,
+            repository_pattern=pattern,
+            can_pull=True,
+            can_push=False,
+            can_delete=False,
+        )
+    )
+    session.commit()
+    return user
+
+
+def _seed_manifest_summary(
+    session,
+    *,
+    repository_name: str,
+    manifest_digest: str,
+    tag_created_at: str = "2026-05-04T10:20:30Z",
+    total_size: int = 1048576,
+    architectures: list[str] | None = None,
+) -> CachedManifestSummary:
+    now = datetime.now(timezone.utc)
+    row = CachedManifestSummary(
+        repository_name=repository_name,
+        manifest_digest=manifest_digest,
+        media_type="application/vnd.oci.image.manifest.v1+json",
+        config_digest=f"{manifest_digest}-cfg",
+        total_size=total_size,
+        created_at=datetime.fromisoformat(tag_created_at.replace("Z", "+00:00")),
+        architectures=architectures or ["linux/amd64", "linux/arm64"],
+        history_count=5,
+        children_truncated=False,
+        history_truncated=False,
+        cached_at=now,
+        last_seen_at=now,
+    )
+    session.add(row)
+    return row
 
 
 def test_admin_can_update_public_registry_origin(settings) -> None:
@@ -1768,11 +1872,12 @@ def test_ui_settings_defaults_to_los_angeles_timezone(settings) -> None:
 
 def test_repo_list_only_shows_visible_repositories(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=["otherns/private", "sheldylew/app", "sheldylew/worker"])
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "otherns/private")
+            _seed_repository_state(session, "sheldylew/app")
+            _seed_repository_state(session, "sheldylew/worker")
             user = User(
                 username="repo-reader",
                 email="repo-reader@example.com",
@@ -1808,10 +1913,13 @@ def test_repo_list_only_shows_visible_repositories(settings) -> None:
 
 def test_admin_sees_all_repositories(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=["otherns/private", "sheldylew/app"])
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "otherns/private")
+            _seed_repository_state(session, "sheldylew/app")
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
         response = client.get("/api/repos")
@@ -1825,10 +1933,13 @@ def test_admin_sees_all_repositories(settings) -> None:
 
 def test_repo_list_supports_pagination(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 13)])
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            for n in range(1, 13):
+                _seed_repository_state(session, f"repo/{n:02d}")
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
         page_one = client.get("/api/repos?page=1")
@@ -1853,77 +1964,68 @@ def test_repo_list_supports_pagination(settings) -> None:
     assert page_two.json()["pagination"]["total"] == 12
 
 
-def test_repo_list_only_resolves_current_page_window(settings) -> None:
+def test_repo_list_uses_db_state_without_registry_catalog_scan(settings) -> None:
     app = create_app(settings)
     fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 26)])
     app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            for n in range(1, 26):
+                _seed_repository_state(session, f"repo/{n:02d}")
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
         response = client.get("/api/repos?page=1")
 
     assert response.status_code == 200
-    assert fake_registry.list_tags_calls == [f"repo/{n:02d}" for n in range(1, 12)]
+    assert fake_registry.list_repositories_bounded_calls == 0
+    assert fake_registry.list_tags_calls == []
 
 
-def test_repo_catalog_listing_is_cached_across_requests(settings) -> None:
+def test_repo_list_excludes_soft_deleted_repositories(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 26)])
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app")
+            _seed_repository_state(session, "sheldylew/deleted", deleted=True)
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
-        first = client.get("/api/repos?page=1")
-        second = client.get("/api/repos?page=1")
+        response = client.get("/api/repos?page=1")
 
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert fake_registry.list_repositories_bounded_calls == 1
+    assert response.status_code == 200
+    assert response.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
 
 
-def test_repo_list_page_payload_is_cached_across_requests(settings) -> None:
-    settings = replace(settings, repository_tag_probe_cache_seconds=0)
+def test_repo_list_excludes_repositories_without_active_tags(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 26)])
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app")
+            _seed_repository_state(session, "sheldylew/empty", tags=())
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
-        first = client.get("/api/repos?page=1")
-        second = client.get("/api/repos?page=1")
+        response = client.get("/api/repos?page=1")
 
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert second.json() == first.json()
-    assert fake_registry.list_tags_calls == [f"repo/{n:02d}" for n in range(1, 12)]
+    assert response.status_code == 200
+    assert response.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
 
 
-def test_repo_tag_probe_cache_reuses_checks_across_pages(settings) -> None:
-    settings = replace(settings, repository_list_cache_seconds=0)
+def test_repository_visibility_update_is_reflected_in_db_backed_repo_list(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 16)])
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
-        login = _login(client, settings.admin_username, settings.admin_password)
-        assert login.status_code == 200
-        page_one = client.get("/api/repos?page=1")
-        page_two = client.get("/api/repos?page=2")
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "public/app")
+            session.commit()
 
-    assert page_one.status_code == 200
-    assert page_two.status_code == 200
-    assert fake_registry.list_tags_calls == [f"repo/{n:02d}" for n in range(1, 16)]
-
-
-def test_repository_visibility_update_invalidates_repo_list_page_cache(settings) -> None:
-    app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=["public/app"])
-    app.state.registry_client_factory = lambda: fake_registry
-
-    with TestClient(app) as client:
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
         csrf = login.cookies.get("rcr_csrf")
@@ -1942,21 +2044,20 @@ def test_repository_visibility_update_invalidates_repo_list_page_cache(settings)
     assert second.json()["repos"] == [{"name": "public/app", "visibility": "public"}]
 
 
-def test_registry_event_invalidates_repo_tag_probe_cache(settings) -> None:
-    settings = replace(settings, repository_list_cache_seconds=0)
+def test_registry_delete_event_removes_tag_from_db_backed_repo_list(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        repositories=["sheldylew/app", "sheldylew/gc-me"],
-        tags={"sheldylew/app": ["latest"], "sheldylew/gc-me": []},
-        missing_repos={"sheldylew/gc-me"},
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app")
+            _seed_repository_state(session, "sheldylew/gc-me", tags=("old",))
+            gc_tag = session.scalar(select(RepositoryTag).join(Repository).where(Repository.name == "sheldylew/gc-me"))
+            gc_tag.manifest_digest = "sha256:gone"
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
         first = client.get("/api/repos")
-        fake_registry.missing_repos.clear()
         event = client.post(
             "/api/internal/registry-events",
             headers=_registry_event_headers(app),
@@ -1978,42 +2079,19 @@ def test_registry_event_invalidates_repo_tag_probe_cache(settings) -> None:
     assert first.status_code == 200
     assert event.status_code == 202
     assert second.status_code == 200
-    assert first.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
-    assert second.json()["repos"] == [
+    assert first.json()["repos"] == [
         {"name": "sheldylew/app", "visibility": "private"},
         {"name": "sheldylew/gc-me", "visibility": "private"},
     ]
-
-
-def test_repo_list_skips_stale_catalog_entries(settings) -> None:
-    app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        repositories=["sheldylew/app", "sheldylew/gc-me"],
-        tags={"sheldylew/app": ["latest"]},
-        missing_repos={"sheldylew/gc-me"},
-    )
-    app.state.registry_client_factory = lambda: fake_registry
-
-    with TestClient(app) as client:
-        login = _login(client, settings.admin_username, settings.admin_password)
-        assert login.status_code == 200
-        response = client.get("/api/repos")
-
-    assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
+    assert second.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
 
 
 def test_repo_tags_require_pull_permission(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        tags={
-            "sheldylew/app": ["latest"]
-        }
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app")
             user = User(
                 username="blocked-reader",
                 email="blocked-reader@example.com",
@@ -2090,6 +2168,7 @@ def test_repo_tag_manifest_returns_details(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("latest",))
             user = User(
                 username="manifest-reader",
                 email="manifest-reader@example.com",
@@ -2121,25 +2200,22 @@ def test_repo_tag_manifest_returns_details(settings) -> None:
     assert response.json()["public_registry_origin"] == settings.public_registry_origin
 
 
-def test_repo_tags_return_paginated_summary_rows(settings) -> None:
+def test_repo_tag_manifest_rejects_soft_deleted_tag_before_registry_fetch(settings) -> None:
     app = create_app(settings)
     fake_registry = FakeRegistryClient(
-        tags={
-            "sheldylew/app": ["release"]
-        },
         manifests={
-            ("sheldylew/app", "release"): {
+            ("sheldylew/app", "gone"): {
                 "name": "sheldylew/app",
-                "tag": "release",
-                "digest": "sha256:abc",
+                "tag": "gone",
+                "digest": "sha256:gone",
                 "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg",
+                "config_digest": "sha256:config",
                 "config_media_type": "application/vnd.oci.image.config.v1+json",
                 "layers": [],
-                "total_size": 1048576,
-                "architectures": ["linux/amd64", "linux/arm64"],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
                 "created_at": "2026-05-04T10:20:30Z",
-                "history_count": 5,
+                "history_count": 1,
             }
         }
     )
@@ -2147,27 +2223,68 @@ def test_repo_tags_return_paginated_summary_rows(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            user = User(
-                username="summary-reader",
-                email="summary-reader@example.com",
-                password_hash=hash_password("summary-reader-pass"),
-                is_admin=False,
-                is_active=True,
-            )
-            session.add(user)
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("gone",))
+            tag_row = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag_row.deleted_at = datetime.now(timezone.utc)
             session.commit()
-            session.refresh(user)
-            session.add(
-                RepositoryPermission(
-                    subject_type="user",
-                    subject_id=user.id,
-                    repository_pattern="sheldylew/*",
-                    can_pull=True,
-                    can_push=False,
-                    can_delete=False,
+            _grant_reader(session, username="soft-delete-reader", password="soft-delete-reader-pass")
+
+        login = _login(client, "soft-delete-reader", "soft-delete-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags/gone")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Repository tag not found."
+    assert fake_registry.get_manifest_details_calls == []
+
+
+def test_repo_tag_history_rejects_soft_deleted_tag_before_registry_fetch(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        histories={
+            ("sheldylew/app", "gone"): [
+                HistoryVariant(
+                    platform="linux/amd64",
+                    manifest_digest="sha256:gone",
+                    config_digest="sha256:config",
+                    created_at=None,
+                    entries=[{}],
                 )
-            )
+            ]
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("gone",))
+            tag_row = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag_row.deleted_at = datetime.now(timezone.utc)
             session.commit()
+            _grant_reader(session, username="soft-history-reader", password="soft-history-reader-pass")
+
+        login = _login(client, "soft-history-reader", "soft-history-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags/gone/history")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Repository tag not found."
+    assert fake_registry.get_tag_history_bounded_calls == []
+
+
+def test_repo_tags_return_paginated_summary_rows(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient()
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("release",))
+            tag = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag.manifest_digest = "sha256:abc"
+            _seed_manifest_summary(session, repository_name="sheldylew/app", manifest_digest="sha256:abc")
+            session.commit()
+            _grant_reader(session, username="summary-reader", password="summary-reader-pass")
 
         login = _login(client, "summary-reader", "summary-reader-pass")
         assert login.status_code == 200
@@ -2197,43 +2314,17 @@ def test_repo_tags_return_paginated_summary_rows(settings) -> None:
         "has_prev": False,
         "has_next": False,
     }
-    assert fake_registry.list_tags_calls == ["sheldylew/app"]
-    assert fake_registry.resolve_manifest_descriptor_calls == [("sheldylew/app", "release")]
-    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:abc")]
-    with app.state.session_factory() as session:
-        cached = session.scalars(select(CachedManifestSummary)).all()
-    assert len(cached) == 1
-    assert cached[0].repository_name == "sheldylew/app"
-    assert cached[0].manifest_digest == "sha256:abc"
+    assert fake_registry.list_tags_calls == []
+    assert fake_registry.resolve_manifest_descriptor_calls == []
+    assert fake_registry.get_manifest_details_calls == []
 
 
 def test_admin_repo_tags_include_repository_visibility(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        tags={
-            "public/app": ["latest"]
-        },
-        manifests={
-            ("public/app", "latest"): {
-                "name": "public/app",
-                "tag": "latest",
-                "digest": "sha256:manifest",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:config",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 42,
-                "architectures": ["linux/amd64"],
-                "created_at": "2026-05-04T10:20:30Z",
-                "history_count": 1,
-            }
-        }
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            session.add(Repository(name="public/app", visibility="public"))
+            _seed_repository_state(session, "public/app", visibility="public")
             session.commit()
 
         login = _login(client, settings.admin_username, settings.admin_password)
@@ -2269,64 +2360,32 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
         session_lifetime_seconds=settings.session_lifetime_seconds,
     )
     app = create_app(limited_settings)
-    fake_registry = FakeRegistryClient(
-        tags={
-            "sheldylew/app": ["one", "two"]
-        },
-        manifests={
-            ("sheldylew/app", "one"): {
-                "name": "sheldylew/app",
-                "tag": "one",
-                "digest": "sha256:one",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg-one",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 11,
-                "architectures": ["linux/amd64"],
-                "created_at": "2026-05-04T10:20:30Z",
-                "history_count": 1,
-            },
-            ("sheldylew/app", "two"): {
-                "name": "sheldylew/app",
-                "tag": "two",
-                "digest": "sha256:two",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg-two",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 22,
-                "architectures": ["linux/arm64"],
-                "created_at": "2026-05-05T10:20:30Z",
-                "history_count": 2,
-            },
-        }
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            user = User(
-                username="trunc-reader",
-                email="trunc-reader@example.com",
-                password_hash=hash_password("trunc-reader-pass"),
-                is_admin=False,
-                is_active=True,
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("one", "two"))
+            tag_rows = session.scalars(
+                select(RepositoryTag).where(RepositoryTag.repository_id == repository.id).order_by(RepositoryTag.name.asc())
+            ).all()
+            tag_rows[0].manifest_digest = "sha256:one"
+            tag_rows[1].manifest_digest = "sha256:two"
+            _seed_manifest_summary(
+                session,
+                repository_name="sheldylew/app",
+                manifest_digest="sha256:one",
+                total_size=11,
+                architectures=["linux/amd64"],
             )
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            session.add(
-                RepositoryPermission(
-                    subject_type="user",
-                    subject_id=user.id,
-                    repository_pattern="sheldylew/*",
-                    can_pull=True,
-                    can_push=False,
-                    can_delete=False,
-                )
+            _seed_manifest_summary(
+                session,
+                repository_name="sheldylew/app",
+                manifest_digest="sha256:two",
+                tag_created_at="2026-05-05T10:20:30Z",
+                total_size=22,
+                architectures=["linux/arm64"],
             )
             session.commit()
+            _grant_reader(session, username="trunc-reader", password="trunc-reader-pass")
 
         login = _login(client, "trunc-reader", "trunc-reader-pass")
         response = client.get("/api/repos/sheldylew/app/tags?page=2")
@@ -2343,55 +2402,27 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
         "has_prev": True,
         "has_next": False,
     }
-    assert fake_registry.resolve_manifest_descriptor_calls == [("sheldylew/app", "two")]
-    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:two")]
 
 
-def test_repo_tags_cache_hit_skips_repeated_manifest_detail_fetch(settings) -> None:
+def test_repo_tags_summary_rows_skip_registry_fetch(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        tags={"sheldylew/app": ["release"]},
-        manifests={
-            ("sheldylew/app", "release"): {
-                "name": "sheldylew/app",
-                "tag": "release",
-                "digest": "sha256:cached",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg-cached",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 77,
-                "architectures": ["linux/amd64"],
-                "created_at": "2026-05-04T10:20:30Z",
-                "history_count": 3,
-            }
-        },
-    )
+    fake_registry = FakeRegistryClient()
     app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            user = User(
-                username="cache-reader",
-                email="cache-reader@example.com",
-                password_hash=hash_password("cache-reader-pass"),
-                is_admin=False,
-                is_active=True,
-            )
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            session.add(
-                RepositoryPermission(
-                    subject_type="user",
-                    subject_id=user.id,
-                    repository_pattern="sheldylew/*",
-                    can_pull=True,
-                    can_push=False,
-                    can_delete=False,
-                )
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("release",))
+            tag = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag.manifest_digest = "sha256:cached"
+            _seed_manifest_summary(
+                session,
+                repository_name="sheldylew/app",
+                manifest_digest="sha256:cached",
+                total_size=77,
+                architectures=["linux/amd64"],
             )
             session.commit()
+            _grant_reader(session, username="cache-reader", password="cache-reader-pass")
 
         login = _login(client, "cache-reader", "cache-reader-pass")
         assert login.status_code == 200
@@ -2401,147 +2432,22 @@ def test_repo_tags_cache_hit_skips_repeated_manifest_detail_fetch(settings) -> N
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json()["tags"] == second.json()["tags"]
-    assert fake_registry.resolve_manifest_descriptor_calls == [
-        ("sheldylew/app", "release"),
-        ("sheldylew/app", "release"),
-    ]
-    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:cached")]
+    assert fake_registry.list_tags_calls == []
+    assert fake_registry.resolve_manifest_descriptor_calls == []
+    assert fake_registry.get_manifest_details_calls == []
 
 
-def test_repo_tags_retagged_digest_populates_new_cache_row(settings) -> None:
+def test_repo_tags_shared_digest_uses_single_cached_summary(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        tags={"sheldylew/app": ["release"]},
-        manifests={
-            ("sheldylew/app", "release-v1"): {
-                "name": "sheldylew/app",
-                "tag": "release-v1",
-                "digest": "sha256:one",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg-one",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 11,
-                "architectures": ["linux/amd64"],
-                "created_at": "2026-05-04T10:20:30Z",
-                "history_count": 1,
-            },
-            ("sheldylew/app", "release-v2"): {
-                "name": "sheldylew/app",
-                "tag": "release-v2",
-                "digest": "sha256:two",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg-two",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 22,
-                "architectures": ["linux/arm64"],
-                "created_at": "2026-05-05T10:20:30Z",
-                "history_count": 2,
-            },
-        },
-        descriptor_sequences={
-            ("sheldylew/app", "release"): [
-                ("sha256:one", "application/vnd.oci.image.manifest.v1+json"),
-                ("sha256:two", "application/vnd.oci.image.manifest.v1+json"),
-            ]
-        },
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            user = User(
-                username="retag-reader",
-                email="retag-reader@example.com",
-                password_hash=hash_password("retag-reader-pass"),
-                is_admin=False,
-                is_active=True,
-            )
-            session.add(user)
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("edge", "release"))
+            for tag in session.scalars(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id)).all():
+                tag.manifest_digest = "sha256:shared"
+            _seed_manifest_summary(session, repository_name="sheldylew/app", manifest_digest="sha256:shared", total_size=44)
             session.commit()
-            session.refresh(user)
-            session.add(
-                RepositoryPermission(
-                    subject_type="user",
-                    subject_id=user.id,
-                    repository_pattern="sheldylew/*",
-                    can_pull=True,
-                    can_push=False,
-                    can_delete=False,
-                )
-            )
-            session.commit()
-
-        login = _login(client, "retag-reader", "retag-reader-pass")
-        assert login.status_code == 200
-        first = client.get("/api/repos/sheldylew/app/tags")
-        second = client.get("/api/repos/sheldylew/app/tags")
-        with app.state.session_factory() as session:
-            cached_rows = session.scalars(
-                select(CachedManifestSummary).order_by(CachedManifestSummary.manifest_digest.asc())
-            ).all()
-
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.json()["tags"][0]["digest"] == "sha256:one"
-    assert second.json()["tags"][0]["digest"] == "sha256:two"
-    assert [row.manifest_digest for row in cached_rows] == ["sha256:one", "sha256:two"]
-    assert fake_registry.get_manifest_details_calls == [
-        ("sheldylew/app", "sha256:one"),
-        ("sheldylew/app", "sha256:two"),
-    ]
-
-
-def test_repo_tags_shared_digest_uses_single_cold_fetch(settings) -> None:
-    app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        tags={"sheldylew/app": ["edge", "release"]},
-        descriptors={
-            ("sheldylew/app", "edge"): ("sha256:shared", "application/vnd.oci.image.manifest.v1+json"),
-            ("sheldylew/app", "release"): ("sha256:shared", "application/vnd.oci.image.manifest.v1+json"),
-        },
-        manifests={
-            ("sheldylew/app", "release"): {
-                "name": "sheldylew/app",
-                "tag": "release",
-                "digest": "sha256:shared",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg-shared",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 44,
-                "architectures": ["linux/amd64", "linux/arm64"],
-                "created_at": "2026-05-04T10:20:30Z",
-                "history_count": 5,
-            }
-        },
-    )
-    app.state.registry_client_factory = lambda: fake_registry
-
-    with TestClient(app) as client:
-        with app.state.session_factory() as session:
-            user = User(
-                username="shared-reader",
-                email="shared-reader@example.com",
-                password_hash=hash_password("shared-reader-pass"),
-                is_admin=False,
-                is_active=True,
-            )
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            session.add(
-                RepositoryPermission(
-                    subject_type="user",
-                    subject_id=user.id,
-                    repository_pattern="sheldylew/*",
-                    can_pull=True,
-                    can_push=False,
-                    can_delete=False,
-                )
-            )
-            session.commit()
+            _grant_reader(session, username="shared-reader", password="shared-reader-pass")
 
         login = _login(client, "shared-reader", "shared-reader-pass")
         assert login.status_code == 200
@@ -2549,64 +2455,29 @@ def test_repo_tags_shared_digest_uses_single_cold_fetch(settings) -> None:
 
     assert response.status_code == 200
     assert [tag["tag"] for tag in response.json()["tags"]] == ["edge", "release"]
-    assert fake_registry.resolve_manifest_descriptor_calls == [
-        ("sheldylew/app", "edge"),
-        ("sheldylew/app", "release"),
-    ]
-    assert fake_registry.get_manifest_details_calls == [("sheldylew/app", "sha256:shared")]
 
 
-def test_repo_tags_skip_stale_tags_when_manifest_resolution_fails(settings) -> None:
+def test_repo_tags_exclude_soft_deleted_tags(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        tags={"sheldylew/app": ["gone", "latest"]},
-        descriptors={
-            ("sheldylew/app", "latest"): ("sha256:live", "application/vnd.oci.image.manifest.v1+json"),
-        },
-        manifests={
-            ("sheldylew/app", "latest"): {
-                "name": "sheldylew/app",
-                "tag": "latest",
-                "digest": "sha256:live",
-                "media_type": "application/vnd.oci.image.manifest.v1+json",
-                "config_digest": "sha256:cfg-live",
-                "config_media_type": "application/vnd.oci.image.config.v1+json",
-                "layers": [],
-                "total_size": 55,
-                "architectures": ["linux/amd64"],
-                "created_at": "2026-05-04T10:20:30Z",
-                "history_count": 1,
-            }
-        },
-        descriptor_sequences={
-            ("sheldylew/app", "gone"): [],
-        },
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            user = User(
-                username="stale-reader",
-                email="stale-reader@example.com",
-                password_hash=hash_password("stale-reader-pass"),
-                is_admin=False,
-                is_active=True,
-            )
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            session.add(
-                RepositoryPermission(
-                    subject_type="user",
-                    subject_id=user.id,
-                    repository_pattern="sheldylew/*",
-                    can_pull=True,
-                    can_push=False,
-                    can_delete=False,
-                )
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("gone", "latest"))
+            tag_rows = session.scalars(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id)).all()
+            for tag in tag_rows:
+                if tag.name == "gone":
+                    tag.deleted_at = datetime.now(timezone.utc)
+                if tag.name == "latest":
+                    tag.manifest_digest = "sha256:live"
+            _seed_manifest_summary(
+                session,
+                repository_name="sheldylew/app",
+                manifest_digest="sha256:live",
+                total_size=55,
+                architectures=["linux/amd64"],
             )
             session.commit()
+            _grant_reader(session, username="stale-reader", password="stale-reader-pass")
 
         login = _login(client, "stale-reader", "stale-reader-pass")
         assert login.status_code == 200
@@ -2621,7 +2492,7 @@ def test_repo_tags_skip_stale_tags_when_manifest_resolution_fails(settings) -> N
             "total_size": 55,
             "architectures": ["linux/amd64"],
             "created_at": "2026-05-04T10:20:30Z",
-            "history_count": 1,
+            "history_count": 5,
             "children_truncated": False,
             "history_truncated": False,
         }
@@ -2683,6 +2554,9 @@ def test_registry_push_event_warms_cache_using_live_tag_resolution(settings) -> 
         )
         with app.state.session_factory() as session:
             cached_rows = session.scalars(select(CachedManifestSummary)).all()
+            inbox_rows = session.scalars(select(RegistryEventInbox)).all()
+            repository = session.scalar(select(Repository).where(Repository.name == "sheldylew/app"))
+            tag_row = session.scalar(select(RepositoryTag).where(RepositoryTag.name == "latest"))
 
     assert response.status_code == 202
     assert response.json() == {"accepted": 1}
@@ -2692,6 +2566,11 @@ def test_registry_push_event_warms_cache_using_live_tag_resolution(settings) -> 
     assert cached_rows[0].repository_name == "sheldylew/app"
     assert cached_rows[0].manifest_digest == "sha256:new"
     assert cached_rows[0].total_size == 99
+    assert len(inbox_rows) == 1
+    assert inbox_rows[0].status == "processed"
+    assert repository.deleted_at is None
+    assert tag_row.manifest_digest == "sha256:new"
+    assert tag_row.deleted_at is None
 
 
 def test_registry_delete_event_removes_cached_manifest_summary(settings) -> None:
@@ -2699,21 +2578,15 @@ def test_registry_delete_event_removes_cached_manifest_summary(settings) -> None
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            session.add(
-                CachedManifestSummary(
-                    repository_name="sheldylew/app",
-                    manifest_digest="sha256:gone",
-                    media_type="application/vnd.oci.image.manifest.v1+json",
-                    config_digest="sha256:cfg-gone",
-                    total_size=10,
-                    created_at=None,
-                    architectures=["linux/amd64"],
-                    history_count=1,
-                    children_truncated=False,
-                    history_truncated=False,
-                    cached_at=datetime.now(timezone.utc),
-                    last_seen_at=datetime.now(timezone.utc),
-                )
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("latest",))
+            tag_row = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag_row.manifest_digest = "sha256:gone"
+            _seed_manifest_summary(
+                session,
+                repository_name="sheldylew/app",
+                manifest_digest="sha256:gone",
+                total_size=10,
+                architectures=["linux/amd64"],
             )
             session.commit()
 
@@ -2735,10 +2608,14 @@ def test_registry_delete_event_removes_cached_manifest_summary(settings) -> None
         )
         with app.state.session_factory() as session:
             cached_rows = session.scalars(select(CachedManifestSummary)).all()
+            tag_row = session.scalar(select(RepositoryTag).where(RepositoryTag.name == "latest"))
+            inbox_rows = session.scalars(select(RegistryEventInbox)).all()
 
     assert response.status_code == 202
     assert response.json() == {"accepted": 1}
     assert cached_rows == []
+    assert tag_row.deleted_at is not None
+    assert inbox_rows[0].status == "processed"
 
 
 def test_repo_tag_history_returns_variants(settings) -> None:
@@ -2767,6 +2644,7 @@ def test_repo_tag_history_returns_variants(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("release",))
             user = User(
                 username="history-reader",
                 email="history-reader@example.com",
@@ -2835,6 +2713,7 @@ def test_repo_tag_history_returns_truncation_metadata(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("release",))
             user = User(
                 username="history-trunc",
                 email="history-trunc@example.com",
@@ -2867,17 +2746,11 @@ def test_repo_tag_history_returns_truncation_metadata(settings) -> None:
 
 def test_admin_dashboard_returns_stats_and_activity(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(
-        repositories=["sheldylew/app", "sheldylew/worker"],
-        tags={
-            "sheldylew/app": ["latest", "release"],
-            "sheldylew/worker": ["stable"],
-        },
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("latest", "release"))
+            _seed_repository_state(session, "sheldylew/worker", tags=("stable",))
             user = User(
                 username="dashboard-user",
                 email="dashboard-user@example.com",
@@ -2926,6 +2799,46 @@ def test_admin_maintenance_returns_cache_stats(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("latest", "release"))
+            _seed_repository_state(session, "sheldylew/worker")
+            session.add(
+                RegistryEventInbox(
+                    action="push",
+                    repository_name="sheldylew/app",
+                    tag="queued",
+                    digest="sha256:queued",
+                    raw_payload={},
+                    dedupe_key="push|sheldylew/app|queued|sha256:queued",
+                    status="pending",
+                    received_at=now,
+                )
+            )
+            session.add(
+                RegistryEventInbox(
+                    action="push",
+                    repository_name="sheldylew/app",
+                    tag="failed",
+                    digest="sha256:failed",
+                    raw_payload={},
+                    dedupe_key="push|sheldylew/app|failed|sha256:failed",
+                    status="failed",
+                    attempts=1,
+                    error="boom",
+                    received_at=now,
+                    processed_at=now,
+                )
+            )
+            session.add(
+                RegistryStateRebuildJob(
+                    status="succeeded",
+                    requested_by=1,
+                    repositories_scanned=2,
+                    tags_scanned=3,
+                    created_at=now,
+                    updated_at=now,
+                    finished_at=now,
+                )
+            )
             session.add_all(
                 [
                     CachedManifestSummary(
@@ -2986,20 +2899,159 @@ def test_admin_maintenance_returns_cache_stats(settings) -> None:
     assert body["cache"]["oldest_cached_at"] == older_cached.isoformat()
     assert body["cache"]["newest_cached_at"] == (now - timedelta(hours=6)).isoformat()
     assert body["cache"]["newest_last_seen_at"] == newest_seen.isoformat()
+    assert body["registry_state"]["active_repositories"] == 2
+    assert body["registry_state"]["active_tags"] == 3
+    assert body["registry_state"]["inbox_queued"] == 1
+    assert body["registry_state"]["inbox_failed"] == 1
+    assert body["registry_state"]["last_rebuild"]["status"] == "succeeded"
+    assert body["rebuild_jobs"][0]["repositories_scanned"] == 2
 
 
-def test_admin_dashboard_skips_stale_registry_entries(settings) -> None:
+def test_registry_state_rebuild_requires_csrf(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.post("/api/admin/maintenance/cache/rebuild")
+
+    assert response.status_code == 403
+
+
+def test_registry_state_rebuild_walks_registry_and_repairs_db_state(settings) -> None:
     app = create_app(settings)
     fake_registry = FakeRegistryClient(
-        repositories=["sheldylew/app", "sheldylew/gc-me"],
-        tags={
-            "sheldylew/app": ["latest", "release"],
+        repositories=["public/app", "sheldylew/worker"],
+        tags={"public/app": ["latest"], "sheldylew/worker": ["stable"]},
+        descriptors={
+            ("public/app", "latest"): ("sha256:public-new", "application/vnd.oci.image.manifest.v1+json"),
+            ("sheldylew/worker", "stable"): ("sha256:worker", "application/vnd.oci.image.manifest.v1+json"),
         },
-        missing_repos={"sheldylew/gc-me"},
+        manifests={
+            ("public/app", "latest"): {
+                "name": "public/app",
+                "tag": "latest",
+                "digest": "sha256:public-new",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:public-cfg",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 101,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-07T10:20:30Z",
+                "history_count": 1,
+            },
+            ("sheldylew/worker", "stable"): {
+                "name": "sheldylew/worker",
+                "tag": "stable",
+                "digest": "sha256:worker",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:worker-cfg",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 202,
+                "architectures": ["linux/arm64"],
+                "created_at": "2026-05-08T10:20:30Z",
+                "history_count": 2,
+            },
+        },
     )
     app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            public_repo = _seed_repository_state(session, "public/app", tags=("old",), visibility="public")
+            old_tag = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == public_repo.id))
+            old_tag.manifest_digest = "sha256:old"
+            _seed_repository_state(session, "stale/repo", tags=("gone",))
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/maintenance/cache/rebuild",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            job = session.scalar(select(RegistryStateRebuildJob).order_by(RegistryStateRebuildJob.id.desc()))
+            public_repo = session.scalar(select(Repository).where(Repository.name == "public/app"))
+            worker_repo = session.scalar(select(Repository).where(Repository.name == "sheldylew/worker"))
+            stale_repo = session.scalar(select(Repository).where(Repository.name == "stale/repo"))
+            public_latest = session.scalar(
+                select(RepositoryTag)
+                .join(Repository)
+                .where(Repository.name == "public/app", RepositoryTag.name == "latest")
+            )
+            public_old = session.scalar(
+                select(RepositoryTag)
+                .join(Repository)
+                .where(Repository.name == "public/app", RepositoryTag.name == "old")
+            )
+            worker_tag = session.scalar(
+                select(RepositoryTag)
+                .join(Repository)
+                .where(Repository.name == "sheldylew/worker", RepositoryTag.name == "stable")
+            )
+            summaries = session.scalars(
+                select(CachedManifestSummary).order_by(CachedManifestSummary.manifest_digest.asc())
+            ).all()
+
+    assert response.status_code == 200
+    assert response.json()["job"]["status"] == "queued"
+    assert job.status == "succeeded"
+    assert job.repositories_scanned == 2
+    assert job.tags_scanned == 2
+    assert job.tags_deleted == 2
+    assert public_repo.visibility == "public"
+    assert public_repo.deleted_at is None
+    assert worker_repo.deleted_at is None
+    assert stale_repo.deleted_at is not None
+    assert public_latest.manifest_digest == "sha256:public-new"
+    assert worker_tag.manifest_digest == "sha256:worker"
+    assert public_old.deleted_at is not None
+    assert [row.manifest_digest for row in summaries] == ["sha256:public-new", "sha256:worker"]
+
+
+def test_registry_state_rebuild_rejects_active_maintenance_job(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+            session.add(
+                GcJob(
+                    status="queued",
+                    requested_by=admin.id,
+                    dry_run=False,
+                    delete_untagged=False,
+                    prune_empty_dirs=False,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/maintenance/cache/rebuild",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A maintenance job is already queued or running."
+
+
+def test_admin_dashboard_skips_soft_deleted_registry_state(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("latest", "release"))
+            _seed_repository_state(session, "sheldylew/gc-me", deleted=True)
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
         response = client.get("/api/admin/dashboard")
@@ -3036,32 +3088,28 @@ def test_admin_dashboard_caps_repository_fanout(settings) -> None:
         session_lifetime_seconds=settings.session_lifetime_seconds,
     )
     app = create_app(limited_settings)
-    fake_registry = FakeRegistryClient(
-        repositories=["sheldylew/app", "sheldylew/worker"],
-        tags={"sheldylew/app": ["latest"], "sheldylew/worker": ["stable"]},
-        repo_pages_truncated=True,
-    )
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app")
+            _seed_repository_state(session, "sheldylew/worker")
+            session.commit()
+
         login = _login(client, limited_settings.admin_username, limited_settings.admin_password)
         response = client.get("/api/admin/dashboard")
 
     body = response.json()
     assert response.status_code == 200
-    assert fake_registry.list_tags_calls == ["sheldylew/app"]
     assert body["repo_distribution_truncation"]["truncated"] is True
     assert body["repo_distribution_truncation"]["returned"] == 1
 
 
 def test_admin_dashboard_includes_public_pull_counter(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(repositories=["public/app"], tags={"public/app": ["latest"]})
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            session.add(Repository(name="public/app", visibility="public"))
+            _seed_repository_state(session, "public/app", visibility="public")
             session.commit()
 
         public_pull = client.get(
@@ -3137,6 +3185,7 @@ def test_delete_tag_requires_delete_permission(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("latest",))
             user = User(
                 username="delete-blocked",
                 email="delete-blocked@example.com",
@@ -3182,6 +3231,9 @@ def test_delete_tag_deletes_manifest_and_records_audit(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("latest",))
+            tag = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag.manifest_digest = "sha256:manifest"
             user = User(
                 username="delete-allowed",
                 email="delete-allowed@example.com",
@@ -3214,10 +3266,12 @@ def test_delete_tag_deletes_manifest_and_records_audit(settings) -> None:
 
         with app.state.session_factory() as session:
             events = session.query(AuditEvent).all()
+            tag = session.scalar(select(RepositoryTag).where(RepositoryTag.name == "latest"))
 
     assert response.status_code == 200
     assert fake_registry.deleted_manifests == [("sheldylew/app", "sha256:manifest")]
     assert events[-1].action == "repository_tag_deleted"
+    assert tag.deleted_at is not None
 
 
 def test_admin_can_delete_tag_without_explicit_repo_permission(settings) -> None:
@@ -3242,6 +3296,12 @@ def test_admin_can_delete_tag_without_explicit_repo_permission(settings) -> None
     app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/admin-delete", tags=("latest",))
+            tag = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag.manifest_digest = "sha256:admin-manifest"
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         csrf = login.cookies.get("rcr_csrf")
         response = client.post(
@@ -3252,6 +3312,9 @@ def test_admin_can_delete_tag_without_explicit_repo_permission(settings) -> None
 
     assert response.status_code == 200
     assert fake_registry.deleted_manifests == [("sheldylew/admin-delete", "sha256:admin-manifest")]
+    with app.state.session_factory() as session:
+        tag = session.scalar(select(RepositoryTag).where(RepositoryTag.name == "latest"))
+    assert tag.deleted_at is not None
 
 
 def test_delete_empty_repository_prunes_storage(settings, temp_workspace) -> None:
@@ -3280,10 +3343,12 @@ def test_delete_empty_repository_prunes_storage(settings, temp_workspace) -> Non
         session_lifetime_seconds=settings.session_lifetime_seconds,
     )
     app = create_app(custom_settings)
-    fake_registry = FakeRegistryClient(tags={"sheldylew/empty": []})
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/empty", tags=())
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         csrf = login.cookies.get("rcr_csrf")
         response = client.post(
@@ -3294,14 +3359,19 @@ def test_delete_empty_repository_prunes_storage(settings, temp_workspace) -> Non
 
     assert response.status_code == 200
     assert repo_path.exists() is False
+    with app.state.session_factory() as session:
+        repository = session.scalar(select(Repository).where(Repository.name == "sheldylew/empty"))
+    assert repository.deleted_at is not None
 
 
 def test_delete_empty_repository_rejects_non_empty_repo(settings) -> None:
     app = create_app(settings)
-    fake_registry = FakeRegistryClient(tags={"sheldylew/app": ["latest"]})
-    app.state.registry_client_factory = lambda: fake_registry
 
     with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("latest",))
+            session.commit()
+
         login = _login(client, settings.admin_username, settings.admin_password)
         csrf = login.cookies.get("rcr_csrf")
         response = client.post(
