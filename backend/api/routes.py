@@ -62,6 +62,7 @@ REGISTRY_NOTIFICATION_MANIFEST_MEDIA_TYPES = {
     "application/vnd.docker.distribution.manifest.list.v2+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 }
+REPOSITORY_LIST_PAGE_SIZE = 10
 
 
 def _normalize_required_text(value: str, *, field_name: str, max_length: int = MAX_SHORT_TEXT_LENGTH) -> str:
@@ -247,6 +248,102 @@ def _list_repositories_cached(
         "truncation": truncation,
     }
     return repositories, truncation
+
+
+def _clear_repository_list_page_cache(request: Request) -> None:
+    request.app.state.repository_list_page_cache = {}
+
+
+def _clear_repository_tag_probe_cache(request: Request) -> None:
+    request.app.state.repository_tag_probe_cache = {}
+
+
+def _clear_repository_read_caches(request: Request, *, include_catalog: bool = False) -> None:
+    _clear_repository_list_page_cache(request)
+    _clear_repository_tag_probe_cache(request)
+    if include_catalog:
+        request.app.state.repository_catalog_cache = None
+
+
+def _repository_list_page_cache_key(user: User, *, page: int, page_size: int) -> tuple[int, bool, int, int]:
+    return (user.id, user.is_admin, page, page_size)
+
+
+def _cached_repository_list_payload(
+    request: Request,
+    settings: Settings,
+    *,
+    cache_key: tuple[int, bool, int, int],
+) -> Optional[dict]:
+    cache_ttl = settings.repository_list_cache_seconds
+    if cache_ttl <= 0:
+        return None
+
+    now = monotonic()
+    cache = getattr(request.app.state, "repository_list_page_cache", {})
+    cached = cache.get(cache_key)
+    if cached and cached.get("expires_at", 0.0) > now:
+        return cached["payload"]
+    if cached:
+        cache.pop(cache_key, None)
+    return None
+
+
+def _store_repository_list_payload(
+    request: Request,
+    settings: Settings,
+    *,
+    cache_key: tuple[int, bool, int, int],
+    payload: dict,
+) -> None:
+    cache_ttl = settings.repository_list_cache_seconds
+    if cache_ttl <= 0:
+        return
+
+    cache = getattr(request.app.state, "repository_list_page_cache", {})
+    cache[cache_key] = {
+        "expires_at": monotonic() + cache_ttl,
+        "payload": payload,
+    }
+    request.app.state.repository_list_page_cache = cache
+
+
+def _repository_tags_resolvable_cached(
+    request: Request,
+    registry: RegistryClient,
+    settings: Settings,
+    *,
+    repository_name: str,
+) -> bool:
+    cache_ttl = settings.repository_tag_probe_cache_seconds
+    if cache_ttl <= 0:
+        try:
+            registry.list_tags(repository_name)
+        except RegistryNotFoundError:
+            return False
+        return True
+
+    now = monotonic()
+    cache = getattr(request.app.state, "repository_tag_probe_cache", {})
+    cached = cache.get(repository_name)
+    if cached and cached.get("expires_at", 0.0) > now:
+        return bool(cached["resolvable"])
+    if cached:
+        cache.pop(repository_name, None)
+
+    try:
+        registry.list_tags(repository_name)
+    except RegistryNotFoundError:
+        resolvable = False
+    else:
+        resolvable = True
+
+    cache[repository_name] = {
+        "expires_at": now + cache_ttl,
+        "resolvable": resolvable,
+    }
+    request.app.state.repository_tag_probe_cache = cache
+    return resolvable
 
 
 def _serialize_manifest(details: ManifestDetails) -> dict:
@@ -535,6 +632,9 @@ def _warm_cached_manifest_summary(
 
 
 def _process_registry_notification_events(request: Request, events: list[dict[str, Optional[str]]]) -> None:
+    if events:
+        _clear_repository_read_caches(request, include_catalog=True)
+
     warmed_references: set[tuple[str, Optional[str], Optional[str]]] = set()
     deleted_digests: set[tuple[str, str]] = set()
 
@@ -720,8 +820,7 @@ def _expected_request_origins(request: Request) -> set[str]:
     if public_origin:
         origins.add(public_origin)
     origins.update(settings.csrf_trusted_origins)
-    if settings.app_env == "development":
-        origins.add(str(request.base_url).rstrip("/"))
+    origins.add(str(request.base_url).rstrip("/"))
     return origins
 
 
@@ -1595,6 +1694,7 @@ def list_permissions(
 @router.post("/admin/permissions")
 def upsert_permission(
     payload: UpsertPermissionPayload,
+    request: Request,
     csrf_user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -1657,12 +1757,14 @@ def upsert_permission(
             "can_delete": permission.can_delete,
         },
     )
+    _clear_repository_list_page_cache(request)
     return {"permission": _serialize_permission(permission, subject_name=subject_name)}
 
 
 @router.post("/admin/permissions/{permission_id}/delete")
 def delete_permission(
     permission_id: int,
+    request: Request,
     csrf_user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -1688,12 +1790,14 @@ def delete_permission(
     )
     db.delete(permission)
     db.commit()
+    _clear_repository_list_page_cache(request)
     return {"ok": True, "permission_id": permission_id}
 
 
 @router.post("/admin/repositories/visibility")
 def upsert_repository_visibility(
     payload: UpsertRepositoryVisibilityPayload,
+    request: Request,
     csrf_user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -1728,6 +1832,7 @@ def upsert_repository_visibility(
             "visibility": repository.visibility,
         },
     )
+    _clear_repository_list_page_cache(request)
     return {"repository": _serialize_repository(repository)}
 
 
@@ -2165,7 +2270,13 @@ def list_repositories(
     page: int = 1,
 ):
     safe_page = max(page, 1)
-    page_size = 10
+    page_size = REPOSITORY_LIST_PAGE_SIZE
+    cache_key = _repository_list_page_cache_key(user, page=safe_page, page_size=page_size)
+    cached_payload = _cached_repository_list_payload(request, settings, cache_key=cache_key)
+    if cached_payload is not None:
+        registry.close()
+        return cached_payload
+
     try:
         all_repositories, truncation = _list_repositories_cached(request, registry, settings)
         visible_repositories = filter_visible_repositories(
@@ -2180,9 +2291,12 @@ def list_repositories(
         visible_and_resolvable: list[str] = []
         has_next_resolvable = False
         for repository_name in visible_repositories:
-            try:
-                registry.list_tags(repository_name)
-            except RegistryNotFoundError:
+            if not _repository_tags_resolvable_cached(
+                request,
+                registry,
+                settings,
+                repository_name=repository_name,
+            ):
                 continue
             if resolvable_before_page < page_start:
                 resolvable_before_page += 1
@@ -2206,7 +2320,7 @@ def list_repositories(
         total_visible = resolvable_before_page + len(visible_and_resolvable)
     else:
         total_visible = len(visible_repositories)
-    return {
+    payload = {
         "repos": [
             {"name": repository_name, "visibility": repository_visibility.get(repository_name, "private")}
             for repository_name in visible_and_resolvable
@@ -2221,6 +2335,8 @@ def list_repositories(
         },
         "user": _serialize_user(user),
     }
+    _store_repository_list_payload(request, settings, cache_key=cache_key, payload=payload)
+    return payload
 
 
 @router.get("/repos/{repo_name:path}/tags")
@@ -2442,6 +2558,7 @@ def delete_repository_tag(
     repo_name: str,
     tag: str,
     payload: DeleteTagPayload,
+    request: Request,
     user: User = Depends(require_csrf),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -2470,6 +2587,7 @@ def delete_repository_tag(
         target_type="repository_tag",
         metadata_json={"repo": repo_name, "tag": tag, "digest": manifest.digest},
     )
+    _clear_repository_read_caches(request)
     return {"ok": True, "repo": repo_name, "tag": tag, "digest": manifest.digest}
 
 
@@ -2477,6 +2595,7 @@ def delete_repository_tag(
 def delete_empty_repository(
     repo_name: str,
     payload: DeleteRepositoryPayload,
+    request: Request,
     user: User = Depends(require_csrf),
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
@@ -2508,4 +2627,5 @@ def delete_empty_repository(
         target_type="repository",
         metadata_json={"repo": repo_name, "removed": removed},
     )
+    _clear_repository_read_caches(request, include_catalog=True)
     return {"ok": True, "repo": repo_name, "removed": removed}

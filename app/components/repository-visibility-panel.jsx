@@ -22,6 +22,7 @@ export default function RepositoryVisibilityPanel({ repositoryName, initialVisib
   const [saving, setSaving] = useState(false);
 
   async function updateVisibility(nextPublic) {
+    const previousPublic = isPublic;
     setIsPublic(nextPublic);
     setError("");
     setSaving(true);
@@ -42,7 +43,7 @@ export default function RepositoryVisibilityPanel({ repositoryName, initialVisib
       const payload = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        setIsPublic(initialVisibility === "public");
+        setIsPublic(previousPublic);
         setError(readApiErrorDetail(payload, "Could not update repository visibility."));
         return;
       }
@@ -50,7 +51,7 @@ export default function RepositoryVisibilityPanel({ repositoryName, initialVisib
       setIsPublic(payload.repository.visibility === "public");
       router.refresh();
     } catch {
-      setIsPublic(initialVisibility === "public");
+      setIsPublic(previousPublic);
       setError("Could not update repository visibility.");
     } finally {
       setSaving(false);

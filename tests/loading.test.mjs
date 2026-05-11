@@ -34,6 +34,7 @@ test("client API fetches and internal navigation show a screen-level overlay", a
   assert.match(layout, /<ApiBusyOverlay \/>/);
   assert.match(apiOverlay, /window\.fetch = trackedFetch/);
   assert.match(apiOverlay, /pathname\.startsWith\("\/api\/"\)/);
+  assert.match(apiOverlay, /X-Background-Prefetch/);
   assert.match(apiOverlay, /document\.addEventListener\("click", handleDocumentClick, true\)/);
   assert.match(apiOverlay, /setNavigationPending\(true\)/);
   assert.match(apiOverlay, /<LoadingOverlay \/>/);

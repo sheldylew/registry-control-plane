@@ -97,6 +97,10 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
             app.state.maintenance_auto_run = True
         if not hasattr(app.state, "repository_catalog_cache"):
             app.state.repository_catalog_cache = None
+        if not hasattr(app.state, "repository_list_page_cache"):
+            app.state.repository_list_page_cache = {}
+        if not hasattr(app.state, "repository_tag_probe_cache"):
+            app.state.repository_tag_probe_cache = {}
         yield
 
     app = FastAPI(title="Registry Control Plane API", lifespan=lifespan)

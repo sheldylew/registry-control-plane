@@ -77,22 +77,11 @@ def _row_actions(permission: RepositoryPermission) -> set[str]:
     return actions
 
 
-def _repository_actions_for_subject(
-    session: Session,
+def _repository_actions_from_permission_rows(
+    permissions: list[RepositoryPermission],
     *,
-    subject_type: str,
-    subject_id: Optional[int],
     repository_name: str,
 ) -> set[str]:
-    if subject_id is None:
-        return set()
-    permissions = session.scalars(
-        select(RepositoryPermission).where(
-            RepositoryPermission.subject_type == subject_type,
-            RepositoryPermission.subject_id == subject_id,
-        )
-    ).all()
-
     exact_matches = [perm for perm in permissions if perm.repository_pattern == repository_name]
     if exact_matches:
         return set().union(*[_row_actions(permission) for permission in exact_matches])
@@ -112,6 +101,43 @@ def _repository_actions_for_subject(
         if _pattern_rank(permission.repository_pattern, repository_name) == best_rank
     ]
     return set().union(*[_row_actions(permission) for permission in best_matches])
+
+
+def _repository_actions_for_subject(
+    session: Session,
+    *,
+    subject_type: str,
+    subject_id: Optional[int],
+    repository_name: str,
+) -> set[str]:
+    if subject_id is None:
+        return set()
+    permissions = session.scalars(
+        select(RepositoryPermission).where(
+            RepositoryPermission.subject_type == subject_type,
+            RepositoryPermission.subject_id == subject_id,
+        )
+    ).all()
+    return _repository_actions_from_permission_rows(permissions, repository_name=repository_name)
+
+
+def _public_repository_names(session: Session, repository_names: list[str]) -> set[str]:
+    if not repository_names:
+        return set()
+
+    public_names: set[str] = set()
+    chunk_size = 500
+    for offset in range(0, len(repository_names), chunk_size):
+        chunk = repository_names[offset:offset + chunk_size]
+        public_names.update(
+            session.scalars(
+                select(Repository.name).where(
+                    Repository.name.in_(chunk),
+                    Repository.visibility == "public",
+                )
+            ).all()
+        )
+    return public_names
 
 
 def is_repository_public(session: Session, repository_name: str) -> bool:
@@ -197,16 +223,22 @@ def filter_visible_repositories(
     if is_admin:
         return sorted(repository_names)
 
+    public_names = _public_repository_names(session, repository_names)
+    permissions = []
+    if subject_id is not None:
+        permissions = session.scalars(
+            select(RepositoryPermission).where(
+                RepositoryPermission.subject_type == subject_type,
+                RepositoryPermission.subject_id == subject_id,
+            )
+        ).all()
+
     visible = [
         repository_name
         for repository_name in repository_names
-        if can_access_repository(
-            session,
-            subject_type=subject_type,
-            subject_id=subject_id,
-            is_admin=is_admin,
+        if repository_name in public_names or "pull" in _repository_actions_from_permission_rows(
+            permissions,
             repository_name=repository_name,
-            action="pull",
         )
     ]
     return sorted(visible)

@@ -1727,6 +1727,35 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
     assert ui_timezone.value == "America/New_York"
 
 
+def test_admin_can_update_public_registry_origin_after_external_domain_changes(settings) -> None:
+    production_settings = replace(
+        settings,
+        app_env="production",
+        public_registry_origin="https://registry-old.sheldylew.com",
+        session_cookie_secure=True,
+    )
+    app = create_app(production_settings)
+
+    with TestClient(app, base_url="https://registry-test.sheldylew.com") as client:
+        login = _login(client, production_settings.admin_username, production_settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/settings",
+            json={
+                "public_registry_origin": "https://registry-test.sheldylew.com",
+                "ui_timezone": "America/Los_Angeles",
+            },
+            headers={
+                "X-CSRF-Token": csrf,
+                "Origin": "https://registry-test.sheldylew.com",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["settings"]["public_registry_origin"] == "https://registry-test.sheldylew.com"
+    assert response.json()["registry_restart_required"] is True
+
+
 def test_ui_settings_defaults_to_los_angeles_timezone(settings) -> None:
     app = create_app(settings)
 
@@ -1852,6 +1881,108 @@ def test_repo_catalog_listing_is_cached_across_requests(settings) -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert fake_registry.list_repositories_bounded_calls == 1
+
+
+def test_repo_list_page_payload_is_cached_across_requests(settings) -> None:
+    settings = replace(settings, repository_tag_probe_cache_seconds=0)
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 26)])
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        first = client.get("/api/repos?page=1")
+        second = client.get("/api/repos?page=1")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert fake_registry.list_tags_calls == [f"repo/{n:02d}" for n in range(1, 12)]
+
+
+def test_repo_tag_probe_cache_reuses_checks_across_pages(settings) -> None:
+    settings = replace(settings, repository_list_cache_seconds=0)
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=[f"repo/{n:02d}" for n in range(1, 16)])
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        page_one = client.get("/api/repos?page=1")
+        page_two = client.get("/api/repos?page=2")
+
+    assert page_one.status_code == 200
+    assert page_two.status_code == 200
+    assert fake_registry.list_tags_calls == [f"repo/{n:02d}" for n in range(1, 16)]
+
+
+def test_repository_visibility_update_invalidates_repo_list_page_cache(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(repositories=["public/app"])
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+        first = client.get("/api/repos")
+        update = client.post(
+            "/api/admin/repositories/visibility",
+            json={"repository_name": "public/app", "visibility": "public"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        second = client.get("/api/repos")
+
+    assert first.status_code == 200
+    assert update.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["repos"] == [{"name": "public/app", "visibility": "private"}]
+    assert second.json()["repos"] == [{"name": "public/app", "visibility": "public"}]
+
+
+def test_registry_event_invalidates_repo_tag_probe_cache(settings) -> None:
+    settings = replace(settings, repository_list_cache_seconds=0)
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        repositories=["sheldylew/app", "sheldylew/gc-me"],
+        tags={"sheldylew/app": ["latest"], "sheldylew/gc-me": []},
+        missing_repos={"sheldylew/gc-me"},
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        first = client.get("/api/repos")
+        fake_registry.missing_repos.clear()
+        event = client.post(
+            "/api/internal/registry-events",
+            headers=_registry_event_headers(app),
+            json={
+                "events": [
+                    {
+                        "action": "delete",
+                        "repository": "sheldylew/gc-me",
+                        "target": {
+                            "repository": "sheldylew/gc-me",
+                            "digest": "sha256:gone",
+                        },
+                    }
+                ]
+            },
+        )
+        second = client.get("/api/repos")
+
+    assert first.status_code == 200
+    assert event.status_code == 202
+    assert second.status_code == 200
+    assert first.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
+    assert second.json()["repos"] == [
+        {"name": "sheldylew/app", "visibility": "private"},
+        {"name": "sheldylew/gc-me", "visibility": "private"},
+    ]
 
 
 def test_repo_list_skips_stale_catalog_entries(settings) -> None:

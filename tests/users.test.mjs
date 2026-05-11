@@ -59,11 +59,15 @@ test("admin users page builds pagination links", async () => {
 });
 
 test("repositories page shows visibility badges", async () => {
-  const page = await readFile(new URL("../app/repos/page.jsx", import.meta.url), "utf8");
+  const [page, panel] = await Promise.all([
+    readFile(new URL("../app/repos/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/repositories-panel.jsx", import.meta.url), "utf8"),
+  ]);
 
-  assert.match(page, /repo\.visibility === "public"/);
-  assert.match(page, /Public/);
-  assert.match(page, /Private/);
+  assert.match(page, /<RepositoriesPanel initialPayload=\{payload\} \/>/);
+  assert.match(panel, /repo\.visibility === "public"/);
+  assert.match(panel, /Public/);
+  assert.match(panel, /Private/);
 });
 
 test("admin shell includes settings navigation", async () => {

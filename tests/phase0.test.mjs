@@ -39,7 +39,7 @@ test("protected repo navigation disables automatic prefetch", async () => {
     robotsPanel,
     auditPage,
     pagination,
-    reposPage,
+    reposPanel,
     repoPage,
     tagPage,
     historyPage,
@@ -50,7 +50,7 @@ test("protected repo navigation disables automatic prefetch", async () => {
     readFile(new URL("../app/components/robots-panel.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/admin/audit/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/ui/pagination.jsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/repos/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/repositories-panel.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/repos/[repo]/tags/[tag]/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/repos/[repo]/tags/[tag]/history/page.jsx", import.meta.url), "utf8"),
@@ -62,7 +62,7 @@ test("protected repo navigation disables automatic prefetch", async () => {
   assert.match(robotsPanel, /prefetch=\{false\}/);
   assert.match(auditPage, /prefetch=\{false\}/);
   assert.match(pagination, /prefetch=\{false\}/);
-  assert.match(reposPage, /prefetch=\{false\}/);
+  assert.match(reposPanel, /prefetch=\{false\}/);
   assert.match(repoPage, /prefetch=\{false\}/);
   assert.match(tagPage, /prefetch=\{false\}/);
   assert.match(historyPage, /prefetch=\{false\}/);

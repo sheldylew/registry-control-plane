@@ -78,7 +78,7 @@ COPY jsconfig.json ./
 COPY next.config.mjs ./
 COPY postcss.config.mjs ./
 
-RUN npm run build
+RUN npm run build:docker
 
 FROM node:20.18.3-alpine3.20 AS web
 

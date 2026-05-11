@@ -4,8 +4,20 @@ import { useEffect, useState } from "react";
 
 import LoadingOverlay from "@/app/components/ui/loading-overlay";
 
-function shouldTrackApiRequest(input) {
+function hasBackgroundPrefetchHeader(input, init) {
+  try {
+    const headers = new Headers(init?.headers || input?.headers || {});
+    return headers.get("X-Background-Prefetch") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function shouldTrackApiRequest(input, init) {
   if (typeof window === "undefined") {
+    return false;
+  }
+  if (hasBackgroundPrefetchHeader(input, init)) {
     return false;
   }
 
@@ -61,7 +73,7 @@ export default function ApiBusyOverlay() {
     const originalFetch = window.fetch.bind(window);
 
     async function trackedFetch(...args) {
-      const trackRequest = shouldTrackApiRequest(args[0]);
+      const trackRequest = shouldTrackApiRequest(args[0], args[1]);
       if (!trackRequest) {
         return originalFetch(...args);
       }
