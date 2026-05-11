@@ -444,7 +444,13 @@ def has_active_rebuild_job(db: Session) -> bool:
     return active is not None
 
 
-def create_rebuild_job(db: Session, *, actor: User, retention_days: int = 30) -> RegistryStateRebuildJob:
+def create_rebuild_job(
+    db: Session,
+    *,
+    actor: User,
+    retention_days: int = 30,
+    reason: str = "manual",
+) -> RegistryStateRebuildJob:
     if has_active_rebuild_job(db):
         raise ValueError("A registry state rebuild is already queued or running.")
     active_gc = db.scalar(
@@ -469,10 +475,33 @@ def create_rebuild_job(db: Session, *, actor: User, retention_days: int = 30) ->
         action="registry_state_rebuild_requested",
         target_type="registry_state_rebuild_job",
         target_id=job.id,
-        metadata_json={"requested_by": actor.username},
+        metadata_json={"requested_by": actor.username, "reason": reason},
         retention_days=retention_days,
     )
     return job
+
+
+def queue_automatic_rebuild_job(db: Session, *, retention_days: int = 30) -> Optional[RegistryStateRebuildJob]:
+    actor = db.scalar(
+        select(User)
+        .where(
+            User.is_admin.is_(True),
+            User.is_active.is_(True),
+        )
+        .order_by(User.id.asc())
+        .limit(1)
+    )
+    if actor is None:
+        return None
+    try:
+        return create_rebuild_job(
+            db,
+            actor=actor,
+            retention_days=retention_days,
+            reason="automatic_startup",
+        )
+    except ValueError:
+        return None
 
 
 def run_registry_state_rebuild_job(session_factory, registry_factory, settings, job_id: int) -> None:

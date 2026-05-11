@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -18,8 +19,10 @@ from backend.log_retention import prune_expired_logs, prune_expired_operational_
 from backend.models import Base
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import RegistryClient
+from backend.registry_state import queue_automatic_rebuild_job, run_registry_state_rebuild_job
 from backend.runtime_secrets import ensure_registry_notifications_token
 from backend.setup import (
+    automatic_registry_state_rebuild_enabled,
     complete_setup_from_environment,
     render_registry_config_to_path,
     saved_public_registry_origin,
@@ -70,6 +73,8 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
         app.state.session_factory = session_factory
         if not hasattr(app.state, "registry_client_factory"):
             app.state.registry_client_factory = lambda: RegistryClient(settings=settings)
+        if not hasattr(app.state, "maintenance_auto_run"):
+            app.state.maintenance_auto_run = True
         if not hasattr(app.state, "maintenance_service_factory"):
             app.state.maintenance_service_factory = lambda: MaintenanceService(
                 session_factory=session_factory,
@@ -93,8 +98,25 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
                 max_attempts=settings.setup_rate_limit_attempts,
                 window_seconds=settings.setup_rate_limit_window_seconds,
             )
-        if not hasattr(app.state, "maintenance_auto_run"):
-            app.state.maintenance_auto_run = True
+
+        auto_rebuild_job_id = None
+        with session_factory() as session:
+            if not setup_required(session) and automatic_registry_state_rebuild_enabled(session):
+                auto_rebuild_job = queue_automatic_rebuild_job(
+                    session,
+                    retention_days=settings.log_retention_days,
+                )
+                auto_rebuild_job_id = auto_rebuild_job.id if auto_rebuild_job is not None else None
+        if auto_rebuild_job_id is not None and app.state.maintenance_auto_run:
+            asyncio.create_task(
+                asyncio.to_thread(
+                    run_registry_state_rebuild_job,
+                    session_factory,
+                    app.state.registry_client_factory,
+                    settings,
+                    auto_rebuild_job_id,
+                )
+            )
         yield
 
     app = FastAPI(title="Registry Control Plane API", lifespan=lifespan)

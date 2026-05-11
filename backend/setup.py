@@ -25,6 +25,7 @@ from backend.runtime_secrets import ensure_registry_notifications_token
 
 PUBLIC_REGISTRY_ORIGIN_KEY = "public_registry_origin"
 UI_TIMEZONE_KEY = "ui_timezone"
+AUTOMATIC_REGISTRY_STATE_REBUILD_KEY = "automatic_registry_state_rebuild"
 DEFAULT_UI_TIMEZONE = "America/Los_Angeles"
 RESTART_COMMAND = "docker compose restart registry"
 REGISTRY_EVENTS_PATH = "/api/internal/registry-events"
@@ -94,6 +95,11 @@ def saved_ui_timezone(session: Session) -> Optional[str]:
 
 def effective_ui_timezone(session: Session) -> str:
     return saved_ui_timezone(session) or DEFAULT_UI_TIMEZONE
+
+
+def automatic_registry_state_rebuild_enabled(session: Session) -> bool:
+    value = get_app_setting(session, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY)
+    return value is not None and value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def env_bootstrap_values(settings: Settings) -> dict[str, Optional[str]]:

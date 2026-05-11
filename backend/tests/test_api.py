@@ -31,7 +31,7 @@ from backend.models import (
 from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
 from backend.runtime_secrets import ensure_registry_notifications_token
-from backend.setup import PUBLIC_REGISTRY_ORIGIN_KEY, ensure_setup_token
+from backend.setup import AUTOMATIC_REGISTRY_STATE_REBUILD_KEY, PUBLIC_REGISTRY_ORIGIN_KEY, ensure_setup_token
 
 
 def test_healthz_returns_ok(settings) -> None:
@@ -1807,17 +1807,19 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
         login = _login(client, settings.admin_username, settings.admin_password)
         csrf = login.cookies.get("rcr_csrf")
         response = client.post(
-                "/api/admin/settings",
-                json={
-                    "public_registry_origin": "https://registry.example.com",
-                    "ui_timezone": "America/New_York",
-                },
-                headers={"X-CSRF-Token": csrf},
-            )
+            "/api/admin/settings",
+            json={
+                "public_registry_origin": "https://registry.example.com",
+                "ui_timezone": "America/New_York",
+                "automatic_registry_state_rebuild": True,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
         settings_response = client.get("/api/admin/settings")
         with app.state.session_factory() as session:
             origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
             ui_timezone = session.get(AppSetting, "ui_timezone")
+            automatic_rebuild = session.get(AppSetting, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY)
 
     assert response.status_code == 200
     assert response.json()["registry_restart_required"] is True
@@ -1825,10 +1827,47 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
     assert settings_response.status_code == 200
     assert settings_response.json()["public_registry_origin"] == "https://registry.example.com"
     assert settings_response.json()["ui_timezone"] == "America/New_York"
+    assert settings_response.json()["automatic_registry_state_rebuild"] is True
     assert origin is not None
     assert origin.value == "https://registry.example.com"
     assert ui_timezone is not None
     assert ui_timezone.value == "America/New_York"
+    assert automatic_rebuild is not None
+    assert automatic_rebuild.value == "true"
+
+
+def test_automatic_registry_rebuild_setting_queues_startup_job(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/settings",
+            json={
+                "public_registry_origin": settings.public_registry_origin,
+                "ui_timezone": "America/Los_Angeles",
+                "automatic_registry_state_rebuild": True,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    restarted_app = create_app(settings)
+    restarted_app.state.maintenance_auto_run = False
+    with TestClient(restarted_app):
+        with restarted_app.state.session_factory() as session:
+            job = session.scalar(select(RegistryStateRebuildJob).order_by(RegistryStateRebuildJob.id.desc()))
+            audit = session.scalar(
+                select(AuditEvent)
+                .where(AuditEvent.action == "registry_state_rebuild_requested")
+                .order_by(AuditEvent.id.desc())
+            )
+
+    assert response.status_code == 200
+    assert job is not None
+    assert job.status == "queued"
+    assert audit is not None
+    assert audit.metadata_json["reason"] == "automatic_startup"
 
 
 def test_admin_can_update_public_registry_origin_after_external_domain_changes(settings) -> None:

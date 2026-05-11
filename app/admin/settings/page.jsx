@@ -20,6 +20,7 @@ export default async function SettingsPage() {
       <SettingsPanel
         initialPublicOrigin={payload.public_registry_origin}
         initialTimeZone={payload.ui_timezone}
+        initialAutomaticRegistryStateRebuild={payload.automatic_registry_state_rebuild}
         restartCommand={payload.restart_command}
       />
     </div>

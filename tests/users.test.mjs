@@ -102,4 +102,8 @@ test("first boot setup page and settings panel use setup APIs", async () => {
   assert.match(setupForm, /Continue to sign in after restart/);
   assert.match(settingsPanel, /\/api\/admin\/settings/);
   assert.match(settingsPanel, /X-CSRF-Token/);
+  assert.match(settingsPanel, /ComboboxInput/);
+  assert.match(settingsPanel, /Intl\.supportedValuesOf\("timeZone"\)/);
+  assert.match(settingsPanel, /automatic_registry_state_rebuild/);
+  assert.match(settingsPanel, /Automatic registry state rebuild/);
 });
