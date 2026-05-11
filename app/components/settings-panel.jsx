@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions } from "@headlessui/react";
+import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions, Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/20/solid";
 
 import Alert from "@/app/components/ui/alert";
@@ -44,6 +44,38 @@ const FALLBACK_TIME_ZONES = [
   "Pacific/Auckland",
   "Pacific/Honolulu",
 ];
+
+const STORAGE_USAGE_INTERVAL_OPTIONS = [
+  { value: "0", label: "Disabled", detail: "Only refresh when maintenance actions touch storage state." },
+  { value: "300", label: "Every 5 minutes", detail: "Fastest background refresh for active troubleshooting." },
+  { value: "900", label: "Every 15 minutes", detail: "Reasonable default for a busy registry." },
+  { value: "1800", label: "Every 30 minutes", detail: "Lower background churn while staying fairly current." },
+  { value: "3600", label: "Every 1 hour", detail: "Good default when storage does not change constantly." },
+  { value: "21600", label: "Every 6 hours", detail: "Useful when usage trends matter more than immediate freshness." },
+  { value: "43200", label: "Every 12 hours", detail: "Twice-daily background refresh." },
+  { value: "86400", label: "Every 24 hours", detail: "Lightest scheduled refresh." },
+  { value: "custom", label: "Custom", detail: "Enter an exact number of seconds." },
+];
+
+function formatStorageUsageInterval(seconds) {
+  if (!seconds) {
+    return "Disabled";
+  }
+  const minutes = seconds / 60;
+  const hours = seconds / 3600;
+  if (Number.isInteger(hours) && hours >= 1) {
+    return `Every ${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  if (Number.isInteger(minutes) && minutes >= 1) {
+    return `Every ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  return `Every ${seconds} seconds`;
+}
+
+function storageUsageIntervalPresetForValue(value) {
+  const normalized = String(Number(value) || 0);
+  return STORAGE_USAGE_INTERVAL_OPTIONS.some((option) => option.value === normalized) ? normalized : "custom";
+}
 
 function standardTimeZones(selectedTimeZone) {
   const supportedTimeZones =
@@ -130,6 +162,42 @@ function TimeZonePicker({ value, onChange }) {
   );
 }
 
+function StorageUsageIntervalPicker({ value, onPresetChange }) {
+  const selectedOption =
+    STORAGE_USAGE_INTERVAL_OPTIONS.find((option) => option.value === value) ||
+    STORAGE_USAGE_INTERVAL_OPTIONS[STORAGE_USAGE_INTERVAL_OPTIONS.length - 1];
+
+  return (
+    <Listbox value={selectedOption} by="value" onChange={onPresetChange}>
+      <div className="relative">
+        <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-60">
+          <span className="block truncate font-medium">{selectedOption.label}</span>
+          <span className="block truncate pr-6 text-xs text-slate-400">{selectedOption.detail}</span>
+          <ChevronUpDownIcon aria-hidden="true" className="pointer-events-none absolute right-3 top-3.5 size-5 text-slate-400" />
+        </ListboxButton>
+        <ListboxOptions
+          transition
+          className="absolute z-[60] mt-2 max-h-72 w-full overflow-auto rounded-lg border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/50 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
+        >
+          {STORAGE_USAGE_INTERVAL_OPTIONS.map((option) => (
+            <ListboxOption
+              key={option.value}
+              value={option}
+              className="group relative cursor-default select-none py-2.5 pl-9 pr-4 text-white data-[focus]:bg-cyan-400 data-[focus]:text-slate-950 data-[focus]:outline-none"
+            >
+              <span className="block truncate font-medium">{option.label}</span>
+              <span className="block truncate text-xs text-slate-400 group-data-[focus]:text-slate-800">{option.detail}</span>
+              <span className="absolute inset-y-0 left-0 hidden items-center pl-2 text-cyan-300 group-data-[focus]:text-slate-950 group-data-[selected]:flex">
+                <CheckIcon aria-hidden="true" className="size-5" />
+              </span>
+            </ListboxOption>
+          ))}
+        </ListboxOptions>
+      </div>
+    </Listbox>
+  );
+}
+
 export default function SettingsPanel({
   initialPublicOrigin,
   initialTimeZone,
@@ -149,6 +217,9 @@ export default function SettingsPanel({
   const [draftStorageUsageRefreshIntervalSeconds, setDraftStorageUsageRefreshIntervalSeconds] = useState(
     String(Number(initialStorageUsageRefreshIntervalSeconds) || 0),
   );
+  const [draftStorageUsageRefreshPreset, setDraftStorageUsageRefreshPreset] = useState(
+    storageUsageIntervalPresetForValue(initialStorageUsageRefreshIntervalSeconds),
+  );
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -167,6 +238,7 @@ export default function SettingsPanel({
     setDraftTimeZone(timeZone);
     setDraftAutomaticRebuild(automaticRebuild);
     setDraftStorageUsageRefreshIntervalSeconds(String(storageUsageRefreshIntervalSeconds));
+    setDraftStorageUsageRefreshPreset(storageUsageIntervalPresetForValue(storageUsageRefreshIntervalSeconds));
     setError("");
     setOpen(true);
   }
@@ -218,6 +290,9 @@ export default function SettingsPanel({
     setDraftAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setStorageUsageRefreshIntervalSeconds(payload.settings.storage_usage_refresh_interval_seconds);
     setDraftStorageUsageRefreshIntervalSeconds(String(payload.settings.storage_usage_refresh_interval_seconds));
+    setDraftStorageUsageRefreshPreset(
+      storageUsageIntervalPresetForValue(payload.settings.storage_usage_refresh_interval_seconds),
+    );
     setMessage(payload.restart_command || "");
     setOpen(false);
   }
@@ -256,9 +331,7 @@ export default function SettingsPanel({
               },
               {
                 label: "Storage usage refresh",
-                value: storageUsageRefreshIntervalSeconds
-                  ? `Every ${storageUsageRefreshIntervalSeconds} seconds`
-                  : "Disabled",
+                value: formatStorageUsageInterval(storageUsageRefreshIntervalSeconds),
               },
               {
                 label: "Change behavior",
@@ -317,17 +390,29 @@ export default function SettingsPanel({
           />
         </div>
         <Field label="Storage usage refresh interval">
-          <Input
-            value={draftStorageUsageRefreshIntervalSeconds}
-            onChange={(event) => setDraftStorageUsageRefreshIntervalSeconds(event.target.value)}
-            required
-            min={0}
-            max={86400}
-            step={1}
-            type="number"
+          <StorageUsageIntervalPicker
+            value={draftStorageUsageRefreshPreset}
+            onPresetChange={(option) => {
+              setDraftStorageUsageRefreshPreset(option.value);
+              if (option.value !== "custom") {
+                setDraftStorageUsageRefreshIntervalSeconds(option.value);
+              }
+            }}
           />
+          {draftStorageUsageRefreshPreset === "custom" ? (
+            <Input
+              className="mt-3"
+              value={draftStorageUsageRefreshIntervalSeconds}
+              onChange={(event) => setDraftStorageUsageRefreshIntervalSeconds(event.target.value)}
+              required
+              min={0}
+              max={86400}
+              step={1}
+              type="number"
+            />
+          ) : null}
           <span className="mt-2 block text-xs text-slate-400">
-            Seconds between background storage measurements. Use 0 to disable periodic refresh.
+            Presets cover the common intervals. Use Custom to enter an exact number of seconds from 0 to 86400.
           </span>
         </Field>
       </FormDialog>
