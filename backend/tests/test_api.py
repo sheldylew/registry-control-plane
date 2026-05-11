@@ -33,9 +33,11 @@ from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNot
 from backend.runtime_secrets import ensure_registry_notifications_token
 from backend.setup import (
     AUTOMATIC_REGISTRY_STATE_REBUILD_KEY,
+    DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
     REGISTRY_STORAGE_USAGE_BYTES_KEY,
     REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
     REGISTRY_STORAGE_USAGE_STALE_KEY,
+    REPOSITORY_TAGS_PAGE_SIZE_KEY,
     STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY,
     PUBLIC_REGISTRY_ORIGIN_KEY,
     ensure_setup_token,
@@ -1820,6 +1822,7 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
             json={
                 "public_registry_origin": "https://registry.example.com",
                 "ui_timezone": "America/New_York",
+                "repository_tags_page_size": 25,
                 "automatic_registry_state_rebuild": True,
                 "storage_usage_refresh_interval_seconds": 120,
             },
@@ -1829,6 +1832,7 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
         with app.state.session_factory() as session:
             origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
             ui_timezone = session.get(AppSetting, "ui_timezone")
+            repository_tags_page_size = session.get(AppSetting, REPOSITORY_TAGS_PAGE_SIZE_KEY)
             automatic_rebuild = session.get(AppSetting, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY)
             storage_interval = session.get(AppSetting, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY)
 
@@ -1838,12 +1842,15 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
     assert settings_response.status_code == 200
     assert settings_response.json()["public_registry_origin"] == "https://registry.example.com"
     assert settings_response.json()["ui_timezone"] == "America/New_York"
+    assert settings_response.json()["repository_tags_page_size"] == 25
     assert settings_response.json()["automatic_registry_state_rebuild"] is True
     assert settings_response.json()["storage_usage_refresh_interval_seconds"] == 120
     assert origin is not None
     assert origin.value == "https://registry.example.com"
     assert ui_timezone is not None
     assert ui_timezone.value == "America/New_York"
+    assert repository_tags_page_size is not None
+    assert repository_tags_page_size.value == "25"
     assert automatic_rebuild is not None
     assert automatic_rebuild.value == "true"
     assert storage_interval is not None
@@ -1946,6 +1953,42 @@ def test_ui_settings_defaults_to_los_angeles_timezone(settings) -> None:
 
     assert response.status_code == 200
     assert response.json()["ui_timezone"] == "America/Los_Angeles"
+
+
+def test_admin_settings_default_repository_tags_page_size_is_ten(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        _login(client, settings.admin_username, settings.admin_password)
+        response = client.get("/api/admin/settings")
+
+    assert response.status_code == 200
+    assert response.json()["repository_tags_page_size"] == DEFAULT_REPOSITORY_TAGS_PAGE_SIZE
+    assert response.json()["default_repository_tags_page_size"] == DEFAULT_REPOSITORY_TAGS_PAGE_SIZE
+
+
+def test_admin_can_update_repository_tags_page_size_without_restart(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/settings",
+            json={
+                "public_registry_origin": settings.public_registry_origin,
+                "ui_timezone": "America/Los_Angeles",
+                "repository_tags_page_size": 7,
+                "automatic_registry_state_rebuild": False,
+                "storage_usage_refresh_interval_seconds": 3600,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["settings"]["repository_tags_page_size"] == 7
+    assert response.json()["registry_restart_required"] is False
+    assert response.json()["restart_command"] is None
 
 
 def test_repo_list_only_shows_visible_repositories(settings) -> None:
@@ -2387,7 +2430,7 @@ def test_repo_tags_return_paginated_summary_rows(settings) -> None:
     ]
     assert response.json()["pagination"] == {
         "page": 1,
-        "page_size": settings.repository_tags_max_items,
+        "page_size": DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
         "total": 1,
         "has_prev": False,
         "has_next": False,
@@ -2415,29 +2458,7 @@ def test_admin_repo_tags_include_repository_visibility(settings) -> None:
 
 
 def test_repo_tags_return_truncation_metadata(settings) -> None:
-    limited_settings = Settings(
-        app_env=settings.app_env,
-        database_url=settings.database_url,
-        registry_internal_url=settings.registry_internal_url,
-        registry_storage_root=settings.registry_storage_root,
-        compose_project_dir=settings.compose_project_dir,
-        registry_service_name=settings.registry_service_name,
-        registry_gc_config_path=settings.registry_gc_config_path,
-        token_issuer=settings.token_issuer,
-        token_service=settings.token_service,
-        token_ttl_seconds=settings.token_ttl_seconds,
-        public_registry_origin=settings.public_registry_origin,
-        auth_private_key_path=settings.auth_private_key_path,
-        auth_public_cert_path=settings.auth_public_cert_path,
-        internal_api_base_url=settings.internal_api_base_url,
-        admin_username=settings.admin_username,
-        admin_password=settings.admin_password,
-        admin_email=settings.admin_email,
-        repository_tags_max_items=1,
-        session_cookie_secure=settings.session_cookie_secure,
-        session_lifetime_seconds=settings.session_lifetime_seconds,
-    )
-    app = create_app(limited_settings)
+    app = create_app(settings)
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
@@ -2462,6 +2483,7 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
                 total_size=22,
                 architectures=["linux/arm64"],
             )
+            set_app_setting(session, REPOSITORY_TAGS_PAGE_SIZE_KEY, "1")
             session.commit()
             _grant_reader(session, username="trunc-reader", password="trunc-reader-pass")
 

@@ -14,12 +14,13 @@ export default async function SettingsPage() {
       <Panel className="p-6">
         <PanelHeader
           title="Settings"
-          description="Configure deployment values that must be shared between the control plane and registry."
+          description="Configure registry-facing values and runtime UI defaults for the control plane."
         />
       </Panel>
       <SettingsPanel
         initialPublicOrigin={payload.public_registry_origin}
         initialTimeZone={payload.ui_timezone}
+        initialRepositoryTagsPageSize={payload.repository_tags_page_size}
         initialAutomaticRegistryStateRebuild={payload.automatic_registry_state_rebuild}
         initialStorageUsageRefreshIntervalSeconds={payload.storage_usage_refresh_interval_seconds}
         restartCommand={payload.restart_command}

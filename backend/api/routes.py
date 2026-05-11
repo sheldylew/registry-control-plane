@@ -50,14 +50,19 @@ from backend.registry_state import (
 )
 from backend.setup import (
     AUTOMATIC_REGISTRY_STATE_REBUILD_KEY,
+    DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
     DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
     DEFAULT_UI_TIMEZONE,
+    PUBLIC_REGISTRY_ORIGIN_KEY,
+    REPOSITORY_TAGS_PAGE_SIZE_KEY,
     RESTART_COMMAND,
     SetupError,
     STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY,
+    UI_TIMEZONE_KEY,
     automatic_registry_state_rebuild_enabled,
     complete_setup,
     effective_public_registry_origin,
+    effective_repository_tags_page_size,
     effective_storage_usage_refresh_interval_seconds,
     effective_ui_timezone,
     render_registry_config_to_path,
@@ -66,11 +71,10 @@ from backend.setup import (
     setup_required,
     setup_status,
     validate_public_registry_origin,
+    validate_repository_tags_page_size,
     validate_storage_usage_refresh_interval_seconds,
     validate_ui_timezone,
     verify_setup_token,
-    PUBLIC_REGISTRY_ORIGIN_KEY,
-    UI_TIMEZONE_KEY,
 )
 
 
@@ -847,6 +851,7 @@ class SetupCompletePayload(BaseModel):
 class UpdateSettingsPayload(BaseModel):
     public_registry_origin: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LENGTH)
     ui_timezone: str = Field(min_length=1, max_length=128)
+    repository_tags_page_size: int = Field(default=DEFAULT_REPOSITORY_TAGS_PAGE_SIZE, ge=1, le=100)
     automatic_registry_state_rebuild: bool = False
     storage_usage_refresh_interval_seconds: int = Field(
         default=DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
@@ -1862,8 +1867,10 @@ def admin_settings(
     return {
         "public_registry_origin": effective_public_registry_origin(db, settings),
         "ui_timezone": effective_ui_timezone(db),
+        "repository_tags_page_size": effective_repository_tags_page_size(db),
         "automatic_registry_state_rebuild": automatic_registry_state_rebuild_enabled(db),
         "storage_usage_refresh_interval_seconds": effective_storage_usage_refresh_interval_seconds(db),
+        "default_repository_tags_page_size": DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
         "default_storage_usage_refresh_interval_seconds": DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
         "default_ui_timezone": DEFAULT_UI_TIMEZONE,
         "restart_command": RESTART_COMMAND,
@@ -1890,6 +1897,7 @@ def update_admin_settings(
     try:
         public_origin = validate_public_registry_origin(payload.public_registry_origin, app_env=settings.app_env)
         ui_timezone = validate_ui_timezone(payload.ui_timezone)
+        repository_tags_page_size = validate_repository_tags_page_size(payload.repository_tags_page_size)
         automatic_rebuild = bool(payload.automatic_registry_state_rebuild)
         storage_interval = validate_storage_usage_refresh_interval_seconds(
             payload.storage_usage_refresh_interval_seconds
@@ -1897,6 +1905,7 @@ def update_admin_settings(
         previous_public_origin = effective_public_registry_origin(db, settings)
         set_app_setting(db, PUBLIC_REGISTRY_ORIGIN_KEY, public_origin)
         set_app_setting(db, UI_TIMEZONE_KEY, ui_timezone)
+        set_app_setting(db, REPOSITORY_TAGS_PAGE_SIZE_KEY, str(repository_tags_page_size))
         set_app_setting(db, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY, "true" if automatic_rebuild else "false")
         set_app_setting(db, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY, str(storage_interval))
         db.commit()
@@ -1916,6 +1925,7 @@ def update_admin_settings(
         metadata_json={
             "public_registry_origin": public_origin,
             "ui_timezone": ui_timezone,
+            "repository_tags_page_size": repository_tags_page_size,
             "automatic_registry_state_rebuild": automatic_rebuild,
             "storage_usage_refresh_interval_seconds": storage_interval,
         },
@@ -1924,6 +1934,7 @@ def update_admin_settings(
         "settings": {
             "public_registry_origin": public_origin,
             "ui_timezone": ui_timezone,
+            "repository_tags_page_size": repository_tags_page_size,
             "automatic_registry_state_rebuild": automatic_rebuild,
             "storage_usage_refresh_interval_seconds": storage_interval,
         },
@@ -2194,7 +2205,7 @@ def list_repository_tags(
     page: int = 1,
 ):
     safe_page = max(page, 1)
-    page_size = settings.repository_tags_max_items
+    page_size = effective_repository_tags_page_size(db)
     repository = db.scalar(
         select(Repository).where(
             Repository.name == repo_name,

@@ -25,12 +25,14 @@ from backend.runtime_secrets import ensure_registry_notifications_token
 
 PUBLIC_REGISTRY_ORIGIN_KEY = "public_registry_origin"
 UI_TIMEZONE_KEY = "ui_timezone"
+REPOSITORY_TAGS_PAGE_SIZE_KEY = "repository_tags_page_size"
 AUTOMATIC_REGISTRY_STATE_REBUILD_KEY = "automatic_registry_state_rebuild"
 STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY = "storage_usage_refresh_interval_seconds"
 REGISTRY_STORAGE_USAGE_BYTES_KEY = "registry_storage_usage_bytes"
 REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY = "registry_storage_usage_measured_at"
 REGISTRY_STORAGE_USAGE_STALE_KEY = "registry_storage_usage_stale"
 DEFAULT_UI_TIMEZONE = "America/Los_Angeles"
+DEFAULT_REPOSITORY_TAGS_PAGE_SIZE = 10
 DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS = 3600
 RESTART_COMMAND = "docker compose restart registry"
 REGISTRY_EVENTS_PATH = "/api/internal/registry-events"
@@ -100,6 +102,26 @@ def saved_ui_timezone(session: Session) -> Optional[str]:
 
 def effective_ui_timezone(session: Session) -> str:
     return saved_ui_timezone(session) or DEFAULT_UI_TIMEZONE
+
+
+def validate_repository_tags_page_size(value: int) -> int:
+    try:
+        page_size = int(value)
+    except (TypeError, ValueError) as exc:
+        raise SetupError("Repository tag page size must be a whole number.") from exc
+    if page_size < 1 or page_size > 100:
+        raise SetupError("Repository tag page size must be between 1 and 100.")
+    return page_size
+
+
+def effective_repository_tags_page_size(session: Session) -> int:
+    value = get_app_setting(session, REPOSITORY_TAGS_PAGE_SIZE_KEY)
+    if value is None:
+        return DEFAULT_REPOSITORY_TAGS_PAGE_SIZE
+    try:
+        return validate_repository_tags_page_size(int(value.strip()))
+    except (SetupError, ValueError):
+        return DEFAULT_REPOSITORY_TAGS_PAGE_SIZE
 
 
 def automatic_registry_state_rebuild_enabled(session: Session) -> bool:

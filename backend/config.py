@@ -41,7 +41,6 @@ class Settings:
     maintenance_min_gate_seconds: float = 1.0
     registry_catalog_max_pages: int = 10
     dashboard_max_repositories: int = 50
-    repository_tags_max_items: int = 10
     manifest_children_max_items: int = 25
     history_entries_max_items: int = 50
     admin_username: Optional[str] = None
@@ -77,8 +76,6 @@ class Settings:
             raise ValueError("REGISTRY_CATALOG_MAX_PAGES must be at least 1.")
         if self.dashboard_max_repositories < 1:
             raise ValueError("DASHBOARD_MAX_REPOSITORIES must be at least 1.")
-        if self.repository_tags_max_items < 1:
-            raise ValueError("REPOSITORY_TAGS_MAX_ITEMS must be at least 1.")
         if self.manifest_children_max_items < 1:
             raise ValueError("MANIFEST_CHILDREN_MAX_ITEMS must be at least 1.")
         if self.history_entries_max_items < 1:
@@ -126,7 +123,6 @@ def load_settings() -> Settings:
         admin_email=os.getenv("ADMIN_EMAIL"),
         registry_catalog_max_pages=int(os.getenv("REGISTRY_CATALOG_MAX_PAGES", "10")),
         dashboard_max_repositories=int(os.getenv("DASHBOARD_MAX_REPOSITORIES", "50")),
-        repository_tags_max_items=int(os.getenv("REPOSITORY_TAGS_MAX_ITEMS", "10")),
         manifest_children_max_items=int(os.getenv("MANIFEST_CHILDREN_MAX_ITEMS", "25")),
         history_entries_max_items=int(os.getenv("HISTORY_ENTRIES_MAX_ITEMS", "50")),
         login_rate_limit_attempts=int(os.getenv("LOGIN_RATE_LIMIT_ATTEMPTS", "5")),

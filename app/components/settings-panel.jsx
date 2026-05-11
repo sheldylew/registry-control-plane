@@ -201,6 +201,7 @@ function StorageUsageIntervalPicker({ value, onPresetChange }) {
 export default function SettingsPanel({
   initialPublicOrigin,
   initialTimeZone,
+  initialRepositoryTagsPageSize = 10,
   initialAutomaticRegistryStateRebuild = false,
   initialStorageUsageRefreshIntervalSeconds = 3600,
   restartCommand,
@@ -209,6 +210,8 @@ export default function SettingsPanel({
   const [draftPublicOrigin, setDraftPublicOrigin] = useState(initialPublicOrigin || "");
   const [timeZone, setTimeZone] = useState(initialTimeZone || "America/Los_Angeles");
   const [draftTimeZone, setDraftTimeZone] = useState(initialTimeZone || "America/Los_Angeles");
+  const [repositoryTagsPageSize, setRepositoryTagsPageSize] = useState(Number(initialRepositoryTagsPageSize) || 10);
+  const [draftRepositoryTagsPageSize, setDraftRepositoryTagsPageSize] = useState(String(Number(initialRepositoryTagsPageSize) || 10));
   const [automaticRebuild, setAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
   const [draftAutomaticRebuild, setDraftAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
   const [storageUsageRefreshIntervalSeconds, setStorageUsageRefreshIntervalSeconds] = useState(
@@ -227,15 +230,25 @@ export default function SettingsPanel({
   const normalizedOrigin = normalizeTextInput(draftPublicOrigin).replace(/\/$/, "");
   const normalizedTimeZone = normalizeTextInput(draftTimeZone);
   const parsedStorageUsageRefreshIntervalSeconds = Number(draftStorageUsageRefreshIntervalSeconds);
+  const parsedRepositoryTagsPageSize = Number(draftRepositoryTagsPageSize);
+  const hasValidRepositoryTagsPageSize =
+    Number.isInteger(parsedRepositoryTagsPageSize) &&
+    parsedRepositoryTagsPageSize >= 1 &&
+    parsedRepositoryTagsPageSize <= 100;
   const hasValidStorageUsageInterval =
     Number.isInteger(parsedStorageUsageRefreshIntervalSeconds) &&
     parsedStorageUsageRefreshIntervalSeconds >= 0 &&
     parsedStorageUsageRefreshIntervalSeconds <= 86400;
-  const canSubmit = isValidPublicOrigin(normalizedOrigin) && Boolean(normalizedTimeZone) && hasValidStorageUsageInterval;
+  const canSubmit =
+    isValidPublicOrigin(normalizedOrigin) &&
+    Boolean(normalizedTimeZone) &&
+    hasValidRepositoryTagsPageSize &&
+    hasValidStorageUsageInterval;
 
   function openDialog() {
     setDraftPublicOrigin(publicOrigin);
     setDraftTimeZone(timeZone);
+    setDraftRepositoryTagsPageSize(String(repositoryTagsPageSize));
     setDraftAutomaticRebuild(automaticRebuild);
     setDraftStorageUsageRefreshIntervalSeconds(String(storageUsageRefreshIntervalSeconds));
     setDraftStorageUsageRefreshPreset(storageUsageIntervalPresetForValue(storageUsageRefreshIntervalSeconds));
@@ -254,7 +267,7 @@ export default function SettingsPanel({
   async function onSubmit(event) {
     event.preventDefault();
     if (!canSubmit) {
-      setError("Enter a valid public origin.");
+      setError("Enter a valid public origin and a repository tag page size between 1 and 100.");
       return;
     }
 
@@ -270,6 +283,7 @@ export default function SettingsPanel({
       body: JSON.stringify({
         public_registry_origin: normalizedOrigin,
         ui_timezone: normalizedTimeZone,
+        repository_tags_page_size: parsedRepositoryTagsPageSize,
         automatic_registry_state_rebuild: draftAutomaticRebuild,
         storage_usage_refresh_interval_seconds: parsedStorageUsageRefreshIntervalSeconds,
       }),
@@ -286,6 +300,8 @@ export default function SettingsPanel({
     setDraftPublicOrigin(payload.settings.public_registry_origin);
     setTimeZone(payload.settings.ui_timezone);
     setDraftTimeZone(payload.settings.ui_timezone);
+    setRepositoryTagsPageSize(payload.settings.repository_tags_page_size);
+    setDraftRepositoryTagsPageSize(String(payload.settings.repository_tags_page_size));
     setAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setDraftAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setStorageUsageRefreshIntervalSeconds(payload.settings.storage_usage_refresh_interval_seconds);
@@ -301,8 +317,8 @@ export default function SettingsPanel({
     <>
       <Panel className="p-6">
         <PanelHeader
-          title="Registry origin"
-          description="Review the public origin Docker clients use when the registry requests a bearer token."
+          title="Runtime settings"
+          description="Review the registry-facing origin and the runtime defaults that shape the control-plane UI."
           action={(
             <Button type="button" onClick={openDialog} size="lg">
               Edit
@@ -326,6 +342,10 @@ export default function SettingsPanel({
                 value: <code className="text-sm text-white">{timeZone}</code>,
               },
               {
+                label: "Repository tags per page",
+                value: <code className="text-sm text-white">{repositoryTagsPageSize}</code>,
+              },
+              {
                 label: "Automatic rebuild",
                 value: automaticRebuild ? "Enabled on API startup" : "Disabled",
               },
@@ -335,7 +355,7 @@ export default function SettingsPanel({
               },
               {
                 label: "Change behavior",
-                value: "Origin changes require a registry restart. Timezone and refresh interval changes apply without restarting services.",
+                value: "Origin changes require a registry restart. Timezone, tag page size, and refresh interval changes apply without restarting services.",
               },
             ]}
           />
@@ -354,7 +374,7 @@ export default function SettingsPanel({
         onClose={closeDialog}
         eyebrow="Settings"
         title="Edit settings"
-        description="Update the external registry origin, UI timezone, startup rebuild behavior, and storage usage refresh interval."
+        description="Update the external registry origin, UI timezone, repository tag page size, startup rebuild behavior, and storage usage refresh interval."
         onSubmit={onSubmit}
         submitLabel="Save settings"
         submitPendingLabel="Saving..."
@@ -380,6 +400,20 @@ export default function SettingsPanel({
             />
           </span>
         </div>
+        <Field label="Repository tags per page">
+          <Input
+            value={draftRepositoryTagsPageSize}
+            onChange={(event) => setDraftRepositoryTagsPageSize(event.target.value)}
+            required
+            min={1}
+            max={100}
+            step={1}
+            type="number"
+          />
+          <span className="mt-2 block text-xs text-slate-400">
+            Controls how many tags the repository details page returns and renders per page. Use a whole number from 1 to 100.
+          </span>
+        </Field>
         <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4">
           <Switch
             checked={draftAutomaticRebuild}

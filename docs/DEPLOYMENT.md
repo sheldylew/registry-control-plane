@@ -43,9 +43,10 @@ Deployment shape:
 - `TOKEN_TTL_SECONDS`: lifetime of issued Docker bearer tokens. Defaults to `900`.
 - `REGISTRY_CATALOG_MAX_PAGES`: max backend page fetches when walking the catalog.
 - `DASHBOARD_MAX_REPOSITORIES`: max repositories returned to the dashboard.
-- `REPOSITORY_TAGS_MAX_ITEMS`: max tags returned for a repository view.
 - `MANIFEST_CHILDREN_MAX_ITEMS`: max manifest-child entries returned for a manifest detail view.
 - `HISTORY_ENTRIES_MAX_ITEMS`: max history entries returned for a repository view.
+
+Repository tag page size is runtime-configurable from `/admin/settings` and defaults to `10`. Changing it does not require a service restart.
 
 ### Maintenance and retention
 
