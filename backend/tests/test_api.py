@@ -35,6 +35,7 @@ from backend.setup import (
     AUTOMATIC_REGISTRY_STATE_REBUILD_KEY,
     REGISTRY_STORAGE_USAGE_BYTES_KEY,
     REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
+    REGISTRY_STORAGE_USAGE_STALE_KEY,
     STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY,
     PUBLIC_REGISTRY_ORIGIN_KEY,
     ensure_setup_token,
@@ -1892,6 +1893,7 @@ def test_maintenance_summary_uses_cached_storage_usage(settings, monkeypatch) ->
         with app.state.session_factory() as session:
             set_app_setting(session, REGISTRY_STORAGE_USAGE_BYTES_KEY, "12345")
             set_app_setting(session, REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY, measured_at.isoformat())
+            set_app_setting(session, REGISTRY_STORAGE_USAGE_STALE_KEY, "true")
             set_app_setting(session, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY, "0")
             session.commit()
 
@@ -1904,6 +1906,7 @@ def test_maintenance_summary_uses_cached_storage_usage(settings, monkeypatch) ->
     assert response.status_code == 200
     assert response.json()["storage_usage_bytes"] == 12345
     assert response.json()["storage_usage_measured_at"] == measured_at.isoformat()
+    assert response.json()["storage_usage_stale"] is True
 
 
 def test_admin_can_update_public_registry_origin_after_external_domain_changes(settings) -> None:
@@ -2632,6 +2635,7 @@ def test_registry_push_event_warms_cache_using_live_tag_resolution(settings) -> 
             inbox_rows = session.scalars(select(RegistryEventInbox)).all()
             repository = session.scalar(select(Repository).where(Repository.name == "sheldylew/app"))
             tag_row = session.scalar(select(RepositoryTag).where(RepositoryTag.name == "latest"))
+            storage_usage_stale = session.get(AppSetting, REGISTRY_STORAGE_USAGE_STALE_KEY)
 
     assert response.status_code == 202
     assert response.json() == {"accepted": 1}
@@ -2646,6 +2650,8 @@ def test_registry_push_event_warms_cache_using_live_tag_resolution(settings) -> 
     assert repository.deleted_at is None
     assert tag_row.manifest_digest == "sha256:new"
     assert tag_row.deleted_at is None
+    assert storage_usage_stale is not None
+    assert storage_usage_stale.value == "true"
 
 
 def test_registry_delete_event_removes_cached_manifest_summary(settings) -> None:
@@ -2685,12 +2691,15 @@ def test_registry_delete_event_removes_cached_manifest_summary(settings) -> None
             cached_rows = session.scalars(select(CachedManifestSummary)).all()
             tag_row = session.scalar(select(RepositoryTag).where(RepositoryTag.name == "latest"))
             inbox_rows = session.scalars(select(RegistryEventInbox)).all()
+            storage_usage_stale = session.get(AppSetting, REGISTRY_STORAGE_USAGE_STALE_KEY)
 
     assert response.status_code == 202
     assert response.json() == {"accepted": 1}
     assert cached_rows == []
     assert tag_row.deleted_at is not None
     assert inbox_rows[0].status == "processed"
+    assert storage_usage_stale is not None
+    assert storage_usage_stale.value == "true"
 
 
 def test_repo_tag_history_returns_variants(settings) -> None:
@@ -3342,11 +3351,14 @@ def test_delete_tag_deletes_manifest_and_records_audit(settings) -> None:
         with app.state.session_factory() as session:
             events = session.query(AuditEvent).all()
             tag = session.scalar(select(RepositoryTag).where(RepositoryTag.name == "latest"))
+            storage_usage_stale = session.get(AppSetting, REGISTRY_STORAGE_USAGE_STALE_KEY)
 
     assert response.status_code == 200
     assert fake_registry.deleted_manifests == [("sheldylew/app", "sha256:manifest")]
     assert events[-1].action == "repository_tag_deleted"
     assert tag.deleted_at is not None
+    assert storage_usage_stale is not None
+    assert storage_usage_stale.value == "true"
 
 
 def test_admin_can_delete_tag_without_explicit_repo_permission(settings) -> None:
@@ -3436,7 +3448,10 @@ def test_delete_empty_repository_prunes_storage(settings, temp_workspace) -> Non
     assert repo_path.exists() is False
     with app.state.session_factory() as session:
         repository = session.scalar(select(Repository).where(Repository.name == "sheldylew/empty"))
+        storage_usage_stale = session.get(AppSetting, REGISTRY_STORAGE_USAGE_STALE_KEY)
     assert repository.deleted_at is not None
+    assert storage_usage_stale is not None
+    assert storage_usage_stale.value == "true"
 
 
 def test_delete_empty_repository_rejects_non_empty_repo(settings) -> None:

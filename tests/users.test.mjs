@@ -71,16 +71,21 @@ test("repositories page shows visibility badges", async () => {
 });
 
 test("maintenance panel exposes registry state rebuild action", async () => {
-  const [page, panel] = await Promise.all([
+  const [page, panel, statCard] = await Promise.all([
     readFile(new URL("../app/admin/maintenance/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/maintenance-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui/stat-card.jsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /\/api\/admin\/maintenance\?page=\$\{page\}/);
   assert.match(page, /payload\.storage_usage_measured_at/);
+  assert.match(page, /payload\.storage_usage_stale/);
+  assert.match(page, /badge=\{payload\.storage_usage_stale \? "Stale" : null\}/);
   assert.match(page, /payload\.registry_state\.active_repositories/);
   assert.match(page, /payload\.registry_state\.inbox_failed/);
   assert.match(page, /payload\.rebuild_jobs/);
+  assert.match(statCard, /badge = null/);
+  assert.match(statCard, /badgeTones/);
   assert.match(panel, /router\.refresh\(\)/);
   assert.match(panel, /\/api\/admin\/maintenance\/cache\/rebuild/);
   assert.match(panel, /Rebuild registry state/);

@@ -340,6 +340,7 @@ echo "==> Verifying live tag delete"
 build_local_image "$DELETE_IMAGE"
 docker_login "$ADMIN_USERNAME" "$ADMIN_PASSWORD"
 docker push "$DELETE_IMAGE" >/dev/null
+wait_for_authed_http "$BASE_URL/api/repos/sheldylew/delete-me/tags/e2e" 200 "$admin_cookie_jar"
 curl -fsS \
   -b "$admin_cookie_jar" \
   -H "Content-Type: application/json" \
@@ -372,6 +373,7 @@ echo "==> Preparing GC candidate"
 build_local_image "$GC_IMAGE"
 docker_login "$ADMIN_USERNAME" "$ADMIN_PASSWORD"
 docker push "$GC_IMAGE" >/dev/null
+wait_for_authed_http "$BASE_URL/api/repos/sheldylew/gc-me/tags/e2e" 200 "$admin_cookie_jar"
 curl -fsS \
   -b "$admin_cookie_jar" \
   -H "Content-Type: application/json" \

@@ -29,6 +29,7 @@ AUTOMATIC_REGISTRY_STATE_REBUILD_KEY = "automatic_registry_state_rebuild"
 STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY = "storage_usage_refresh_interval_seconds"
 REGISTRY_STORAGE_USAGE_BYTES_KEY = "registry_storage_usage_bytes"
 REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY = "registry_storage_usage_measured_at"
+REGISTRY_STORAGE_USAGE_STALE_KEY = "registry_storage_usage_stale"
 DEFAULT_UI_TIMEZONE = "America/Los_Angeles"
 DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS = 3600
 RESTART_COMMAND = "docker compose restart registry"

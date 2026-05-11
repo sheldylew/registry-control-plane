@@ -16,6 +16,7 @@ from backend.models import AuditEvent, GcJob, User
 from backend.setup import (
     REGISTRY_STORAGE_USAGE_BYTES_KEY,
     REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
+    REGISTRY_STORAGE_USAGE_STALE_KEY,
     get_app_setting,
     set_app_setting,
 )
@@ -58,11 +59,17 @@ def record_storage_usage_snapshot(session: Session, *, usage_bytes: int, measure
     measured = measured_at or utcnow()
     set_app_setting(session, REGISTRY_STORAGE_USAGE_BYTES_KEY, str(max(int(usage_bytes), 0)))
     set_app_setting(session, REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY, _serialize_datetime(measured))
+    set_app_setting(session, REGISTRY_STORAGE_USAGE_STALE_KEY, "false")
+
+
+def mark_storage_usage_snapshot_stale(session: Session) -> None:
+    set_app_setting(session, REGISTRY_STORAGE_USAGE_STALE_KEY, "true")
 
 
 def read_storage_usage_snapshot(session: Session) -> dict[str, Optional[object]]:
     raw_bytes = get_app_setting(session, REGISTRY_STORAGE_USAGE_BYTES_KEY)
     raw_measured_at = get_app_setting(session, REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY)
+    raw_stale = get_app_setting(session, REGISTRY_STORAGE_USAGE_STALE_KEY)
     try:
         usage_bytes = max(int(raw_bytes), 0) if raw_bytes is not None else 0
     except ValueError:
@@ -70,6 +77,7 @@ def read_storage_usage_snapshot(session: Session) -> dict[str, Optional[object]]
     return {
         "bytes": usage_bytes,
         "measured_at": _parse_datetime(raw_measured_at),
+        "stale": raw_stale is not None and raw_stale.strip().casefold() in {"1", "true", "yes", "on"},
     }
 
 
@@ -402,6 +410,7 @@ class MaintenanceService:
             "registry_status": "maintenance" if self.registry_gate_enabled(session) else "running",
             "storage_usage_bytes": storage_usage["bytes"],
             "storage_usage_measured_at": storage_usage["measured_at"],
+            "storage_usage_stale": storage_usage["stale"],
             "log_retention_days": self.log_retention_days(),
             "active_job": active_job,
             "last_job": last_job,

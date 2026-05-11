@@ -58,7 +58,7 @@ export default async function AdminMaintenancePage({ searchParams }) {
   }
 
   const storageUsageDetail = payload.storage_usage_measured_at
-    ? `Measured ${formatDateTime(payload.storage_usage_measured_at, { timeZone, fallback: "Unknown" })}.`
+    ? `${payload.storage_usage_stale ? "Last measured" : "Measured"} ${formatDateTime(payload.storage_usage_measured_at, { timeZone, fallback: "Unknown" })}.`
     : "Waiting for the first background measurement.";
   const manifestSummaryDetail = payload.cache.summaries_total
     ? `${payload.cache.repositories_total} repositories. First refreshed ${formatDateTime(payload.cache.oldest_cached_at, { timeZone, fallback: "Unknown" })}.`
@@ -74,7 +74,13 @@ export default async function AdminMaintenancePage({ searchParams }) {
     <div className="space-y-6">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Registry status" value={payload.registry_status} />
-        <StatCard label="Storage usage" value={formatBytes(payload.storage_usage_bytes)} detail={storageUsageDetail} />
+        <StatCard
+          label="Storage usage"
+          value={formatBytes(payload.storage_usage_bytes)}
+          detail={storageUsageDetail}
+          badge={payload.storage_usage_stale ? "Stale" : null}
+          badgeTone="amber"
+        />
         <StatCard
           label="Manifest summaries"
           value={payload.cache.summaries_total}

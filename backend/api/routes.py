@@ -21,7 +21,7 @@ from backend.auth.permissions import (
 )
 from backend.auth.sessions import create_session, revoke_session, revoke_user_sessions
 from backend.config import Settings
-from backend.maintenance import MaintenanceService
+from backend.maintenance import MaintenanceService, mark_storage_usage_snapshot_stale
 from backend.metrics import increment as increment_metric
 from backend.metrics import snapshot as metrics_snapshot
 from backend.models import (
@@ -1952,6 +1952,7 @@ def maintenance_summary(
         "registry_gate_enabled": summary["registry_status"] == "maintenance",
         "storage_usage_bytes": summary["storage_usage_bytes"],
         "storage_usage_measured_at": _serialize_optional_datetime(summary["storage_usage_measured_at"]),
+        "storage_usage_stale": summary["storage_usage_stale"],
         "cache": cache_stats,
         "registry_state": {
             "active_repositories": state_stats["active_repositories"],
@@ -1990,6 +1991,8 @@ def ingest_registry_events(
     events = _normalize_registry_notification_events(payload)
     if events:
         rows = create_registry_event_rows(db, events)
+        mark_storage_usage_snapshot_stale(db)
+        db.commit()
         for row in rows:
             background_tasks.add_task(
                 process_registry_event_inbox_entry,
@@ -2389,6 +2392,7 @@ def delete_repository_tag(
         tag_name=tag,
         manifest_digest=manifest.digest,
     )
+    mark_storage_usage_snapshot_stale(db)
     db.commit()
     return {"ok": True, "repo": repo_name, "tag": tag, "digest": manifest.digest}
 
@@ -2436,5 +2440,6 @@ def delete_empty_repository(
         metadata_json={"repo": repo_name, "removed": removed},
     )
     mark_repository_deleted(db, repository_name=repo_name)
+    mark_storage_usage_snapshot_stale(db)
     db.commit()
     return {"ok": True, "repo": repo_name, "removed": removed}

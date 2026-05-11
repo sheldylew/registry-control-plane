@@ -1,11 +1,20 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
+
 from sqlalchemy import select
 import os
 from datetime import timedelta
 
 from backend.auth.passwords import hash_password
 from backend.main import create_app
-from backend.maintenance import CommandResult, LocalRegistryMaintenanceRunner, MaintenanceService, prune_empty_directories
+from backend.maintenance import (
+    CommandResult,
+    LocalRegistryMaintenanceRunner,
+    MaintenanceService,
+    mark_storage_usage_snapshot_stale,
+    prune_empty_directories,
+    read_storage_usage_snapshot,
+)
 from backend.log_retention import utcnow
 from backend.models import AuditEvent, GcJob, User
 
@@ -22,6 +31,26 @@ class FakeMaintenanceRunner:
 
 def _login(client: TestClient, username: str, password: str):
     return client.post("/api/session/login", json={"username": username, "password": password})
+
+
+def test_storage_usage_refresh_clears_stale_flag(settings, db_session) -> None:
+    storage_root = Path(settings.registry_storage_root)
+    blob_path = storage_root / "blobs" / "sha256" / "abc" / "data"
+    blob_path.parent.mkdir(parents=True)
+    blob_path.write_bytes(b"fresh")
+    service = MaintenanceService(
+        session_factory=None,
+        settings=settings,
+        runner_factory=lambda: FakeMaintenanceRunner(),
+    )
+
+    mark_storage_usage_snapshot_stale(db_session)
+    service.refresh_storage_usage_snapshot(db_session)
+    snapshot = read_storage_usage_snapshot(db_session)
+
+    assert snapshot["bytes"] == 5
+    assert snapshot["stale"] is False
+    assert snapshot["measured_at"] is not None
 
 
 def test_non_admin_cannot_access_maintenance_summary(settings) -> None:
