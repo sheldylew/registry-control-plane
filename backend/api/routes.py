@@ -61,8 +61,8 @@ from backend.setup import (
     UI_TIMEZONE_KEY,
     automatic_registry_state_rebuild_enabled,
     complete_setup,
+    effective_default_page_size,
     effective_public_registry_origin,
-    effective_repository_tags_page_size,
     effective_storage_usage_refresh_interval_seconds,
     effective_ui_timezone,
     render_registry_config_to_path,
@@ -70,8 +70,8 @@ from backend.setup import (
     set_app_setting,
     setup_required,
     setup_status,
+    validate_default_page_size,
     validate_public_registry_origin,
-    validate_repository_tags_page_size,
     validate_storage_usage_refresh_interval_seconds,
     validate_ui_timezone,
     verify_setup_token,
@@ -91,7 +91,6 @@ REGISTRY_NOTIFICATION_MANIFEST_MEDIA_TYPES = {
     "application/vnd.docker.distribution.manifest.list.v2+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 }
-REPOSITORY_LIST_PAGE_SIZE = 10
 
 
 def _normalize_required_text(value: str, *, field_name: str, max_length: int = MAX_SHORT_TEXT_LENGTH) -> str:
@@ -1036,7 +1035,7 @@ def list_users(
     db: Session = Depends(get_db),
 ):
     safe_page = max(page, 1)
-    page_size = 10
+    page_size = effective_default_page_size(db)
     base_query = select(User).order_by(User.username.asc())
     total_users = db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
     users = db.scalars(base_query.offset((safe_page - 1) * page_size).limit(page_size)).all()
@@ -1077,7 +1076,7 @@ def get_user_detail(
         .order_by(RepositoryPermission.repository_pattern.asc())
     ).all()
     safe_activity_page = max(activity_page, 1)
-    activity_page_size = 10
+    activity_page_size = effective_default_page_size(db)
     activity_query = select(AuditEvent).where(
         ((AuditEvent.actor_type == "user") & (AuditEvent.actor_id == user.id))
         | ((AuditEvent.target_type == "user") & (AuditEvent.target_id == user.id))
@@ -1210,12 +1209,13 @@ def reset_user_password(
 def list_web_sessions(
     request: Request,
     page: int = 1,
-    page_size: int = 10,
+    page_size: Optional[int] = None,
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ):
     safe_page = max(page, 1)
-    safe_page_size = min(max(page_size, 1), 100)
+    requested_page_size = effective_default_page_size(db) if page_size is None else page_size
+    safe_page_size = min(max(requested_page_size, 1), 100)
     current_session, _current_user = _get_authenticated_user(request, db)
     current_session_id = current_session.id if current_session else None
     total_sessions = db.scalar(select(func.count()).select_from(WebSession)) or 0
@@ -1324,7 +1324,7 @@ def list_tokens(
     db: Session = Depends(get_db),
 ):
     safe_page = max(page, 1)
-    page_size = 10
+    page_size = effective_default_page_size(db)
     query = (
         select(PersonalAccessToken)
         .where(PersonalAccessToken.user_id == user.id)
@@ -1462,7 +1462,7 @@ def list_permissions(
     users = db.scalars(select(User).order_by(User.username.asc())).all()
     robots = db.scalars(select(RobotAccount).order_by(RobotAccount.name.asc())).all()
     safe_page = max(page, 1)
-    page_size = 10
+    page_size = effective_default_page_size(db)
     query = select(RepositoryPermission).order_by(
         RepositoryPermission.subject_type.asc(),
         RepositoryPermission.subject_id.asc(),
@@ -1867,7 +1867,7 @@ def admin_settings(
     return {
         "public_registry_origin": effective_public_registry_origin(db, settings),
         "ui_timezone": effective_ui_timezone(db),
-        "repository_tags_page_size": effective_repository_tags_page_size(db),
+        "repository_tags_page_size": effective_default_page_size(db),
         "automatic_registry_state_rebuild": automatic_registry_state_rebuild_enabled(db),
         "storage_usage_refresh_interval_seconds": effective_storage_usage_refresh_interval_seconds(db),
         "default_repository_tags_page_size": DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
@@ -1897,7 +1897,7 @@ def update_admin_settings(
     try:
         public_origin = validate_public_registry_origin(payload.public_registry_origin, app_env=settings.app_env)
         ui_timezone = validate_ui_timezone(payload.ui_timezone)
-        repository_tags_page_size = validate_repository_tags_page_size(payload.repository_tags_page_size)
+        repository_tags_page_size = validate_default_page_size(payload.repository_tags_page_size)
         automatic_rebuild = bool(payload.automatic_registry_state_rebuild)
         storage_interval = validate_storage_usage_refresh_interval_seconds(
             payload.storage_usage_refresh_interval_seconds
@@ -1950,7 +1950,7 @@ def maintenance_summary(
     db: Session = Depends(get_db),
     maintenance: MaintenanceService = Depends(get_maintenance_service),
 ):
-    summary = maintenance.maintenance_summary(db, page=page)
+    summary = maintenance.maintenance_summary(db, page=page, page_size=effective_default_page_size(db))
     cache_stats = _cached_manifest_summary_stats(db)
     state_stats = registry_state_stats(db)
     rebuild_jobs = db.scalars(
@@ -2055,7 +2055,7 @@ def audit_log(
     db: Session = Depends(get_db),
 ):
     safe_page = max(page, 1)
-    page_size = 10
+    page_size = effective_default_page_size(db)
     query = select(AuditEvent).order_by(AuditEvent.created_at.desc())
 
     if actor:
@@ -2157,7 +2157,7 @@ def list_repositories(
     page: int = 1,
 ):
     safe_page = max(page, 1)
-    page_size = REPOSITORY_LIST_PAGE_SIZE
+    page_size = effective_default_page_size(db)
     visible_condition = _visible_repository_condition(user)
     visible_repositories_query = (
         select(Repository)
@@ -2205,7 +2205,7 @@ def list_repository_tags(
     page: int = 1,
 ):
     safe_page = max(page, 1)
-    page_size = effective_repository_tags_page_size(db)
+    page_size = effective_default_page_size(db)
     repository = db.scalar(
         select(Repository).where(
             Repository.name == repo_name,

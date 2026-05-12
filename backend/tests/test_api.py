@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from backend.auth.pats import issue_personal_access_token
 from backend.auth.registry_tokens import bootstrap_signing_material
 from backend.auth.passwords import hash_password
 from backend.config import Settings
@@ -1989,6 +1990,162 @@ def test_admin_can_update_repository_tags_page_size_without_restart(settings) ->
     assert response.json()["settings"]["repository_tags_page_size"] == 7
     assert response.json()["registry_restart_required"] is False
     assert response.json()["restart_command"] is None
+
+
+def test_default_page_size_setting_applies_to_paginated_lists(settings) -> None:
+    app = create_app(settings)
+    default_page_size = 7
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+            assert admin is not None
+            set_app_setting(session, REPOSITORY_TAGS_PAGE_SIZE_KEY, str(default_page_size))
+
+            activity_user = User(
+                username="activity-user",
+                email="activity-user@example.com",
+                password_hash=hash_password("activity-user-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(activity_user)
+            session.flush()
+
+            for index in range(12):
+                user = User(
+                    username=f"page-user-{index:02d}",
+                    email=f"page-user-{index:02d}@example.com",
+                    password_hash=hash_password(f"page-user-pass-{index:02d}"),
+                    is_admin=False,
+                    is_active=True,
+                )
+                session.add(user)
+                session.flush()
+                session.add(
+                    RepositoryPermission(
+                        subject_type="user",
+                        subject_id=user.id,
+                        repository_pattern=f"page-seed/{index:02d}/*",
+                        can_pull=True,
+                        can_push=False,
+                        can_delete=False,
+                    )
+                )
+
+            for index in range(12):
+                issue_personal_access_token(session, user_id=admin.id, name=f"page-token-{index:02d}")
+
+            now = datetime.now(timezone.utc)
+            for index in range(12):
+                session.add(
+                    WebSession(
+                        user_id=admin.id,
+                        session_hash=f"{index + 1:064x}",
+                        csrf_token=f"page-csrf-{index:02d}",
+                        expires_at=now + timedelta(days=7),
+                        last_seen_at=now + timedelta(minutes=index),
+                        created_at=now + timedelta(minutes=index),
+                    )
+                )
+                session.add(
+                    AuditEvent(
+                        actor_type="user",
+                        actor_id=admin.id,
+                        action=f"page-audit-{index:02d}",
+                        target_type="user",
+                        target_id=activity_user.id,
+                        metadata_json={"repo": f"sheldylew/page-seed-{index:02d}"},
+                        created_at=now + timedelta(seconds=index),
+                    )
+                )
+                session.add(
+                    GcJob(
+                        status="succeeded",
+                        requested_by=admin.id,
+                        dry_run=False,
+                        delete_untagged=False,
+                        prune_empty_dirs=False,
+                        started_at=now + timedelta(minutes=index),
+                        finished_at=now + timedelta(minutes=index, seconds=5),
+                        log_output=f"page-seed-job-{index:02d}",
+                        created_at=now + timedelta(minutes=index),
+                        updated_at=now + timedelta(minutes=index),
+                    )
+                )
+
+            for index in range(12):
+                _seed_repository_state(session, f"sheldylew/page-seed-{index:02d}", tags=("latest",))
+            _seed_repository_state(
+                session,
+                "sheldylew/page-seed-tags",
+                tags=tuple(f"v{index:02d}" for index in range(12)),
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+
+        users_response = client.get("/api/admin/users")
+        activity_response = client.get(f"/api/admin/users/{activity_user.id}")
+        sessions_response = client.get("/api/admin/sessions")
+        sessions_override_response = client.get("/api/admin/sessions?page_size=3")
+        tokens_response = client.get("/api/admin/tokens")
+        permissions_response = client.get("/api/admin/permissions")
+        audit_response = client.get("/api/admin/audit")
+        maintenance_response = client.get("/api/admin/maintenance")
+        repos_response = client.get("/api/repos")
+        tags_response = client.get("/api/repos/sheldylew/page-seed-tags/tags")
+
+    assert users_response.status_code == 200
+    assert users_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(users_response.json()["users"]) == default_page_size
+    assert users_response.json()["pagination"]["has_next"] is True
+
+    assert activity_response.status_code == 200
+    assert activity_response.json()["activity_pagination"]["page_size"] == default_page_size
+    assert len(activity_response.json()["recent_activity"]) == default_page_size
+    assert activity_response.json()["activity_pagination"]["has_next"] is True
+
+    assert sessions_response.status_code == 200
+    assert sessions_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(sessions_response.json()["sessions"]) == default_page_size
+    assert sessions_response.json()["pagination"]["has_next"] is True
+
+    assert sessions_override_response.status_code == 200
+    assert sessions_override_response.json()["pagination"]["page_size"] == 3
+    assert len(sessions_override_response.json()["sessions"]) == 3
+    assert sessions_override_response.json()["pagination"]["has_next"] is True
+
+    assert tokens_response.status_code == 200
+    assert tokens_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(tokens_response.json()["tokens"]) == default_page_size
+    assert tokens_response.json()["pagination"]["has_next"] is True
+
+    assert permissions_response.status_code == 200
+    assert permissions_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(permissions_response.json()["permissions"]) == default_page_size
+    assert permissions_response.json()["pagination"]["has_next"] is True
+
+    assert audit_response.status_code == 200
+    assert audit_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(audit_response.json()["events"]) == default_page_size
+    assert audit_response.json()["pagination"]["has_next"] is True
+
+    assert maintenance_response.status_code == 200
+    assert maintenance_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(maintenance_response.json()["jobs"]) == default_page_size
+    assert maintenance_response.json()["pagination"]["has_next"] is True
+
+    assert repos_response.status_code == 200
+    assert repos_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(repos_response.json()["repos"]) == default_page_size
+    assert repos_response.json()["pagination"]["has_next"] is True
+
+    assert tags_response.status_code == 200
+    assert tags_response.json()["pagination"]["page_size"] == default_page_size
+    assert len(tags_response.json()["tags"]) == default_page_size
+    assert tags_response.json()["pagination"]["has_next"] is True
 
 
 def test_repo_list_only_shows_visible_repositories(settings) -> None:

@@ -33,6 +33,7 @@ DEVELOPER_PASSWORD="${DEVELOPER_PASSWORD:-developer-pass-123}"
 ROBOT_USERNAME="${ROBOT_USERNAME:-ci-sheldylew}"
 ROBOT_TOKEN="${ROBOT_TOKEN:-rcr_robot_c1c1c1c1.0123456789abcdef0123456789abcdef}"
 REVOKED_ROBOT_TOKEN="${REVOKED_ROBOT_TOKEN:-rcr_robot_d2d2d2d2.fedcba9876543210fedcba9876543210}"
+PAGINATION_DEFAULT_PAGE_SIZE="${PAGINATION_DEFAULT_PAGE_SIZE:-25}"
 
 FIXTURE_IMAGE="${FIXTURE_IMAGE:-localhost:8080/sheldylew/fixture:e2e}"
 READER_DENIED_IMAGE="${READER_DENIED_IMAGE:-localhost:8080/sheldylew/reader-denied:e2e}"
@@ -66,6 +67,60 @@ elif value is None:
 else:
     print(value)
 ' "$path"
+}
+
+assert_paginated_collection() {
+  local url="$1"
+  local collection_path="$2"
+  local pagination_path="$3"
+  local expected_page_size="$4"
+  local min_total="$5"
+  local expected_page="$6"
+  local body
+
+  body="$(curl -fsS -b "$admin_cookie_jar" "$url")"
+  ASSERT_PAGINATED_BODY="$body" /usr/bin/python3 - "$expected_page_size" "$min_total" "$expected_page" "$collection_path" "$pagination_path" <<'PY'
+import json
+import os
+import sys
+
+expected_page_size = int(sys.argv[1])
+min_total = int(sys.argv[2])
+expected_page = int(sys.argv[3])
+collection_path = sys.argv[4]
+pagination_path = sys.argv[5]
+
+payload = json.loads(os.environ["ASSERT_PAGINATED_BODY"])
+
+def resolve(root, path):
+    value = root
+    for part in path.split("."):
+        value = value[part]
+    return value
+
+collection = resolve(payload, collection_path)
+pagination = resolve(payload, pagination_path)
+total = int(pagination["total"])
+page = int(pagination["page"])
+page_size = int(pagination["page_size"])
+returned = len(collection)
+
+if page != expected_page:
+    raise SystemExit(f"Expected page {expected_page}, got {page}")
+if page_size != expected_page_size:
+    raise SystemExit(f"Expected page size {expected_page_size}, got {page_size}")
+if total < min_total:
+    raise SystemExit(f"Expected at least {min_total} total items, got {total}")
+
+remaining = max(total - ((expected_page - 1) * expected_page_size), 0)
+expected_returned = min(expected_page_size, remaining)
+if returned != expected_returned:
+    raise SystemExit(f"Expected {expected_returned} returned items, got {returned}")
+if expected_page == 1 and total > expected_page_size and not pagination["has_next"]:
+    raise SystemExit("Expected a next page but has_next was false")
+if expected_page > 1 and not pagination["has_prev"]:
+    raise SystemExit("Expected a previous page but has_prev was false")
+PY
 }
 
 wait_for_http() {
@@ -190,7 +245,15 @@ for job in payload["jobs"]:
     if job["id"] == job_id:
         print(job["status"])
         raise SystemExit(0)
-raise SystemExit("GC job not found in maintenance summary")
+active_job = payload.get("active_job")
+if active_job and active_job["id"] == job_id:
+    print(active_job["status"])
+    raise SystemExit(0)
+last_job = payload.get("last_job")
+if last_job and last_job["id"] == job_id:
+    print(last_job["status"])
+    raise SystemExit(0)
+print("missing")
 ' "$job_id")"
 
     if [[ "$job_status" == "succeeded" ]]; then
@@ -239,7 +302,7 @@ for job in payload["rebuild_jobs"]:
     if job["id"] == job_id:
         print(job["status"])
         raise SystemExit(0)
-raise SystemExit("Registry state rebuild job not found in maintenance summary")
+print("missing")
 ' "$job_id")"
 
     if [[ "$job_status" == "succeeded" ]]; then
@@ -284,9 +347,55 @@ ADMIN_EMAIL="$ADMIN_EMAIL" \
 echo "==> Seeding permission matrix"
 compose exec -T -e ALLOW_PHASE4_SEED=1 api python -m backend.phase4_seed >/dev/null
 
+echo "==> Seeding pagination fixtures"
+pagination_seed_json="$(compose exec -T -e ALLOW_PHASE4_SEED=1 api python -m backend.pagination_seed)"
+activity_user_id="$(print -r -- "$pagination_seed_json" | json_get activity_user_id)"
+tag_repository="$(print -r -- "$pagination_seed_json" | json_get tag_repository)"
+
 echo "==> Logging into UI as admin"
 admin_login
 csrf_token="$(admin_csrf)"
+
+echo "==> Updating shared default page size"
+settings_response="$(
+  curl -fsS \
+    -b "$admin_cookie_jar" \
+    -H "Content-Type: application/json" \
+    -H "X-CSRF-Token: $csrf_token" \
+    -d "{\"public_registry_origin\":\"$PUBLIC_REGISTRY_ORIGIN\",\"ui_timezone\":\"America/Los_Angeles\",\"repository_tags_page_size\":$PAGINATION_DEFAULT_PAGE_SIZE,\"automatic_registry_state_rebuild\":false,\"storage_usage_refresh_interval_seconds\":3600}" \
+    "$BASE_URL/api/admin/settings"
+)"
+if [[ "$(print -r -- "$settings_response" | json_get settings.repository_tags_page_size)" != "$PAGINATION_DEFAULT_PAGE_SIZE" ]]; then
+  echo "Failed to update shared default page size." >&2
+  print -r -- "$settings_response" >&2
+  exit 1
+fi
+if [[ "$(print -r -- "$settings_response" | json_get registry_restart_required)" != "false" ]]; then
+  echo "Page size update unexpectedly required a registry restart." >&2
+  print -r -- "$settings_response" >&2
+  exit 1
+fi
+
+echo "==> Verifying shared default pagination across live endpoints"
+assert_paginated_collection "$BASE_URL/api/admin/users" "users" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/admin/users?page=2" "users" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/admin/users/$activity_user_id" "recent_activity" "activity_pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/admin/users/$activity_user_id?activity_page=2" "recent_activity" "activity_pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/admin/sessions" "sessions" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/admin/sessions?page=2" "sessions" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/admin/sessions?page_size=7" "sessions" "pagination" 7 50 1
+assert_paginated_collection "$BASE_URL/api/admin/tokens" "tokens" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/admin/tokens?page=2" "tokens" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/admin/permissions" "permissions" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/admin/permissions?page=2" "permissions" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/admin/audit" "events" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/admin/audit?page=2" "events" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/admin/maintenance" "jobs" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/admin/maintenance?page=2" "jobs" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/repos" "repos" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/repos?page=2" "repos" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
+assert_paginated_collection "$BASE_URL/api/repos/$tag_repository/tags" "tags" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 1
+assert_paginated_collection "$BASE_URL/api/repos/$tag_repository/tags?page=2" "tags" "pagination" "$PAGINATION_DEFAULT_PAGE_SIZE" 50 2
 
 echo "==> Building fixture image"
 build_local_image "$FIXTURE_IMAGE"

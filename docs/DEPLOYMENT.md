@@ -46,7 +46,7 @@ Deployment shape:
 - `MANIFEST_CHILDREN_MAX_ITEMS`: max manifest-child entries returned for a manifest detail view.
 - `HISTORY_ENTRIES_MAX_ITEMS`: max history entries returned for a repository view.
 
-Repository tag page size is runtime-configurable from `/admin/settings` and defaults to `10`. Changing it does not require a service restart.
+Default list page size is runtime-configurable from `/admin/settings` and defaults to `10`. Changing it does not require a service restart.
 
 ### Maintenance and retention
 

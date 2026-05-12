@@ -267,7 +267,7 @@ export default function SettingsPanel({
   async function onSubmit(event) {
     event.preventDefault();
     if (!canSubmit) {
-      setError("Enter a valid public origin and a repository tag page size between 1 and 100.");
+      setError("Enter a valid public origin and a default page size between 1 and 100.");
       return;
     }
 
@@ -342,7 +342,7 @@ export default function SettingsPanel({
                 value: <code className="text-sm text-white">{timeZone}</code>,
               },
               {
-                label: "Repository tags per page",
+                label: "Default items per page",
                 value: <code className="text-sm text-white">{repositoryTagsPageSize}</code>,
               },
               {
@@ -355,7 +355,7 @@ export default function SettingsPanel({
               },
               {
                 label: "Change behavior",
-                value: "Origin changes require a registry restart. Timezone, tag page size, and refresh interval changes apply without restarting services.",
+                value: "Origin changes require a registry restart. Timezone, default page size, and refresh interval changes apply without restarting services.",
               },
             ]}
           />
@@ -374,7 +374,7 @@ export default function SettingsPanel({
         onClose={closeDialog}
         eyebrow="Settings"
         title="Edit settings"
-        description="Update the external registry origin, UI timezone, repository tag page size, startup rebuild behavior, and storage usage refresh interval."
+        description="Update the external registry origin, UI timezone, default page size, startup rebuild behavior, and storage usage refresh interval."
         onSubmit={onSubmit}
         submitLabel="Save settings"
         submitPendingLabel="Saving..."
@@ -400,7 +400,7 @@ export default function SettingsPanel({
             />
           </span>
         </div>
-        <Field label="Repository tags per page">
+        <Field label="Default items per page">
           <Input
             value={draftRepositoryTagsPageSize}
             onChange={(event) => setDraftRepositoryTagsPageSize(event.target.value)}
@@ -411,7 +411,7 @@ export default function SettingsPanel({
             type="number"
           />
           <span className="mt-2 block text-xs text-slate-400">
-            Controls how many tags the repository details page returns and renders per page. Use a whole number from 1 to 100.
+            Controls the default page size for paginated list views across the app. Use a whole number from 1 to 100.
           </span>
         </Field>
         <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4">

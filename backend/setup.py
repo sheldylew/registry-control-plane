@@ -114,6 +114,10 @@ def validate_repository_tags_page_size(value: int) -> int:
     return page_size
 
 
+def validate_default_page_size(value: int) -> int:
+    return validate_repository_tags_page_size(value)
+
+
 def effective_repository_tags_page_size(session: Session) -> int:
     value = get_app_setting(session, REPOSITORY_TAGS_PAGE_SIZE_KEY)
     if value is None:
@@ -122,6 +126,10 @@ def effective_repository_tags_page_size(session: Session) -> int:
         return validate_repository_tags_page_size(int(value.strip()))
     except (SetupError, ValueError):
         return DEFAULT_REPOSITORY_TAGS_PAGE_SIZE
+
+
+def effective_default_page_size(session: Session) -> int:
+    return effective_repository_tags_page_size(session)
 
 
 def automatic_registry_state_rebuild_enabled(session: Session) -> bool:

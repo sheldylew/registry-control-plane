@@ -96,11 +96,12 @@ test("web healthchecks use the static root page", async () => {
   }
 });
 
-test("repository tags default page size stays at 10 through admin settings", async () => {
-  const [setup, routes, settingsPanel, compose, bindCompose, dockerSave] = await Promise.all([
+test("shared default page size stays at 10 through admin settings", async () => {
+  const [setup, routes, settingsPanel, sessionsPage, compose, bindCompose, dockerSave] = await Promise.all([
     readFile(new URL("../backend/setup.py", import.meta.url), "utf8"),
     readFile(new URL("../backend/api/routes.py", import.meta.url), "utf8"),
     readFile(new URL("../app/components/settings-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/sessions/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
     readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
     readFile(new URL("../scripts/docker-save.sh", import.meta.url), "utf8"),
@@ -109,7 +110,8 @@ test("repository tags default page size stays at 10 through admin settings", asy
   assert.match(setup, /REPOSITORY_TAGS_PAGE_SIZE_KEY = "repository_tags_page_size"/);
   assert.match(setup, /DEFAULT_REPOSITORY_TAGS_PAGE_SIZE = 10/);
   assert.match(routes, /repository_tags_page_size: int = Field\(default=DEFAULT_REPOSITORY_TAGS_PAGE_SIZE, ge=1, le=100\)/);
-  assert.match(settingsPanel, /Repository tags per page/);
+  assert.match(settingsPanel, /Default items per page/);
+  assert.match(sessionsPage, /pageSizeParam === undefined\s*\?\s*null/);
   for (const source of [compose, bindCompose, dockerSave]) {
     assert.doesNotMatch(source, /REPOSITORY_TAGS_MAX_ITEMS/);
   }

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.log_retention import prune_expired_logs, prune_expired_operational_records
 from backend.models import AuditEvent, GcJob, User
 from backend.setup import (
+    DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
     REGISTRY_STORAGE_USAGE_BYTES_KEY,
     REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
     REGISTRY_STORAGE_USAGE_STALE_KEY,
@@ -393,7 +394,13 @@ class MaintenanceService:
                     retention_days=self._settings.log_retention_days,
                 )
 
-    def maintenance_summary(self, session: Session, *, page: int = 1, page_size: int = 10) -> dict:
+    def maintenance_summary(
+        self,
+        session: Session,
+        *,
+        page: int = 1,
+        page_size: int = DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
+    ) -> dict:
         safe_page = max(page, 1)
         safe_page_size = max(page_size, 1)
         total_jobs = session.scalar(select(func.count()).select_from(GcJob)) or 0
