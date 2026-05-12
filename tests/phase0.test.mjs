@@ -82,6 +82,16 @@ test("repository tag page shows the paginated total count", async () => {
   assert.doesNotMatch(repoPage, /payload\.tags\.length} total/);
 });
 
+test("repository tag deletes redirect to the remaining tag page", async () => {
+  const repoPage = await readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8");
+
+  assert.match(repoPage, /function buildTagDeleteRedirectPath\(repoPath, pagination\)/);
+  assert.match(repoPage, /const remainingTags = Math\.max\(Number\(pagination\?\.total \|\| 0\) - 1, 0\)/);
+  assert.match(repoPage, /if \(remainingTags === 0\) \{\s*return "\/repos";\s*\}/);
+  assert.match(repoPage, /const lastPageAfterDelete = Math\.max\(Math\.ceil\(remainingTags \/ pageSize\), 1\)/);
+  assert.match(repoPage, /redirectPath=\{buildTagDeleteRedirectPath\(payload\.repo, payload\.pagination\)\}/);
+});
+
 test("web healthchecks use the static root page", async () => {
   const [compose, bindCompose, dockerSave] = await Promise.all([
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),

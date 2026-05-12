@@ -2753,6 +2753,45 @@ def test_repo_tags_shared_digest_uses_single_cached_summary(settings) -> None:
     assert [tag["tag"] for tag in response.json()["tags"]] == ["edge", "release"]
 
 
+def test_repo_tags_are_sorted_by_most_recent_push_first(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("z-old", "a-new"))
+            tag_rows = {
+                tag.name: tag
+                for tag in session.scalars(
+                    select(RepositoryTag).where(RepositoryTag.repository_id == repository.id)
+                ).all()
+            }
+            tag_rows["z-old"].pushed_at = datetime(2026, 5, 4, 10, 20, 30, tzinfo=timezone.utc)
+            tag_rows["a-new"].pushed_at = datetime(2026, 5, 5, 10, 20, 30, tzinfo=timezone.utc)
+            for tag_name, digest in {"z-old": "sha256:old", "a-new": "sha256:new"}.items():
+                tag_rows[tag_name].manifest_digest = digest
+            _seed_manifest_summary(
+                session,
+                repository_name="sheldylew/app",
+                manifest_digest="sha256:old",
+                tag_created_at="2026-05-04T10:20:30Z",
+            )
+            _seed_manifest_summary(
+                session,
+                repository_name="sheldylew/app",
+                manifest_digest="sha256:new",
+                tag_created_at="2026-05-05T10:20:30Z",
+            )
+            session.commit()
+            _grant_reader(session, username="recent-reader", password="recent-reader-pass")
+
+        login = _login(client, "recent-reader", "recent-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags")
+
+    assert response.status_code == 200
+    assert [tag["tag"] for tag in response.json()["tags"]] == ["a-new", "z-old"]
+
+
 def test_repo_tags_exclude_soft_deleted_tags(settings) -> None:
     app = create_app(settings)
 

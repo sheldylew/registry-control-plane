@@ -28,6 +28,18 @@ function buildPageHref(repoPath, page) {
   return `${basePath}?${params.toString()}`;
 }
 
+function buildTagDeleteRedirectPath(repoPath, pagination) {
+  const remainingTags = Math.max(Number(pagination?.total || 0) - 1, 0);
+  if (remainingTags === 0) {
+    return "/repos";
+  }
+
+  const pageSize = Math.max(Number(pagination?.page_size || 1), 1);
+  const currentPage = Math.max(Number(pagination?.page || 1), 1);
+  const lastPageAfterDelete = Math.max(Math.ceil(remainingTags / pageSize), 1);
+  return buildPageHref(repoPath, Math.min(currentPage, lastPageAfterDelete));
+}
+
 function formatBytes(size) {
   if (!size) {
     return "0 B";
@@ -184,6 +196,7 @@ export default async function RepoDetailPage({ params, searchParams }) {
                             confirmationValue={`${payload.repo}:${tag.tag}`}
                             requireConfirmation={false}
                             endpoint={`/api/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/delete`}
+                            redirectPath={buildTagDeleteRedirectPath(payload.repo, payload.pagination)}
                             buttonLabel="Delete"
                             successLabel="Deleting..."
                           />

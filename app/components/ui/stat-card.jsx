@@ -25,7 +25,7 @@ export default function StatCard({ label, value, detail, tone = "slate", badge =
           </span>
         ) : null}
       </div>
-      <p className="mt-4 text-3xl font-semibold text-white">{value}</p>
+      <p className="mt-4 text-2xl font-semibold leading-tight text-white sm:text-3xl">{value}</p>
       {detail ? <p className="mt-2 text-sm text-slate-400">{detail}</p> : null}
     </article>
   );

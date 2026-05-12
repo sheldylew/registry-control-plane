@@ -2248,7 +2248,11 @@ def list_repository_tags(
             RepositoryTag.repository_id == repository.id,
             RepositoryTag.deleted_at.is_(None),
         )
-        .order_by(RepositoryTag.name.asc())
+        .order_by(
+            RepositoryTag.pushed_at.is_(None),
+            RepositoryTag.pushed_at.desc(),
+            RepositoryTag.name.asc(),
+        )
         .offset(page_start)
         .limit(page_size)
     ).all()
