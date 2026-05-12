@@ -57,6 +57,15 @@ const STORAGE_USAGE_INTERVAL_OPTIONS = [
   { value: "custom", label: "Custom", detail: "Enter an exact number of seconds." },
 ];
 
+const DEFAULT_PAGE_SIZE_OPTIONS = [
+  { value: "5", label: "5 items", detail: "Smallest preset for very compact list views." },
+  { value: "10", label: "10 items", detail: "Keeps list views compact and easy to scan." },
+  { value: "25", label: "25 items", detail: "A balanced default for denser admin workflows." },
+  { value: "50", label: "50 items", detail: "Shows more rows before paging through long lists." },
+  { value: "100", label: "100 items", detail: "Maximum page size for operators who want fewer page changes." },
+  { value: "custom", label: "Custom", detail: "Enter any whole number from 1 to 100." },
+];
+
 function formatStorageUsageInterval(seconds) {
   if (!seconds) {
     return "Disabled";
@@ -75,6 +84,11 @@ function formatStorageUsageInterval(seconds) {
 function storageUsageIntervalPresetForValue(value) {
   const normalized = String(Number(value) || 0);
   return STORAGE_USAGE_INTERVAL_OPTIONS.some((option) => option.value === normalized) ? normalized : "custom";
+}
+
+function pageSizePresetForValue(value) {
+  const normalized = String(Number(value) || 0);
+  return DEFAULT_PAGE_SIZE_OPTIONS.some((option) => option.value === normalized) ? normalized : "custom";
 }
 
 function standardTimeZones(selectedTimeZone) {
@@ -198,6 +212,42 @@ function StorageUsageIntervalPicker({ value, onPresetChange }) {
   );
 }
 
+function DefaultPageSizePicker({ value, onPresetChange }) {
+  const selectedOption =
+    DEFAULT_PAGE_SIZE_OPTIONS.find((option) => option.value === value) ||
+    DEFAULT_PAGE_SIZE_OPTIONS[DEFAULT_PAGE_SIZE_OPTIONS.length - 1];
+
+  return (
+    <Listbox value={selectedOption} by="value" onChange={onPresetChange}>
+      <div className="relative">
+        <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-60">
+          <span className="block truncate font-medium">{selectedOption.label}</span>
+          <span className="block truncate pr-6 text-xs text-slate-400">{selectedOption.detail}</span>
+          <ChevronUpDownIcon aria-hidden="true" className="pointer-events-none absolute right-3 top-3.5 size-5 text-slate-400" />
+        </ListboxButton>
+        <ListboxOptions
+          transition
+          className="absolute z-[60] mt-2 max-h-72 w-full overflow-auto rounded-lg border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/50 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
+        >
+          {DEFAULT_PAGE_SIZE_OPTIONS.map((option) => (
+            <ListboxOption
+              key={option.value}
+              value={option}
+              className="group relative cursor-default select-none py-2.5 pl-9 pr-4 text-white data-[focus]:bg-cyan-400 data-[focus]:text-slate-950 data-[focus]:outline-none"
+            >
+              <span className="block truncate font-medium">{option.label}</span>
+              <span className="block truncate text-xs text-slate-400 group-data-[focus]:text-slate-800">{option.detail}</span>
+              <span className="absolute inset-y-0 left-0 hidden items-center pl-2 text-cyan-300 group-data-[focus]:text-slate-950 group-data-[selected]:flex">
+                <CheckIcon aria-hidden="true" className="size-5" />
+              </span>
+            </ListboxOption>
+          ))}
+        </ListboxOptions>
+      </div>
+    </Listbox>
+  );
+}
+
 export default function SettingsPanel({
   initialPublicOrigin,
   initialTimeZone,
@@ -212,6 +262,9 @@ export default function SettingsPanel({
   const [draftTimeZone, setDraftTimeZone] = useState(initialTimeZone || "America/Los_Angeles");
   const [repositoryTagsPageSize, setRepositoryTagsPageSize] = useState(Number(initialRepositoryTagsPageSize) || 10);
   const [draftRepositoryTagsPageSize, setDraftRepositoryTagsPageSize] = useState(String(Number(initialRepositoryTagsPageSize) || 10));
+  const [draftRepositoryTagsPageSizePreset, setDraftRepositoryTagsPageSizePreset] = useState(
+    pageSizePresetForValue(initialRepositoryTagsPageSize),
+  );
   const [automaticRebuild, setAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
   const [draftAutomaticRebuild, setDraftAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
   const [storageUsageRefreshIntervalSeconds, setStorageUsageRefreshIntervalSeconds] = useState(
@@ -249,6 +302,7 @@ export default function SettingsPanel({
     setDraftPublicOrigin(publicOrigin);
     setDraftTimeZone(timeZone);
     setDraftRepositoryTagsPageSize(String(repositoryTagsPageSize));
+    setDraftRepositoryTagsPageSizePreset(pageSizePresetForValue(repositoryTagsPageSize));
     setDraftAutomaticRebuild(automaticRebuild);
     setDraftStorageUsageRefreshIntervalSeconds(String(storageUsageRefreshIntervalSeconds));
     setDraftStorageUsageRefreshPreset(storageUsageIntervalPresetForValue(storageUsageRefreshIntervalSeconds));
@@ -302,6 +356,7 @@ export default function SettingsPanel({
     setDraftTimeZone(payload.settings.ui_timezone);
     setRepositoryTagsPageSize(payload.settings.repository_tags_page_size);
     setDraftRepositoryTagsPageSize(String(payload.settings.repository_tags_page_size));
+    setDraftRepositoryTagsPageSizePreset(pageSizePresetForValue(payload.settings.repository_tags_page_size));
     setAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setDraftAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setStorageUsageRefreshIntervalSeconds(payload.settings.storage_usage_refresh_interval_seconds);
@@ -401,17 +456,29 @@ export default function SettingsPanel({
           </span>
         </div>
         <Field label="Default items per page">
-          <Input
-            value={draftRepositoryTagsPageSize}
-            onChange={(event) => setDraftRepositoryTagsPageSize(event.target.value)}
-            required
-            min={1}
-            max={100}
-            step={1}
-            type="number"
+          <DefaultPageSizePicker
+            value={draftRepositoryTagsPageSizePreset}
+            onPresetChange={(option) => {
+              setDraftRepositoryTagsPageSizePreset(option.value);
+              if (option.value !== "custom") {
+                setDraftRepositoryTagsPageSize(option.value);
+              }
+            }}
           />
+          {draftRepositoryTagsPageSizePreset === "custom" ? (
+            <Input
+              className="mt-3"
+              value={draftRepositoryTagsPageSize}
+              onChange={(event) => setDraftRepositoryTagsPageSize(event.target.value)}
+              required
+              min={1}
+              max={100}
+              step={1}
+              type="number"
+            />
+          ) : null}
           <span className="mt-2 block text-xs text-slate-400">
-            Controls the default page size for paginated list views across the app. Use a whole number from 1 to 100.
+            Presets cover the common sizes. Use Custom to enter any whole number from 1 to 100.
           </span>
         </Field>
         <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4">

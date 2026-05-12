@@ -117,6 +117,8 @@ test("first boot setup page and settings panel use setup APIs", async () => {
   assert.match(settingsPanel, /storage_usage_refresh_interval_seconds/);
   assert.match(settingsPanel, /Storage usage refresh interval/);
   assert.match(settingsPanel, /function StorageUsageIntervalPicker/);
+  assert.match(settingsPanel, /function DefaultPageSizePicker/);
+  assert.match(settingsPanel, /Presets cover the common sizes/);
   assert.match(settingsPanel, /className="absolute z-\[60\] mt-2 max-h-72 w-full/);
   assert.doesNotMatch(settingsPanel, /anchor="bottom"/);
 });

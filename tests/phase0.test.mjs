@@ -111,6 +111,7 @@ test("shared default page size stays at 10 through admin settings", async () => 
   assert.match(setup, /DEFAULT_REPOSITORY_TAGS_PAGE_SIZE = 10/);
   assert.match(routes, /repository_tags_page_size: int = Field\(default=DEFAULT_REPOSITORY_TAGS_PAGE_SIZE, ge=1, le=100\)/);
   assert.match(settingsPanel, /Default items per page/);
+  assert.match(settingsPanel, /function DefaultPageSizePicker/);
   assert.match(sessionsPage, /pageSizeParam === undefined\s*\?\s*null/);
   for (const source of [compose, bindCompose, dockerSave]) {
     assert.doesNotMatch(source, /REPOSITORY_TAGS_MAX_ITEMS/);
