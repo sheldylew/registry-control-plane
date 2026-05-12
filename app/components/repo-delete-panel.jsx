@@ -17,6 +17,7 @@ function readCookie(name) {
 export default function RepoDeletePanel({
   title,
   description,
+  warning,
   confirmationLabel,
   confirmationValue,
   requireConfirmation = true,
@@ -111,6 +112,11 @@ export default function RepoDeletePanel({
 
       <Dialog open={open} onClose={closeDialog} eyebrow="Confirm delete" title={title}>
         <p className="text-sm leading-7 text-slate-300">{description}</p>
+        {warning ? (
+          <div className="mt-4 rounded-lg border border-amber-300/30 bg-amber-300/10 p-4 text-sm leading-7 text-amber-100">
+            {warning}
+          </div>
+        ) : null}
         {requireConfirmation ? (
           <>
             <p className="mt-5 text-xs uppercase tracking-[0.18em] text-slate-400">

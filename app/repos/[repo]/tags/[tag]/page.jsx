@@ -36,6 +36,19 @@ function buildDockerPullCommand(origin, repo, tag) {
   }
 }
 
+function buildSharedManifestWarning(item) {
+  const count = Number(item.shared_manifest_tag_count || 0);
+  if (count <= 1) {
+    return null;
+  }
+
+  const tags = Array.isArray(item.shared_manifest_tags) ? item.shared_manifest_tags : [];
+  const tagList = tags.length
+    ? ` Active tags currently pointing at this manifest include ${tags.join(", ")}${count > tags.length ? ` and ${count - tags.length} more` : ""}.`
+    : "";
+  return `This manifest is shared by ${count} active tags. Deleting it can remove every tag that points at this digest.${tagList}`;
+}
+
 export default async function RepoTagDetailPage({ params }) {
   const resolvedParams = await params;
   const repoPath = decodeURIComponent(resolvedParams.repo);
@@ -134,6 +147,7 @@ export default async function RepoTagDetailPage({ params }) {
         <RepoDeletePanel
           title="Delete tag"
           description="This resolves the tag to its manifest digest and deletes that manifest from the registry. Disk space is not reclaimed until registry garbage collection runs."
+          warning={buildSharedManifestWarning(manifest)}
           confirmationValue={`${manifest.name}:${manifest.tag}`}
           requireConfirmation={false}
           endpoint={`/api/repos/${encodeURIComponent(manifest.name)}/tags/${encodeURIComponent(manifest.tag)}/delete`}

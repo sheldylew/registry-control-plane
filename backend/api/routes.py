@@ -95,6 +95,7 @@ REGISTRY_NOTIFICATION_MANIFEST_MEDIA_TYPES = {
     "application/vnd.docker.distribution.manifest.list.v2+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 }
+SHARED_MANIFEST_TAG_SAMPLE_SIZE = 5
 
 
 def _normalize_required_text(value: str, *, field_name: str, max_length: int = MAX_SHORT_TEXT_LENGTH) -> str:
@@ -306,8 +307,64 @@ def _subject_for_user(user: User) -> dict[str, object]:
     }
 
 
-def _serialize_manifest(details: ManifestDetails) -> dict:
-    return {
+def _shared_manifest_tag_metadata_by_digest(
+    db: Session,
+    *,
+    repository_id: int,
+    manifest_digests: list[str],
+) -> dict[str, dict[str, object]]:
+    if not manifest_digests:
+        return {}
+
+    counts = {
+        digest: int(count or 0)
+        for digest, count in db.execute(
+            select(RepositoryTag.manifest_digest, func.count(RepositoryTag.id))
+            .where(
+                RepositoryTag.repository_id == repository_id,
+                RepositoryTag.deleted_at.is_(None),
+                RepositoryTag.manifest_digest.in_(manifest_digests),
+            )
+            .group_by(RepositoryTag.manifest_digest)
+        ).all()
+    }
+
+    metadata: dict[str, dict[str, object]] = {}
+    for digest, count in counts.items():
+        tag_names = db.scalars(
+            select(RepositoryTag.name)
+            .where(
+                RepositoryTag.repository_id == repository_id,
+                RepositoryTag.deleted_at.is_(None),
+                RepositoryTag.manifest_digest == digest,
+            )
+            .order_by(RepositoryTag.name.asc())
+            .limit(SHARED_MANIFEST_TAG_SAMPLE_SIZE)
+        ).all()
+        metadata[digest] = {
+            "shared_manifest_tag_count": count,
+            "shared_manifest_tags": list(tag_names),
+        }
+    return metadata
+
+
+def _shared_manifest_tag_metadata(
+    db: Session,
+    *,
+    repository_id: int,
+    manifest_digest: Optional[str],
+) -> dict[str, object]:
+    if not manifest_digest:
+        return {"shared_manifest_tag_count": 0, "shared_manifest_tags": []}
+    return _shared_manifest_tag_metadata_by_digest(
+        db,
+        repository_id=repository_id,
+        manifest_digests=[manifest_digest],
+    ).get(manifest_digest, {"shared_manifest_tag_count": 0, "shared_manifest_tags": []})
+
+
+def _serialize_manifest(details: ManifestDetails, *, shared_manifest_metadata: Optional[dict[str, object]] = None) -> dict:
+    payload = {
         "name": details.name,
         "tag": details.tag,
         "digest": details.digest,
@@ -322,10 +379,12 @@ def _serialize_manifest(details: ManifestDetails) -> dict:
         "children_truncated": details.children_truncated,
         "history_truncated": details.history_truncated,
     }
+    payload.update(shared_manifest_metadata or {"shared_manifest_tag_count": 0, "shared_manifest_tags": []})
+    return payload
 
 
-def _serialize_tag_summary(summary: TagSummary) -> dict:
-    return {
+def _serialize_tag_summary(summary: TagSummary, *, shared_manifest_metadata: Optional[dict[str, object]] = None) -> dict:
+    payload = {
         "tag": summary.tag,
         "digest": summary.digest,
         "media_type": summary.media_type,
@@ -336,6 +395,8 @@ def _serialize_tag_summary(summary: TagSummary) -> dict:
         "children_truncated": summary.children_truncated,
         "history_truncated": summary.history_truncated,
     }
+    payload.update(shared_manifest_metadata or {"shared_manifest_tag_count": 0, "shared_manifest_tags": []})
+    return payload
 
 
 def _format_cached_created_at(value: Optional[datetime]) -> Optional[str]:
@@ -2267,6 +2328,11 @@ def list_repository_tags(
             )
         ).all()
         cache_rows_by_digest = {row.manifest_digest: row for row in cached_rows}
+    shared_manifest_metadata = _shared_manifest_tag_metadata_by_digest(
+        db,
+        repository_id=repository.id,
+        manifest_digests=digests,
+    )
 
     tags: list[TagSummary] = []
     for tag_row in tag_rows:
@@ -2301,7 +2367,13 @@ def list_repository_tags(
         "can_manage_visibility": user.is_admin,
         "can_delete_tag": can_delete_tag,
         "can_prune_repository": can_prune_repository,
-        "tags": [_serialize_tag_summary(tag) for tag in tags],
+        "tags": [
+            _serialize_tag_summary(
+                tag,
+                shared_manifest_metadata=shared_manifest_metadata.get(tag.digest),
+            )
+            for tag in tags
+        ],
         "truncation": truncation,
         "pagination": {
             "page": safe_page,
@@ -2341,7 +2413,14 @@ def get_repository_tag_details(
         registry.close()
 
     return {
-        "manifest": _serialize_manifest(manifest),
+        "manifest": _serialize_manifest(
+            manifest,
+            shared_manifest_metadata=_shared_manifest_tag_metadata(
+                db,
+                repository_id=_repository.id,
+                manifest_digest=manifest.digest,
+            ),
+        ),
         "public_registry_origin": effective_public_registry_origin(db, settings),
         "can_delete_tag": can_delete_tag,
     }

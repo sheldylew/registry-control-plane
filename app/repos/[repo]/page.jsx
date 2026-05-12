@@ -40,6 +40,19 @@ function buildTagDeleteRedirectPath(repoPath, pagination) {
   return buildPageHref(repoPath, Math.min(currentPage, lastPageAfterDelete));
 }
 
+function buildSharedManifestWarning(item) {
+  const count = Number(item.shared_manifest_tag_count || 0);
+  if (count <= 1) {
+    return null;
+  }
+
+  const tags = Array.isArray(item.shared_manifest_tags) ? item.shared_manifest_tags : [];
+  const tagList = tags.length
+    ? ` Active tags currently pointing at this manifest include ${tags.join(", ")}${count > tags.length ? ` and ${count - tags.length} more` : ""}.`
+    : "";
+  return `This manifest is shared by ${count} active tags. Deleting it can remove every tag that points at this digest.${tagList}`;
+}
+
 function formatBytes(size) {
   if (!size) {
     return "0 B";
@@ -193,6 +206,7 @@ export default async function RepoDetailPage({ params, searchParams }) {
                             compact
                             title="Delete tag"
                             description="This resolves the tag to its manifest digest and deletes that manifest from the registry. Disk space is not reclaimed until registry garbage collection runs."
+                            warning={buildSharedManifestWarning(tag)}
                             confirmationValue={`${payload.repo}:${tag.tag}`}
                             requireConfirmation={false}
                             endpoint={`/api/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/delete`}

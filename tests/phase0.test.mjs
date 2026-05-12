@@ -92,6 +92,24 @@ test("repository tag deletes redirect to the remaining tag page", async () => {
   assert.match(repoPage, /redirectPath=\{buildTagDeleteRedirectPath\(payload\.repo, payload\.pagination\)\}/);
 });
 
+test("repository tag deletes warn when a manifest is shared", async () => {
+  const [deletePanel, repoPage, tagPage, routes] = await Promise.all([
+    readFile(new URL("../app/components/repo-delete-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/tags/[tag]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../backend/api/routes.py", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(deletePanel, /warning,/);
+  assert.match(deletePanel, /border-amber-300\/30 bg-amber-300\/10/);
+  assert.match(repoPage, /function buildSharedManifestWarning\(item\)/);
+  assert.match(repoPage, /warning=\{buildSharedManifestWarning\(tag\)\}/);
+  assert.match(tagPage, /function buildSharedManifestWarning\(item\)/);
+  assert.match(tagPage, /warning=\{buildSharedManifestWarning\(manifest\)\}/);
+  assert.match(routes, /shared_manifest_tag_count/);
+  assert.match(routes, /shared_manifest_tags/);
+});
+
 test("web healthchecks use the static root page", async () => {
   const [compose, bindCompose, dockerSave] = await Promise.all([
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),

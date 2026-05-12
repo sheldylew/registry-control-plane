@@ -2622,6 +2622,8 @@ def test_repo_tags_return_paginated_summary_rows(settings) -> None:
             "history_count": 5,
             "children_truncated": False,
             "history_truncated": False,
+            "shared_manifest_tag_count": 1,
+            "shared_manifest_tags": ["release"],
         }
     ]
     assert response.json()["pagination"] == {
@@ -2750,7 +2752,50 @@ def test_repo_tags_shared_digest_uses_single_cached_summary(settings) -> None:
         response = client.get("/api/repos/sheldylew/app/tags")
 
     assert response.status_code == 200
-    assert [tag["tag"] for tag in response.json()["tags"]] == ["edge", "release"]
+    tags = response.json()["tags"]
+    assert [tag["tag"] for tag in tags] == ["edge", "release"]
+    assert [tag["shared_manifest_tag_count"] for tag in tags] == [2, 2]
+    assert [tag["shared_manifest_tags"] for tag in tags] == [["edge", "release"], ["edge", "release"]]
+
+
+def test_repo_tag_manifest_includes_shared_digest_warning_metadata(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/app", "edge"): {
+                "name": "sheldylew/app",
+                "tag": "edge",
+                "digest": "sha256:shared",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("edge", "release"))
+            for tag in session.scalars(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id)).all():
+                tag.manifest_digest = "sha256:shared"
+            session.commit()
+            _grant_reader(session, username="detail-shared-reader", password="detail-shared-reader-pass")
+
+        login = _login(client, "detail-shared-reader", "detail-shared-reader-pass")
+        assert login.status_code == 200
+        response = client.get("/api/repos/sheldylew/app/tags/edge")
+
+    assert response.status_code == 200
+    manifest = response.json()["manifest"]
+    assert manifest["digest"] == "sha256:shared"
+    assert manifest["shared_manifest_tag_count"] == 2
+    assert manifest["shared_manifest_tags"] == ["edge", "release"]
 
 
 def test_repo_tags_are_sorted_by_most_recent_push_first(settings) -> None:
@@ -2830,6 +2875,8 @@ def test_repo_tags_exclude_soft_deleted_tags(settings) -> None:
             "history_count": 5,
             "children_truncated": False,
             "history_truncated": False,
+            "shared_manifest_tag_count": 1,
+            "shared_manifest_tags": ["latest"],
         }
     ]
 
