@@ -8,14 +8,17 @@ from backend.config import Settings
 from backend.log_retention import utcnow
 from backend.main import create_app
 from backend.models import AuditEvent, GcJob, PersonalAccessToken, RobotAccount, RobotToken, User, WebSession
+from backend.setup import AUDIT_LOG_RETENTION_DAYS_KEY, set_app_setting
 
 
 def test_startup_prunes_old_audit_events_and_completed_gc_jobs(settings) -> None:
     app = create_app(settings)
-    stale_time = utcnow() - timedelta(days=settings.log_retention_days + 1)
+    retention_days = 5
+    stale_time = utcnow() - timedelta(days=retention_days + 1)
 
     with TestClient(app):
         with app.state.session_factory() as session:
+            set_app_setting(session, AUDIT_LOG_RETENTION_DAYS_KEY, str(retention_days))
             session.add(
                 AuditEvent(
                     actor_type="system",
@@ -94,10 +97,12 @@ def test_startup_prunes_stale_sessions_and_token_records(settings) -> None:
 
 def test_new_audit_write_prunes_old_logs(settings) -> None:
     app = create_app(settings)
-    stale_time = utcnow() - timedelta(days=settings.log_retention_days + 1)
+    retention_days = 5
+    stale_time = utcnow() - timedelta(days=retention_days + 1)
 
     with TestClient(app):
         with app.state.session_factory() as session:
+            set_app_setting(session, AUDIT_LOG_RETENTION_DAYS_KEY, str(retention_days))
             session.add(
                 AuditEvent(
                     actor_type="system",

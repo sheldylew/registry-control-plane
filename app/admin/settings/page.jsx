@@ -21,6 +21,7 @@ export default async function SettingsPage() {
         initialPublicOrigin={payload.public_registry_origin}
         initialTimeZone={payload.ui_timezone}
         initialRepositoryTagsPageSize={payload.repository_tags_page_size}
+        initialAuditLogRetentionDays={payload.audit_log_retention_days}
         initialAutomaticRegistryStateRebuild={payload.automatic_registry_state_rebuild}
         initialStorageUsageRefreshIntervalSeconds={payload.storage_usage_refresh_interval_seconds}
         restartCommand={payload.restart_command}

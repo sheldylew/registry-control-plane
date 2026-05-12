@@ -25,6 +25,7 @@ from backend.runtime_secrets import ensure_registry_notifications_token
 from backend.setup import (
     automatic_registry_state_rebuild_enabled,
     complete_setup_from_environment,
+    effective_audit_log_retention_days,
     effective_storage_usage_refresh_interval_seconds,
     render_registry_config_to_path,
     saved_public_registry_origin,
@@ -84,7 +85,10 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
             app_public_origin = saved_public_registry_origin(session) or settings.public_registry_origin
             if not setup_required(session):
                 render_registry_config_to_path(settings, public_registry_origin=app_public_origin)
-            prune_expired_logs(session, retention_days=settings.log_retention_days)
+            prune_expired_logs(
+                session,
+                retention_days=effective_audit_log_retention_days(session, fallback_days=settings.log_retention_days),
+            )
             prune_expired_operational_records(
                 session,
                 web_session_retention_days=settings.web_session_retention_days,
@@ -130,7 +134,7 @@ def create_app(app_settings: Optional[Settings] = None) -> FastAPI:
             if not setup_required(session) and automatic_registry_state_rebuild_enabled(session):
                 auto_rebuild_job = queue_automatic_rebuild_job(
                     session,
-                    retention_days=settings.log_retention_days,
+                    retention_days=effective_audit_log_retention_days(session, fallback_days=settings.log_retention_days),
                 )
                 auto_rebuild_job_id = auto_rebuild_job.id if auto_rebuild_job is not None else None
         if auto_rebuild_job_id is not None and app.state.maintenance_auto_run:

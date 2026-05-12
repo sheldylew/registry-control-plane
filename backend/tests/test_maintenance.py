@@ -17,6 +17,7 @@ from backend.maintenance import (
 )
 from backend.log_retention import utcnow
 from backend.models import AuditEvent, GcJob, User
+from backend.setup import AUDIT_LOG_RETENTION_DAYS_KEY, set_app_setting
 
 
 class FakeMaintenanceRunner:
@@ -240,12 +241,14 @@ def test_maintenance_logs_do_not_contain_admin_password(settings) -> None:
 
 def test_admin_can_prune_retained_logs_manually(settings) -> None:
     app = create_app(settings)
-    stale_time = utcnow() - timedelta(days=settings.log_retention_days + 1)
+    retention_days = 15
+    stale_time = utcnow() - timedelta(days=retention_days + 1)
 
     with TestClient(app) as client:
         login = _login(client, settings.admin_username, settings.admin_password)
         csrf = login.cookies.get("rcr_csrf")
         with app.state.session_factory() as session:
+            set_app_setting(session, AUDIT_LOG_RETENTION_DAYS_KEY, str(retention_days))
             session.add(
                 AuditEvent(
                     actor_type="system",
@@ -274,7 +277,7 @@ def test_admin_can_prune_retained_logs_manually(settings) -> None:
             jobs = session.scalars(select(GcJob)).all()
 
     assert response.status_code == 200
-    assert response.json()["retention_days"] == settings.log_retention_days
+    assert response.json()["retention_days"] == retention_days
     assert response.json()["pruned"] == {
         "audit_events_deleted": 1,
         "gc_jobs_deleted": 1,

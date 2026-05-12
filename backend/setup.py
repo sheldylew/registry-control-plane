@@ -26,6 +26,7 @@ from backend.runtime_secrets import ensure_registry_notifications_token
 PUBLIC_REGISTRY_ORIGIN_KEY = "public_registry_origin"
 UI_TIMEZONE_KEY = "ui_timezone"
 REPOSITORY_TAGS_PAGE_SIZE_KEY = "repository_tags_page_size"
+AUDIT_LOG_RETENTION_DAYS_KEY = "audit_log_retention_days"
 AUTOMATIC_REGISTRY_STATE_REBUILD_KEY = "automatic_registry_state_rebuild"
 STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY = "storage_usage_refresh_interval_seconds"
 REGISTRY_STORAGE_USAGE_BYTES_KEY = "registry_storage_usage_bytes"
@@ -33,6 +34,7 @@ REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY = "registry_storage_usage_measured_at"
 REGISTRY_STORAGE_USAGE_STALE_KEY = "registry_storage_usage_stale"
 DEFAULT_UI_TIMEZONE = "America/Los_Angeles"
 DEFAULT_REPOSITORY_TAGS_PAGE_SIZE = 10
+DEFAULT_AUDIT_LOG_RETENTION_DAYS = 30
 DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS = 3600
 RESTART_COMMAND = "docker compose restart registry"
 REGISTRY_EVENTS_PATH = "/api/internal/registry-events"
@@ -130,6 +132,32 @@ def effective_repository_tags_page_size(session: Session) -> int:
 
 def effective_default_page_size(session: Session) -> int:
     return effective_repository_tags_page_size(session)
+
+
+def validate_audit_log_retention_days(value: int) -> int:
+    try:
+        retention_days = int(value)
+    except (TypeError, ValueError) as exc:
+        raise SetupError("Audit pruning retention must be a whole number of days.") from exc
+    if retention_days < 1:
+        raise SetupError("Audit pruning retention must be at least 1 day.")
+    return retention_days
+
+
+def effective_audit_log_retention_days(
+    session: Session,
+    fallback_days: int = DEFAULT_AUDIT_LOG_RETENTION_DAYS,
+) -> int:
+    value = get_app_setting(session, AUDIT_LOG_RETENTION_DAYS_KEY)
+    if value is not None:
+        try:
+            return validate_audit_log_retention_days(int(value.strip()))
+        except (SetupError, ValueError):
+            pass
+    try:
+        return validate_audit_log_retention_days(fallback_days)
+    except SetupError:
+        return DEFAULT_AUDIT_LOG_RETENTION_DAYS
 
 
 def automatic_registry_state_rebuild_enabled(session: Session) -> bool:

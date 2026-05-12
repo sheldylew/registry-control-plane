@@ -33,7 +33,9 @@ from backend.rate_limit import FixedWindowRateLimiter
 from backend.registry_client import HistoryVariant, ManifestDetails, RegistryNotFoundError, ResolvedManifestDescriptor, TagSummary
 from backend.runtime_secrets import ensure_registry_notifications_token
 from backend.setup import (
+    AUDIT_LOG_RETENTION_DAYS_KEY,
     AUTOMATIC_REGISTRY_STATE_REBUILD_KEY,
+    DEFAULT_AUDIT_LOG_RETENTION_DAYS,
     DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
     REGISTRY_STORAGE_USAGE_BYTES_KEY,
     REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
@@ -1824,6 +1826,7 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
                 "public_registry_origin": "https://registry.example.com",
                 "ui_timezone": "America/New_York",
                 "repository_tags_page_size": 25,
+                "audit_log_retention_days": 60,
                 "automatic_registry_state_rebuild": True,
                 "storage_usage_refresh_interval_seconds": 120,
             },
@@ -1834,6 +1837,7 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
             origin = session.get(AppSetting, PUBLIC_REGISTRY_ORIGIN_KEY)
             ui_timezone = session.get(AppSetting, "ui_timezone")
             repository_tags_page_size = session.get(AppSetting, REPOSITORY_TAGS_PAGE_SIZE_KEY)
+            audit_log_retention_days = session.get(AppSetting, AUDIT_LOG_RETENTION_DAYS_KEY)
             automatic_rebuild = session.get(AppSetting, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY)
             storage_interval = session.get(AppSetting, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY)
 
@@ -1844,6 +1848,7 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
     assert settings_response.json()["public_registry_origin"] == "https://registry.example.com"
     assert settings_response.json()["ui_timezone"] == "America/New_York"
     assert settings_response.json()["repository_tags_page_size"] == 25
+    assert settings_response.json()["audit_log_retention_days"] == 60
     assert settings_response.json()["automatic_registry_state_rebuild"] is True
     assert settings_response.json()["storage_usage_refresh_interval_seconds"] == 120
     assert origin is not None
@@ -1852,6 +1857,8 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
     assert ui_timezone.value == "America/New_York"
     assert repository_tags_page_size is not None
     assert repository_tags_page_size.value == "25"
+    assert audit_log_retention_days is not None
+    assert audit_log_retention_days.value == "60"
     assert automatic_rebuild is not None
     assert automatic_rebuild.value == "true"
     assert storage_interval is not None
@@ -1966,6 +1973,8 @@ def test_admin_settings_default_repository_tags_page_size_is_ten(settings) -> No
     assert response.status_code == 200
     assert response.json()["repository_tags_page_size"] == DEFAULT_REPOSITORY_TAGS_PAGE_SIZE
     assert response.json()["default_repository_tags_page_size"] == DEFAULT_REPOSITORY_TAGS_PAGE_SIZE
+    assert response.json()["audit_log_retention_days"] == DEFAULT_AUDIT_LOG_RETENTION_DAYS
+    assert response.json()["default_audit_log_retention_days"] == DEFAULT_AUDIT_LOG_RETENTION_DAYS
 
 
 def test_admin_can_update_repository_tags_page_size_without_restart(settings) -> None:
@@ -1990,6 +1999,36 @@ def test_admin_can_update_repository_tags_page_size_without_restart(settings) ->
     assert response.json()["settings"]["repository_tags_page_size"] == 7
     assert response.json()["registry_restart_required"] is False
     assert response.json()["restart_command"] is None
+
+
+def test_admin_can_update_audit_log_retention_without_restart(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/settings",
+            json={
+                "public_registry_origin": settings.public_registry_origin,
+                "ui_timezone": "America/Los_Angeles",
+                "repository_tags_page_size": 10,
+                "audit_log_retention_days": 15,
+                "automatic_registry_state_rebuild": False,
+                "storage_usage_refresh_interval_seconds": 3600,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            audit_log_retention_days = session.get(AppSetting, AUDIT_LOG_RETENTION_DAYS_KEY)
+
+    assert response.status_code == 200
+    assert response.json()["settings"]["audit_log_retention_days"] == 15
+    assert response.json()["registry_restart_required"] is False
+    assert response.json()["restart_command"] is None
+    assert audit_log_retention_days is not None
+    assert audit_log_retention_days.value == "15"
 
 
 def test_default_page_size_setting_applies_to_paginated_lists(settings) -> None:

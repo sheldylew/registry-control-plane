@@ -66,6 +66,14 @@ const DEFAULT_PAGE_SIZE_OPTIONS = [
   { value: "custom", label: "Custom", detail: "Enter any whole number from 1 to 100." },
 ];
 
+const AUDIT_LOG_RETENTION_OPTIONS = [
+  { value: "5", label: "5 days", detail: "Most aggressive cleanup when audit history is only needed briefly." },
+  { value: "15", label: "15 days", detail: "A shorter retention window that still keeps a couple of weeks of history." },
+  { value: "30", label: "30 days", detail: "Keeps a month of audit and completed maintenance history." },
+  { value: "60", label: "60 days", detail: "Retains a longer operational trail before pruning old rows." },
+  { value: "custom", label: "Custom", detail: "Enter any whole number of days." },
+];
+
 function formatStorageUsageInterval(seconds) {
   if (!seconds) {
     return "Disabled";
@@ -89,6 +97,16 @@ function storageUsageIntervalPresetForValue(value) {
 function pageSizePresetForValue(value) {
   const normalized = String(Number(value) || 0);
   return DEFAULT_PAGE_SIZE_OPTIONS.some((option) => option.value === normalized) ? normalized : "custom";
+}
+
+function formatAuditLogRetentionDays(days) {
+  const normalized = Number(days) || 0;
+  return `${normalized} day${normalized === 1 ? "" : "s"}`;
+}
+
+function auditLogRetentionPresetForValue(value) {
+  const normalized = String(Number(value) || 0);
+  return AUDIT_LOG_RETENTION_OPTIONS.some((option) => option.value === normalized) ? normalized : "custom";
 }
 
 function standardTimeZones(selectedTimeZone) {
@@ -248,10 +266,47 @@ function DefaultPageSizePicker({ value, onPresetChange }) {
   );
 }
 
+function AuditLogRetentionPicker({ value, onPresetChange }) {
+  const selectedOption =
+    AUDIT_LOG_RETENTION_OPTIONS.find((option) => option.value === value) ||
+    AUDIT_LOG_RETENTION_OPTIONS[AUDIT_LOG_RETENTION_OPTIONS.length - 1];
+
+  return (
+    <Listbox value={selectedOption} by="value" onChange={onPresetChange}>
+      <div className="relative">
+        <ListboxButton className="grid w-full cursor-default grid-cols-1 rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-left text-white outline-none transition hover:border-cyan-400/40 focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-60">
+          <span className="block truncate font-medium">{selectedOption.label}</span>
+          <span className="block truncate pr-6 text-xs text-slate-400">{selectedOption.detail}</span>
+          <ChevronUpDownIcon aria-hidden="true" className="pointer-events-none absolute right-3 top-3.5 size-5 text-slate-400" />
+        </ListboxButton>
+        <ListboxOptions
+          transition
+          className="absolute z-[60] mt-2 max-h-72 w-full overflow-auto rounded-lg border border-white/10 bg-slate-950 py-1 text-sm shadow-2xl shadow-slate-950/50 outline-none data-[closed]:data-[leave]:opacity-0 data-[leave]:transition data-[leave]:duration-100 data-[leave]:ease-in"
+        >
+          {AUDIT_LOG_RETENTION_OPTIONS.map((option) => (
+            <ListboxOption
+              key={option.value}
+              value={option}
+              className="group relative cursor-default select-none py-2.5 pl-9 pr-4 text-white data-[focus]:bg-cyan-400 data-[focus]:text-slate-950 data-[focus]:outline-none"
+            >
+              <span className="block truncate font-medium">{option.label}</span>
+              <span className="block truncate text-xs text-slate-400 group-data-[focus]:text-slate-800">{option.detail}</span>
+              <span className="absolute inset-y-0 left-0 hidden items-center pl-2 text-cyan-300 group-data-[focus]:text-slate-950 group-data-[selected]:flex">
+                <CheckIcon aria-hidden="true" className="size-5" />
+              </span>
+            </ListboxOption>
+          ))}
+        </ListboxOptions>
+      </div>
+    </Listbox>
+  );
+}
+
 export default function SettingsPanel({
   initialPublicOrigin,
   initialTimeZone,
   initialRepositoryTagsPageSize = 10,
+  initialAuditLogRetentionDays = 30,
   initialAutomaticRegistryStateRebuild = false,
   initialStorageUsageRefreshIntervalSeconds = 3600,
   restartCommand,
@@ -264,6 +319,13 @@ export default function SettingsPanel({
   const [draftRepositoryTagsPageSize, setDraftRepositoryTagsPageSize] = useState(String(Number(initialRepositoryTagsPageSize) || 10));
   const [draftRepositoryTagsPageSizePreset, setDraftRepositoryTagsPageSizePreset] = useState(
     pageSizePresetForValue(initialRepositoryTagsPageSize),
+  );
+  const [auditLogRetentionDays, setAuditLogRetentionDays] = useState(Number(initialAuditLogRetentionDays) || 30);
+  const [draftAuditLogRetentionDays, setDraftAuditLogRetentionDays] = useState(
+    String(Number(initialAuditLogRetentionDays) || 30),
+  );
+  const [draftAuditLogRetentionPreset, setDraftAuditLogRetentionPreset] = useState(
+    auditLogRetentionPresetForValue(initialAuditLogRetentionDays),
   );
   const [automaticRebuild, setAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
   const [draftAutomaticRebuild, setDraftAutomaticRebuild] = useState(Boolean(initialAutomaticRegistryStateRebuild));
@@ -284,10 +346,14 @@ export default function SettingsPanel({
   const normalizedTimeZone = normalizeTextInput(draftTimeZone);
   const parsedStorageUsageRefreshIntervalSeconds = Number(draftStorageUsageRefreshIntervalSeconds);
   const parsedRepositoryTagsPageSize = Number(draftRepositoryTagsPageSize);
+  const parsedAuditLogRetentionDays = Number(draftAuditLogRetentionDays);
   const hasValidRepositoryTagsPageSize =
     Number.isInteger(parsedRepositoryTagsPageSize) &&
     parsedRepositoryTagsPageSize >= 1 &&
     parsedRepositoryTagsPageSize <= 100;
+  const hasValidAuditLogRetentionDays =
+    Number.isInteger(parsedAuditLogRetentionDays) &&
+    parsedAuditLogRetentionDays >= 1;
   const hasValidStorageUsageInterval =
     Number.isInteger(parsedStorageUsageRefreshIntervalSeconds) &&
     parsedStorageUsageRefreshIntervalSeconds >= 0 &&
@@ -296,6 +362,7 @@ export default function SettingsPanel({
     isValidPublicOrigin(normalizedOrigin) &&
     Boolean(normalizedTimeZone) &&
     hasValidRepositoryTagsPageSize &&
+    hasValidAuditLogRetentionDays &&
     hasValidStorageUsageInterval;
 
   function openDialog() {
@@ -303,6 +370,8 @@ export default function SettingsPanel({
     setDraftTimeZone(timeZone);
     setDraftRepositoryTagsPageSize(String(repositoryTagsPageSize));
     setDraftRepositoryTagsPageSizePreset(pageSizePresetForValue(repositoryTagsPageSize));
+    setDraftAuditLogRetentionDays(String(auditLogRetentionDays));
+    setDraftAuditLogRetentionPreset(auditLogRetentionPresetForValue(auditLogRetentionDays));
     setDraftAutomaticRebuild(automaticRebuild);
     setDraftStorageUsageRefreshIntervalSeconds(String(storageUsageRefreshIntervalSeconds));
     setDraftStorageUsageRefreshPreset(storageUsageIntervalPresetForValue(storageUsageRefreshIntervalSeconds));
@@ -321,7 +390,7 @@ export default function SettingsPanel({
   async function onSubmit(event) {
     event.preventDefault();
     if (!canSubmit) {
-      setError("Enter a valid public origin and a default page size between 1 and 100.");
+      setError("Enter a valid public origin, audit retention, and default page size.");
       return;
     }
 
@@ -338,6 +407,7 @@ export default function SettingsPanel({
         public_registry_origin: normalizedOrigin,
         ui_timezone: normalizedTimeZone,
         repository_tags_page_size: parsedRepositoryTagsPageSize,
+        audit_log_retention_days: parsedAuditLogRetentionDays,
         automatic_registry_state_rebuild: draftAutomaticRebuild,
         storage_usage_refresh_interval_seconds: parsedStorageUsageRefreshIntervalSeconds,
       }),
@@ -357,6 +427,9 @@ export default function SettingsPanel({
     setRepositoryTagsPageSize(payload.settings.repository_tags_page_size);
     setDraftRepositoryTagsPageSize(String(payload.settings.repository_tags_page_size));
     setDraftRepositoryTagsPageSizePreset(pageSizePresetForValue(payload.settings.repository_tags_page_size));
+    setAuditLogRetentionDays(payload.settings.audit_log_retention_days);
+    setDraftAuditLogRetentionDays(String(payload.settings.audit_log_retention_days));
+    setDraftAuditLogRetentionPreset(auditLogRetentionPresetForValue(payload.settings.audit_log_retention_days));
     setAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setDraftAutomaticRebuild(payload.settings.automatic_registry_state_rebuild);
     setStorageUsageRefreshIntervalSeconds(payload.settings.storage_usage_refresh_interval_seconds);
@@ -373,7 +446,7 @@ export default function SettingsPanel({
       <Panel className="p-6">
         <PanelHeader
           title="Runtime settings"
-          description="Review the registry-facing origin and the runtime defaults that shape the control-plane UI."
+          description="Review the registry-facing origin plus the runtime defaults that shape the control-plane UI and retention behavior."
           action={(
             <Button type="button" onClick={openDialog} size="lg">
               Edit
@@ -401,6 +474,10 @@ export default function SettingsPanel({
                 value: <code className="text-sm text-white">{repositoryTagsPageSize}</code>,
               },
               {
+                label: "Audit pruning retention",
+                value: <code className="text-sm text-white">{formatAuditLogRetentionDays(auditLogRetentionDays)}</code>,
+              },
+              {
                 label: "Automatic rebuild",
                 value: automaticRebuild ? "Enabled on API startup" : "Disabled",
               },
@@ -410,7 +487,7 @@ export default function SettingsPanel({
               },
               {
                 label: "Change behavior",
-                value: "Origin changes require a registry restart. Timezone, default page size, and refresh interval changes apply without restarting services.",
+                value: "Origin changes require a registry restart. Timezone, page size, audit retention, and refresh interval changes apply without restarting services.",
               },
             ]}
           />
@@ -429,7 +506,7 @@ export default function SettingsPanel({
         onClose={closeDialog}
         eyebrow="Settings"
         title="Edit settings"
-        description="Update the external registry origin, UI timezone, default page size, startup rebuild behavior, and storage usage refresh interval."
+        description="Update the external registry origin, UI timezone, audit retention, default page size, startup rebuild behavior, and storage usage refresh interval."
         onSubmit={onSubmit}
         submitLabel="Save settings"
         submitPendingLabel="Saving..."
@@ -479,6 +556,31 @@ export default function SettingsPanel({
           ) : null}
           <span className="mt-2 block text-xs text-slate-400">
             Presets cover the common sizes. Use Custom to enter any whole number from 1 to 100.
+          </span>
+        </Field>
+        <Field label="Audit pruning retention">
+          <AuditLogRetentionPicker
+            value={draftAuditLogRetentionPreset}
+            onPresetChange={(option) => {
+              setDraftAuditLogRetentionPreset(option.value);
+              if (option.value !== "custom") {
+                setDraftAuditLogRetentionDays(option.value);
+              }
+            }}
+          />
+          {draftAuditLogRetentionPreset === "custom" ? (
+            <Input
+              className="mt-3"
+              value={draftAuditLogRetentionDays}
+              onChange={(event) => setDraftAuditLogRetentionDays(event.target.value)}
+              required
+              min={1}
+              step={1}
+              type="number"
+            />
+          ) : null}
+          <span className="mt-2 block text-xs text-slate-400">
+            Presets cover the common retention windows. Use Custom to enter any whole number of days.
           </span>
         </Field>
         <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4">

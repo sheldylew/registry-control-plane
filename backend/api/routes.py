@@ -49,7 +49,9 @@ from backend.registry_state import (
     run_registry_state_rebuild_job,
 )
 from backend.setup import (
+    AUDIT_LOG_RETENTION_DAYS_KEY,
     AUTOMATIC_REGISTRY_STATE_REBUILD_KEY,
+    DEFAULT_AUDIT_LOG_RETENTION_DAYS,
     DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
     DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
     DEFAULT_UI_TIMEZONE,
@@ -61,6 +63,7 @@ from backend.setup import (
     UI_TIMEZONE_KEY,
     automatic_registry_state_rebuild_enabled,
     complete_setup,
+    effective_audit_log_retention_days,
     effective_default_page_size,
     effective_public_registry_origin,
     effective_storage_usage_refresh_interval_seconds,
@@ -70,6 +73,7 @@ from backend.setup import (
     set_app_setting,
     setup_required,
     setup_status,
+    validate_audit_log_retention_days,
     validate_default_page_size,
     validate_public_registry_origin,
     validate_storage_usage_refresh_interval_seconds,
@@ -851,6 +855,7 @@ class UpdateSettingsPayload(BaseModel):
     public_registry_origin: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LENGTH)
     ui_timezone: str = Field(min_length=1, max_length=128)
     repository_tags_page_size: int = Field(default=DEFAULT_REPOSITORY_TAGS_PAGE_SIZE, ge=1, le=100)
+    audit_log_retention_days: int = Field(default=DEFAULT_AUDIT_LOG_RETENTION_DAYS, ge=1)
     automatic_registry_state_rebuild: bool = False
     storage_usage_refresh_interval_seconds: int = Field(
         default=DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
@@ -1868,8 +1873,10 @@ def admin_settings(
         "public_registry_origin": effective_public_registry_origin(db, settings),
         "ui_timezone": effective_ui_timezone(db),
         "repository_tags_page_size": effective_default_page_size(db),
+        "audit_log_retention_days": effective_audit_log_retention_days(db, fallback_days=settings.log_retention_days),
         "automatic_registry_state_rebuild": automatic_registry_state_rebuild_enabled(db),
         "storage_usage_refresh_interval_seconds": effective_storage_usage_refresh_interval_seconds(db),
+        "default_audit_log_retention_days": DEFAULT_AUDIT_LOG_RETENTION_DAYS,
         "default_repository_tags_page_size": DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
         "default_storage_usage_refresh_interval_seconds": DEFAULT_STORAGE_USAGE_REFRESH_INTERVAL_SECONDS,
         "default_ui_timezone": DEFAULT_UI_TIMEZONE,
@@ -1898,6 +1905,7 @@ def update_admin_settings(
         public_origin = validate_public_registry_origin(payload.public_registry_origin, app_env=settings.app_env)
         ui_timezone = validate_ui_timezone(payload.ui_timezone)
         repository_tags_page_size = validate_default_page_size(payload.repository_tags_page_size)
+        audit_log_retention_days = validate_audit_log_retention_days(payload.audit_log_retention_days)
         automatic_rebuild = bool(payload.automatic_registry_state_rebuild)
         storage_interval = validate_storage_usage_refresh_interval_seconds(
             payload.storage_usage_refresh_interval_seconds
@@ -1906,6 +1914,7 @@ def update_admin_settings(
         set_app_setting(db, PUBLIC_REGISTRY_ORIGIN_KEY, public_origin)
         set_app_setting(db, UI_TIMEZONE_KEY, ui_timezone)
         set_app_setting(db, REPOSITORY_TAGS_PAGE_SIZE_KEY, str(repository_tags_page_size))
+        set_app_setting(db, AUDIT_LOG_RETENTION_DAYS_KEY, str(audit_log_retention_days))
         set_app_setting(db, AUTOMATIC_REGISTRY_STATE_REBUILD_KEY, "true" if automatic_rebuild else "false")
         set_app_setting(db, STORAGE_USAGE_REFRESH_INTERVAL_SECONDS_KEY, str(storage_interval))
         db.commit()
@@ -1926,6 +1935,7 @@ def update_admin_settings(
             "public_registry_origin": public_origin,
             "ui_timezone": ui_timezone,
             "repository_tags_page_size": repository_tags_page_size,
+            "audit_log_retention_days": audit_log_retention_days,
             "automatic_registry_state_rebuild": automatic_rebuild,
             "storage_usage_refresh_interval_seconds": storage_interval,
         },
@@ -1935,6 +1945,7 @@ def update_admin_settings(
             "public_registry_origin": public_origin,
             "ui_timezone": ui_timezone,
             "repository_tags_page_size": repository_tags_page_size,
+            "audit_log_retention_days": audit_log_retention_days,
             "automatic_registry_state_rebuild": automatic_rebuild,
             "storage_usage_refresh_interval_seconds": storage_interval,
         },
@@ -2029,7 +2040,10 @@ def create_registry_state_rebuild(
         job = create_rebuild_job(
             db,
             actor=user,
-            retention_days=request.app.state.settings.log_retention_days,
+            retention_days=effective_audit_log_retention_days(
+                db,
+                fallback_days=request.app.state.settings.log_retention_days,
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -2145,7 +2159,7 @@ def prune_maintenance_logs(
 ):
     counts = maintenance.prune_logs(db, actor=user)
     return {
-        "retention_days": maintenance.log_retention_days(),
+        "retention_days": maintenance.log_retention_days(db),
         "pruned": counts,
     }
 

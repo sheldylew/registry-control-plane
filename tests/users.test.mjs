@@ -114,11 +114,15 @@ test("first boot setup page and settings panel use setup APIs", async () => {
   assert.match(settingsPanel, /Intl\.supportedValuesOf\("timeZone"\)/);
   assert.match(settingsPanel, /automatic_registry_state_rebuild/);
   assert.match(settingsPanel, /Automatic registry state rebuild/);
+  assert.match(settingsPanel, /audit_log_retention_days/);
+  assert.match(settingsPanel, /Audit pruning retention/);
   assert.match(settingsPanel, /storage_usage_refresh_interval_seconds/);
   assert.match(settingsPanel, /Storage usage refresh interval/);
+  assert.match(settingsPanel, /function AuditLogRetentionPicker/);
   assert.match(settingsPanel, /function StorageUsageIntervalPicker/);
   assert.match(settingsPanel, /function DefaultPageSizePicker/);
   assert.match(settingsPanel, /Presets cover the common sizes/);
+  assert.match(settingsPanel, /Presets cover the common retention windows/);
   assert.match(settingsPanel, /className="absolute z-\[60\] mt-2 max-h-72 w-full/);
   assert.doesNotMatch(settingsPanel, /anchor="bottom"/);
 });

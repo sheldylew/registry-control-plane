@@ -50,7 +50,7 @@ Default list page size is runtime-configurable from `/admin/settings` and defaul
 
 ### Maintenance and retention
 
-- `LOG_RETENTION_DAYS`: retention window for audit events and completed maintenance job logs. Defaults to `30`.
+- Audit pruning retention is runtime-configurable from `/admin/settings` and defaults to `30` days. `LOG_RETENTION_DAYS` remains the fallback default before an operator saves a runtime override.
 - `WEB_SESSION_RETENTION_DAYS`: retention window for expired or revoked browser session rows. Defaults to `30`.
 - `TOKEN_RECORD_RETENTION_DAYS`: retention window for expired or revoked PAT and robot-token rows. Defaults to `90`.
 - `MAINTENANCE_MIN_GATE_SECONDS`: minimum time the destructive maintenance gate stays up during a destructive GC run.

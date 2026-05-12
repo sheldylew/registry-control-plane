@@ -14,10 +14,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.log_retention import prune_expired_logs, prune_expired_operational_records
 from backend.models import AuditEvent, GcJob, User
 from backend.setup import (
+    DEFAULT_AUDIT_LOG_RETENTION_DAYS,
     DEFAULT_REPOSITORY_TAGS_PAGE_SIZE,
     REGISTRY_STORAGE_USAGE_BYTES_KEY,
     REGISTRY_STORAGE_USAGE_MEASURED_AT_KEY,
     REGISTRY_STORAGE_USAGE_STALE_KEY,
+    effective_audit_log_retention_days,
     get_app_setting,
     set_app_setting,
 )
@@ -171,9 +173,10 @@ def _record_audit_event(
     action: str,
     target_id: Optional[int] = None,
     metadata_json: Optional[dict] = None,
-    retention_days: int = 30,
+    retention_days: int = DEFAULT_AUDIT_LOG_RETENTION_DAYS,
 ) -> None:
-    prune_expired_logs(session, retention_days=retention_days)
+    resolved_retention_days = effective_audit_log_retention_days(session, fallback_days=retention_days)
+    prune_expired_logs(session, retention_days=resolved_retention_days)
     session.add(
         AuditEvent(
             actor_type="user",
@@ -215,8 +218,8 @@ class MaintenanceService:
     def minimum_gate_seconds(self) -> float:
         return max(float(getattr(self._settings, "maintenance_min_gate_seconds", 0.0)), 0.0)
 
-    def log_retention_days(self) -> int:
-        return self._settings.log_retention_days
+    def log_retention_days(self, session: Session) -> int:
+        return effective_audit_log_retention_days(session, fallback_days=self._settings.log_retention_days)
 
     def has_active_job(self, session: Session) -> bool:
         active = session.scalar(
@@ -242,7 +245,8 @@ class MaintenanceService:
         delete_untagged: bool,
         prune_empty_dirs: bool,
     ) -> GcJob:
-        prune_expired_logs(session, retention_days=self._settings.log_retention_days)
+        retention_days = self.log_retention_days(session)
+        prune_expired_logs(session, retention_days=retention_days)
         if self.has_active_job(session):
             raise ValueError("A garbage-collection job is already queued or running.")
 
@@ -267,12 +271,13 @@ class MaintenanceService:
                 "prune_empty_dirs": prune_empty_dirs,
                 "requested_by": actor.username,
             },
-            retention_days=self._settings.log_retention_days,
+            retention_days=retention_days,
         )
         return job
 
     def prune_logs(self, session: Session, *, actor: User) -> dict[str, int]:
-        counts = prune_expired_logs(session, retention_days=self._settings.log_retention_days)
+        retention_days = self.log_retention_days(session)
+        counts = prune_expired_logs(session, retention_days=retention_days)
         counts.update(
             prune_expired_operational_records(
                 session,
@@ -285,7 +290,7 @@ class MaintenanceService:
             actor=actor,
             action="logs_pruned",
             metadata_json={
-                "retention_days": self._settings.log_retention_days,
+                "retention_days": retention_days,
                 "web_session_retention_days": self._settings.web_session_retention_days,
                 "token_record_retention_days": self._settings.token_record_retention_days,
                 "audit_events_deleted": counts["audit_events_deleted"],
@@ -294,7 +299,7 @@ class MaintenanceService:
                 "personal_access_tokens_deleted": counts["personal_access_tokens_deleted"],
                 "robot_tokens_deleted": counts["robot_tokens_deleted"],
             },
-            retention_days=self._settings.log_retention_days,
+            retention_days=retention_days,
         )
         return counts
 
@@ -305,6 +310,7 @@ class MaintenanceService:
                 return
 
             actor = session.get(User, job.requested_by)
+            retention_days = self.log_retention_days(session)
             job.status = "running"
             job.started_at = utcnow()
             session.commit()
@@ -318,7 +324,7 @@ class MaintenanceService:
                     "delete_untagged": job.delete_untagged,
                     "prune_empty_dirs": job.prune_empty_dirs,
                 },
-                retention_days=self._settings.log_retention_days,
+                retention_days=retention_days,
             )
 
             runner = self._runner_factory()
@@ -368,7 +374,7 @@ class MaintenanceService:
                         "bytes_before": job.bytes_before,
                         "bytes_after": job.bytes_after,
                     },
-                    retention_days=self._settings.log_retention_days,
+                    retention_days=retention_days,
                 )
             except Exception as exc:
                 job.status = "failed"
@@ -391,7 +397,7 @@ class MaintenanceService:
                         "bytes_after": job.bytes_after,
                         "error": str(exc),
                     },
-                    retention_days=self._settings.log_retention_days,
+                    retention_days=retention_days,
                 )
 
     def maintenance_summary(
@@ -418,7 +424,7 @@ class MaintenanceService:
             "storage_usage_bytes": storage_usage["bytes"],
             "storage_usage_measured_at": storage_usage["measured_at"],
             "storage_usage_stale": storage_usage["stale"],
-            "log_retention_days": self.log_retention_days(),
+            "log_retention_days": self.log_retention_days(session),
             "active_job": active_job,
             "last_job": last_job,
             "jobs": jobs,

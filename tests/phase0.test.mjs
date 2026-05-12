@@ -118,6 +118,25 @@ test("shared default page size stays at 10 through admin settings", async () => 
   }
 });
 
+test("audit pruning retention stays runtime-configurable through admin settings", async () => {
+  const [setup, routes, settingsPanel] = await Promise.all([
+    readFile(new URL("../backend/setup.py", import.meta.url), "utf8"),
+    readFile(new URL("../backend/api/routes.py", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-panel.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(setup, /AUDIT_LOG_RETENTION_DAYS_KEY = "audit_log_retention_days"/);
+  assert.match(setup, /DEFAULT_AUDIT_LOG_RETENTION_DAYS = 30/);
+  assert.match(routes, /audit_log_retention_days: int = Field\(default=DEFAULT_AUDIT_LOG_RETENTION_DAYS, ge=1\)/);
+  assert.match(routes, /"audit_log_retention_days": effective_audit_log_retention_days/);
+  assert.match(settingsPanel, /Audit pruning retention/);
+  assert.match(settingsPanel, /function AuditLogRetentionPicker/);
+  assert.match(settingsPanel, /5 days/);
+  assert.match(settingsPanel, /15 days/);
+  assert.match(settingsPanel, /30 days/);
+  assert.match(settingsPanel, /60 days/);
+});
+
 test("release compose files keep internal service DNS aliases explicit", async () => {
   const [bindCompose, dockerSave] = await Promise.all([
     readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),

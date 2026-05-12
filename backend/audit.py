@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from backend.log_retention import prune_expired_logs
 from backend.models import AuditEvent, User
+from backend.setup import effective_audit_log_retention_days
 
 
 def record_audit_event(
@@ -18,7 +19,7 @@ def record_audit_event(
     target_type: Optional[str] = None,
     target_id: Optional[int] = None,
     metadata_json: Optional[dict] = None,
-    retention_days: int = 30,
+    retention_days: Optional[int] = None,
 ) -> None:
     resolved_actor_type = actor_type
     resolved_actor_id = actor_id
@@ -26,7 +27,10 @@ def record_audit_event(
         resolved_actor_type = "user"
         resolved_actor_id = actor.id
 
-    prune_expired_logs(session, retention_days=retention_days)
+    prune_expired_logs(
+        session,
+        retention_days=effective_audit_log_retention_days(session, fallback_days=retention_days or 30),
+    )
 
     session.add(
         AuditEvent(
