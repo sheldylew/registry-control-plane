@@ -97,6 +97,8 @@ test("admin shell includes settings navigation", async () => {
 
   assert.match(shell, /href: "\/admin\/settings"/);
   assert.match(shell, /label: "Settings"/);
+  assert.match(shell, /const Icon = item\.icon/);
+  assert.match(shell, /<Icon className="h-4 w-4"/);
 });
 
 test("first boot setup page and settings panel use setup APIs", async () => {

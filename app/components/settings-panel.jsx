@@ -443,12 +443,12 @@ export default function SettingsPanel({
 
   return (
     <>
-      <Panel className="p-6">
+      <Panel className="p-4 sm:p-6">
         <PanelHeader
           title="Runtime settings"
           description="Review the registry-facing origin plus the runtime defaults that shape the control-plane UI and retention behavior."
           action={(
-            <Button type="button" onClick={openDialog} size="lg">
+            <Button type="button" onClick={openDialog} size="lg" className="w-full sm:w-auto">
               Edit
             </Button>
           )}
@@ -459,15 +459,15 @@ export default function SettingsPanel({
             items={[
               {
                 label: "Public origin",
-                value: <code className="text-sm text-white">{publicOrigin || "Not configured"}</code>,
+                value: <code className="break-all text-sm text-white">{publicOrigin || "Not configured"}</code>,
               },
               {
                 label: "Registry restart",
-                value: <code className="text-sm text-white">{restartCommand}</code>,
+                value: <code className="break-all text-sm text-white">{restartCommand}</code>,
               },
               {
                 label: "UI timezone",
-                value: <code className="text-sm text-white">{timeZone}</code>,
+                value: <code className="break-all text-sm text-white">{timeZone}</code>,
               },
               {
                 label: "Default items per page",
@@ -496,7 +496,7 @@ export default function SettingsPanel({
         {message ? (
           <Alert tone="amber" className="mt-6">
             <p>Registry restart required after the latest settings change.</p>
-            <code className="mt-2 block rounded-lg bg-slate-950 px-3 py-2 text-amber-50">{message}</code>
+            <code className="mt-2 block break-all rounded-lg bg-slate-950 px-3 py-2 text-amber-50">{message}</code>
           </Alert>
         ) : null}
       </Panel>

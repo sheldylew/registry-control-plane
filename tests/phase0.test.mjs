@@ -110,6 +110,234 @@ test("repository tag deletes warn when a manifest is shared", async () => {
   assert.match(routes, /shared_manifest_tags/);
 });
 
+test("high-density lists expose mobile card layouts without dropping desktop tables", async () => {
+  const [tableUi, repoPage, usersPanel, permissionsPanel, pagination, reposPanel, adminShell] = await Promise.all([
+    readFile(new URL("../app/components/ui/table.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/permissions-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui/pagination.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/repositories-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/admin-shell.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(tableUi, /mobileCards/);
+  assert.match(tableUi, /lg:hidden/);
+  assert.match(tableUi, /hidden lg:block/);
+  assert.match(tableUi, /export function MobileDisclosureCard/);
+  assert.match(tableUi, /<details className=\{`group rounded-lg/);
+  assert.match(tableUi, /group-open:hidden/);
+  assert.match(tableUi, /group-open:inline-flex/);
+  for (const source of [repoPage, usersPanel, permissionsPanel]) {
+    assert.match(source, /mobileCards=\{/);
+    assert.match(source, /MobileCardList/);
+    assert.match(source, /MobileDisclosureCard/);
+    assert.match(source, /<Table>/);
+  }
+  assert.match(pagination, /Showing <span className="font-medium text-white">\{start\}/);
+  assert.match(reposPanel, /Showing <span className="font-medium text-white">\{start\}/);
+  assert.match(adminShell, /px-4 py-6 sm:px-6 sm:py-10/);
+  assert.match(adminShell, /text-3xl font-semibold tracking-tight text-white sm:text-4xl/);
+  assert.match(adminShell, /Command menu/);
+  assert.match(adminShell, /translate-y-0/);
+  assert.match(adminShell, /-translate-y-full/);
+  assert.match(adminShell, /renderMobileNavItems/);
+  assert.doesNotMatch(adminShell, /-translate-x-full/);
+});
+
+test("maintenance page keeps desktop layout while adding mobile affordances", async () => {
+  const [maintenancePage, maintenancePanel, statCard, floatingButtonGroup] = await Promise.all([
+    readFile(new URL("../app/admin/maintenance/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/maintenance-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui/stat-card.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui/floating-button-group.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(maintenancePage, /FloatingButtonGroup/);
+  assert.match(maintenancePage, /href: "#maintenance-actions"/);
+  assert.match(maintenancePage, /href: "#maintenance-jobs"/);
+  assert.match(maintenancePage, /href: "#maintenance-rebuilds"/);
+  assert.match(maintenancePage, /title="Registry health and state"/);
+  assert.match(maintenancePage, /Review storage, manifest cache, registry state, and recent maintenance outcomes before running jobs\./);
+  assert.match(maintenancePage, /function summarizeModeTone\(job\)/);
+  assert.match(maintenancePage, /detailBadge=\{Boolean\(payload\.last_job\)\}/);
+  assert.match(maintenancePage, /detailBadgeTone=\{payload\.last_job \? summarizeModeTone\(payload\.last_job\) : "slate"\}/);
+  assert.match(maintenancePage, /openLabel="Open job history"/);
+  assert.match(maintenancePage, /hideLabel="Hide job history"/);
+  assert.match(maintenancePage, /openLabel="Open rebuild jobs"/);
+  assert.doesNotMatch(maintenancePage, /overflow-x-auto rounded-xl border border-white\/10 bg-slate-950\/85 p-2/);
+  assert.match(maintenancePage, /xl:grid-cols-5/);
+  assert.match(maintenancePage, /max-h-72 overflow-auto whitespace-pre-wrap/);
+  assert.match(floatingButtonGroup, /sticky top-3/);
+  assert.match(floatingButtonGroup, /lg:hidden/);
+  assert.match(floatingButtonGroup, /rounded-full/);
+  assert.match(floatingButtonGroup, /shadow-2xl shadow-cyan-950\/30/);
+  assert.match(maintenancePanel, /id="maintenance-actions"/);
+  assert.match(maintenancePanel, /mt-5 w-full justify-center sm:w-auto/);
+  assert.doesNotMatch(maintenancePanel, /sticky bottom-3/);
+  assert.match(maintenancePanel, /hidden space-y-6 lg:block/);
+  assert.match(maintenancePanel, /Open rebuild action/);
+  assert.match(maintenancePanel, /Open prune action/);
+  assert.match(statCard, /p-4/);
+  assert.match(statCard, /sm:p-6/);
+  assert.match(statCard, /detailBadge = false/);
+  assert.match(statCard, /badgeTones\[detailBadgeTone\]/);
+});
+
+test("overview dashboard stats are grouped in a titled container", async () => {
+  const adminPage = await readFile(new URL("../app/admin/page.jsx", import.meta.url), "utf8");
+
+  assert.match(adminPage, /title="Control-plane snapshot"/);
+  assert.match(adminPage, /At-a-glance identity, credential, and registry counts for the current control plane\./);
+  assert.match(adminPage, /<Panel as="section" className='p-4 sm:p-6'>/);
+  assert.match(adminPage, /xl:grid-cols-5/);
+});
+
+test("remaining app sections keep desktop layout while tightening mobile shells", async () => {
+  const [
+    panel,
+    dialog,
+    formDialog,
+    repoDeletePanel,
+    adminPage,
+    auditPage,
+    sessionsPanel,
+    tokensPanel,
+    robotsPanel,
+    userProfile,
+    robotProfile,
+    tagPage,
+    tagHistoryPage,
+    settingsPanel,
+    publicHome,
+    loginPage,
+    setupPage,
+    loginForm,
+    setupForm,
+    emptyState,
+  ] = await Promise.all([
+    readFile(new URL("../app/components/ui/panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui/dialog.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui/form-dialog.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/repo-delete-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/audit/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/sessions-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/tokens-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/robots-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/user-profile-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/robot-profile-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/tags/[tag]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/tags/[tag]/history/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/login/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/setup/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/login-form.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/setup-form.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ui/empty-state.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(panel, /w-full shrink-0 sm:w-auto/);
+  assert.match(dialog, /max-h-\[calc\(100vh-2rem\)\]/);
+  assert.match(formDialog, /grid gap-3 sm:flex sm:items-center sm:justify-end/);
+  assert.match(repoDeletePanel, /grid gap-3 sm:flex sm:items-center sm:justify-end/);
+  for (const source of [adminPage, auditPage, sessionsPanel, tokensPanel, robotsPanel, userProfile, robotProfile, tagPage, tagHistoryPage, settingsPanel]) {
+    assert.match(source, /p-4 sm:p-6/);
+  }
+  assert.match(auditPage, /max-h-72 overflow-auto whitespace-pre-wrap/);
+  assert.match(sessionsPanel, /grid-cols-2 gap-3/);
+  assert.match(tagPage, /w-full shrink-0 self-start sm:w-auto/);
+  assert.match(settingsPanel, /break-all text-sm text-white/);
+  assert.match(publicHome, /px-4 py-6 sm:px-6 sm:py-10/);
+  assert.match(publicHome, /text-3xl font-semibold tracking-tight text-white sm:text-6xl/);
+  assert.match(loginPage, /px-4 py-6 sm:px-6 sm:py-10/);
+  assert.match(setupPage, /px-4 py-6 sm:px-6 sm:py-10/);
+  assert.match(loginForm, /p-5 shadow-2xl shadow-slate-950\/30 sm:p-8/);
+  assert.match(setupForm, /p-5 shadow-2xl shadow-slate-950\/30 sm:p-8/);
+  assert.match(emptyState, /px-4 py-8/);
+});
+
+test("long mobile lists collapse to summaries with on-demand details", async () => {
+  const [
+    panel,
+    maintenancePage,
+    auditPage,
+    sessionsPanel,
+    tokensPanel,
+    robotsPanel,
+    userProfile,
+    robotProfile,
+    adminPage,
+    tagPage,
+    tagHistoryPage,
+  ] = await Promise.all([
+    readFile(new URL("../app/components/ui/panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/maintenance/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/audit/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/sessions-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/tokens-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/robots-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/user-profile-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/robot-profile-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/tags/[tag]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/repos/[repo]/tags/[tag]/history/page.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(panel, /export function MobileCollapsiblePanel/);
+  assert.match(panel, /openLabel = "Open details"/);
+  assert.match(panel, /mt-3 inline-flex text-sm font-medium text-cyan-200 group-open:hidden/);
+  assert.match(panel, /group-open:hidden/);
+  assert.match(panel, /lg:hidden/);
+  assert.match(panel, /hidden lg:block/);
+
+  for (const source of [
+    maintenancePage,
+    auditPage,
+    sessionsPanel,
+    tokensPanel,
+    robotsPanel,
+    userProfile,
+    robotProfile,
+    adminPage,
+    tagPage,
+    tagHistoryPage,
+  ]) {
+    assert.match(source, /MobileDisclosureCard/);
+  }
+
+  for (const source of [
+    maintenancePage,
+    auditPage,
+    sessionsPanel,
+    tokensPanel,
+    robotsPanel,
+    userProfile,
+    robotProfile,
+    adminPage,
+    tagPage,
+    tagHistoryPage,
+  ]) {
+    assert.match(source, /MobileCollapsiblePanel/);
+  }
+
+  for (const source of [
+    maintenancePage,
+    sessionsPanel,
+    tokensPanel,
+    robotsPanel,
+    userProfile,
+    robotProfile,
+    adminPage,
+    tagPage,
+    tagHistoryPage,
+  ]) {
+    assert.match(source, /lg:hidden/);
+    assert.match(source, /hidden .*lg:block|hidden .*lg:flex/);
+  }
+});
+
 test("web healthchecks use the static root page", async () => {
   const [compose, bindCompose, dockerSave] = await Promise.all([
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),

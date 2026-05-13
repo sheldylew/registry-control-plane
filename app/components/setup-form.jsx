@@ -67,8 +67,8 @@ export default function SetupForm({ initialPublicOrigin = "" }) {
   }
 
   return (
-    <Panel as="form" onSubmit={onSubmit} className="p-8 shadow-2xl shadow-slate-950/30">
-      <h1 className="text-3xl font-semibold text-white">First boot setup</h1>
+    <Panel as="form" onSubmit={onSubmit} className="p-5 shadow-2xl shadow-slate-950/30 sm:p-8">
+      <h1 className="text-2xl font-semibold text-white sm:text-3xl">First boot setup</h1>
       <p className="mt-3 text-sm leading-6 text-slate-300">
         Enter the one-time setup token from container logs, then create the first admin account and public registry origin.
       </p>
@@ -138,7 +138,7 @@ export default function SetupForm({ initialPublicOrigin = "" }) {
             Setup complete. Restart the registry service before signing in or using Docker clients so the running registry
             reloads the updated token realm.
           </p>
-          <code className="mt-2 block rounded-lg bg-slate-950 px-3 py-2 text-amber-50">
+          <code className="mt-2 block break-all rounded-lg bg-slate-950 px-3 py-2 text-amber-50">
             {result.restart_command || "docker compose restart registry"}
           </code>
           <a

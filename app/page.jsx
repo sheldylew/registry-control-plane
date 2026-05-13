@@ -25,7 +25,7 @@ export default function HomePage() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <main className="relative mx-auto flex min-h-screen max-w-7xl flex-col overflow-hidden px-6 py-10 lg:px-8">
+    <main className="relative mx-auto flex min-h-screen max-w-7xl flex-col overflow-hidden px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -bottom-20 -right-16 h-[30rem] w-[48rem] rounded-full bg-[radial-gradient(circle,_rgba(34,211,238,0.16),_transparent_66%)]" />
         <svg
@@ -53,16 +53,16 @@ export default function HomePage() {
         <div className="absolute -bottom-8 -right-8 h-[28rem] w-[34rem] rounded-full bg-[radial-gradient(circle_at_bottom_right,_rgba(2,6,23,0.5),_rgba(2,6,23,0.22)_38%,_transparent_74%)] blur-2xl" />
       </div>
 
-      <header className="relative z-10 border-b border-white/10 pb-8">
-        <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+      <header className="relative z-10 border-b border-white/10 pb-6 sm:pb-8">
+        <div className="mt-4 flex flex-col gap-5 sm:mt-6 sm:gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-cyan-300">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300 sm:text-sm sm:tracking-[0.35em]">
               Self-hosted registry operations
             </p>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl">
+            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-6xl">
               Registry Control Plane
             </h1>
-            <p className="mt-4 text-lg leading-8 text-slate-300">
+            <p className="mt-4 text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
               A production-minded control plane for sole developers and homelab
               operators who want clean registry access, scoped credentials, and
               an interface that respects the underlying Docker Distribution
@@ -73,8 +73,8 @@ export default function HomePage() {
         </div>
       </header>
 
-      <section className="relative z-10 grid gap-6 py-10 lg:grid-cols-3">
-        <Panel as="article" className="bg-white/6 p-6 shadow-2xl shadow-slate-950/30 backdrop-blur">
+      <section className="relative z-10 grid gap-4 py-6 sm:gap-6 sm:py-10 lg:grid-cols-3">
+        <Panel as="article" className="bg-white/6 p-4 shadow-2xl shadow-slate-950/30 backdrop-blur sm:p-6">
           <p className="text-sm font-medium text-slate-400">Operator view</p>
           <h2 className="mt-2 text-2xl font-semibold text-white">
             Daily control surface
@@ -84,10 +84,11 @@ export default function HomePage() {
             registry access in one place instead of stitching together scripts,
             htpasswd files, and one-off notes.
           </p>
-          <div className="mt-6 flex gap-3">
+          <div className="mt-6 grid gap-3 sm:flex">
             <Button
               as="a"
               href="/login"
+              className="w-full sm:w-auto"
             >
               Sign in
             </Button>
@@ -95,13 +96,14 @@ export default function HomePage() {
               as="a"
               href="/admin"
               variant="secondary"
+              className="w-full sm:w-auto"
             >
               Admin dashboard
             </Button>
           </div>
         </Panel>
 
-        <article className="rounded-lg border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-950/30">
+        <article className="rounded-lg border border-white/10 bg-white p-4 text-slate-900 shadow-2xl shadow-slate-950/30 sm:p-6">
           <p className="text-sm font-medium text-slate-500">Deployment shape</p>
           <h2 className="mt-2 text-2xl font-semibold">
             Registry stays standard
@@ -112,11 +114,11 @@ export default function HomePage() {
             the registry path familiar and the management layer replaceable.
           </p>
           <dl className="mt-6 space-y-3 text-sm">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <dt className="text-slate-500">Public path</dt>
               <dd className="font-semibold text-slate-900">{registryBasePath}</dd>
             </div>
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <dt className="text-slate-500">Upstream routing</dt>
               <dd className="font-semibold text-slate-900">
                 Managed behind nginx
@@ -125,7 +127,7 @@ export default function HomePage() {
           </dl>
         </article>
 
-        <Panel as="article" className="border-emerald-400/20 bg-emerald-400/10 p-6 shadow-2xl shadow-slate-950/30">
+        <Panel as="article" className="border-emerald-400/20 bg-emerald-400/10 p-4 shadow-2xl shadow-slate-950/30 sm:p-6">
           <p className="text-sm font-medium text-emerald-200">API ownership</p>
           <h2 className="mt-2 text-2xl font-semibold text-white">
             Access model contained
@@ -136,11 +138,11 @@ export default function HomePage() {
             rather than becoming another backend in disguise.
           </p>
           <dl className="mt-6 space-y-3 text-sm text-emerald-50">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <dt className="opacity-70">API base path</dt>
               <dd className="font-semibold">{apiBasePath}</dd>
             </div>
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <dt className="opacity-70">Auth token path</dt>
               <dd className="font-semibold">{authTokenPath}</dd>
             </div>
@@ -148,8 +150,8 @@ export default function HomePage() {
         </Panel>
       </section>
 
-      <section className="relative z-10 grid gap-6 lg:grid-cols-2">
-        <Panel as="article" className="border-[color:var(--line)] bg-[color:var(--surface)] p-6">
+      <section className="relative z-10 grid gap-4 sm:gap-6 lg:grid-cols-2">
+        <Panel as="article" className="border-[color:var(--line)] bg-[color:var(--surface)] p-4 sm:p-6">
           <h2 className="text-lg font-semibold text-white">
             Production signals
           </h2>
@@ -163,7 +165,7 @@ export default function HomePage() {
           </ul>
         </Panel>
 
-        <Panel as="article" className="border-[color:var(--line)] bg-[color:var(--surface)] p-6">
+        <Panel as="article" className="border-[color:var(--line)] bg-[color:var(--surface)] p-4 sm:p-6">
           <h2 className="text-lg font-semibold text-white">Homelab fit</h2>
           <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-300">
             {operatorWorkflows.map((item) => (

@@ -11,7 +11,7 @@ export default async function SetupPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl items-center px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-xl items-center px-4 py-6 sm:px-6 sm:py-10">
       <SetupForm initialPublicOrigin={payload.public_registry_origin || ""} />
     </main>
   );

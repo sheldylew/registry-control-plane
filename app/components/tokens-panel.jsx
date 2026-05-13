@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import Alert from "@/app/components/ui/alert";
@@ -10,7 +10,8 @@ import EmptyState from "@/app/components/ui/empty-state";
 import FormDialog from "@/app/components/ui/form-dialog";
 import { Field, Input } from "@/app/components/ui/form";
 import Pagination from "@/app/components/ui/pagination";
-import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
+import { MobileDisclosureCard, MobileField } from "@/app/components/ui/table";
 import { FORM_NAME_MAX_LENGTH, hasNonEmptyValue, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
 
 function readCookie(name) {
@@ -103,12 +104,12 @@ export default function TokensPanel({ initialTokens, pagination }) {
   return (
     <>
       <div className="space-y-6">
-        <Panel className="p-6">
+        <Panel className="p-4 sm:p-6">
           <PanelHeader
             title="Personal access tokens"
             description="Review issued CLI credentials first, then open a focused creation flow when a new token is needed."
             action={(
-              <Button type="button" onClick={openDialog} size="lg">
+              <Button type="button" onClick={openDialog} size="lg" className="w-full sm:w-auto">
                 Create token
               </Button>
             )}
@@ -121,13 +122,55 @@ export default function TokensPanel({ initialTokens, pagination }) {
           ) : null}
         </Panel>
 
-        <Panel className="p-6">
+        <MobileCollapsiblePanel
+          className="p-4 sm:p-6"
+          title="Issued tokens"
+          summaryMeta={`${pagination.total} tokens`}
+        >
           <PanelHeader title="Issued tokens" description="Review active and revoked personal access tokens." />
           <ul className="mt-4 space-y-3">
             {initialTokens.length ? initialTokens.map((token) => (
+              <Fragment key={token.id}>
+              <li className="lg:hidden">
+                <MobileDisclosureCard
+                  summary={(
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-white">{token.name}</p>
+                        <Badge tone={token.revoked_at ? "amber" : "emerald"} dot>
+                          {token.revoked_at ? "Revoked" : "Active"}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 truncate font-mono text-xs text-slate-400">
+                        prefix: {token.token_prefix}
+                      </p>
+                    </div>
+                  )}
+                >
+                  <dl className="grid gap-3">
+                    <MobileField label="Token prefix">
+                      <span className="break-all font-mono">{token.token_prefix}</span>
+                    </MobileField>
+                    <MobileField label="Status">
+                      {token.revoked_at ? "Revoked" : "Active"}
+                    </MobileField>
+                  </dl>
+                  {!token.revoked_at ? (
+                    <Button
+                      type="button"
+                      onClick={() => revokeToken(token.id)}
+                      variant="warning"
+                      size="xs"
+                      loading={pendingRevokeTokenId === token.id}
+                      className="mt-4 w-full"
+                    >
+                      Revoke
+                    </Button>
+                  ) : null}
+                </MobileDisclosureCard>
+              </li>
               <li
-                key={token.id}
-                className="flex flex-col gap-3 rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 md:flex-row md:items-center md:justify-between"
+                className="hidden gap-3 rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 lg:flex lg:flex-row lg:items-center lg:justify-between"
               >
                 <div>
                   <p className="text-sm font-semibold text-white">{token.name}</p>
@@ -146,11 +189,13 @@ export default function TokensPanel({ initialTokens, pagination }) {
                     variant="warning"
                     size="xs"
                     loading={pendingRevokeTokenId === token.id}
+                    className="w-full lg:w-auto"
                   >
                     Revoke
                   </Button>
                 )}
               </li>
+              </Fragment>
             )) : null}
           </ul>
           {!initialTokens.length ? (
@@ -173,7 +218,7 @@ export default function TokensPanel({ initialTokens, pagination }) {
             label="tokens"
             hrefForPage={buildPageHref}
           />
-        </Panel>
+        </MobileCollapsiblePanel>
       </div>
 
       <FormDialog

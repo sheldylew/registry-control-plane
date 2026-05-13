@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
-import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
+import { MobileDisclosureCard, MobileField } from "@/app/components/ui/table";
 import { formatDateTime } from "@/app/lib/date-format";
 import { apiFetch } from "@/app/lib/server-api";
 import { getUiTimezone } from "@/app/lib/ui-settings";
@@ -30,7 +31,7 @@ export default async function RepoTagHistoryPage({ params }) {
 
   return (
     <div className="space-y-6">
-      <Panel className="p-6">
+      <Panel className="p-4 sm:p-6">
         <PanelHeader
           eyebrow="History"
           title={`${payload.repo}:${payload.tag}`}
@@ -41,6 +42,7 @@ export default async function RepoTagHistoryPage({ params }) {
               href={`/repos/${encodeURIComponent(payload.repo)}`}
               prefetch={false}
               variant="secondary"
+              className="w-full sm:w-auto"
             >
               Back to repository
             </Button>
@@ -49,7 +51,14 @@ export default async function RepoTagHistoryPage({ params }) {
       </Panel>
 
       {payload.variants.map((variant, index) => (
-        <Panel as="section" key={`${variant.platform || "single"}-${index}`} className="p-6">
+        <MobileCollapsiblePanel
+          as="section"
+          key={`${variant.platform || "single"}-${index}`}
+          className="p-4 sm:p-6"
+          eyebrow="Variant"
+          title={variant.platform ? formatPlatformLabel(variant.platform) : "Single image"}
+          summaryMeta={`${variant.entry_count} entries`}
+        >
           <PanelHeader
             eyebrow="Variant"
             title={variant.platform ? formatPlatformLabel(variant.platform) : "Single image"}
@@ -61,7 +70,7 @@ export default async function RepoTagHistoryPage({ params }) {
             )}
           />
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="mt-5 grid gap-3 sm:gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Manifest Digest</p>
               <p className="mt-2 break-all font-mono text-xs text-slate-100">{variant.manifest_digest || "Unavailable"}</p>
@@ -75,8 +84,25 @@ export default async function RepoTagHistoryPage({ params }) {
           {variant.entries.length ? (
             <ol className="mt-5 space-y-3">
               {variant.entries.map((entry, entryIndex) => (
-                <li key={entryIndex} className="rounded-lg border border-white/10 bg-slate-950/70 p-4">
-                  <div className="flex items-center justify-between gap-4">
+                <li key={entryIndex}>
+                  <MobileDisclosureCard
+                    className="lg:hidden"
+                    summary={(
+                      <div>
+                        <p className="text-sm font-medium text-white">Step {entryIndex + 1}</p>
+                        <p className="mt-1 text-xs text-slate-400">{formatDateTime(entry.created || null, { timeZone })}</p>
+                      </div>
+                    )}
+                  >
+                    <MobileField label="Created by">
+                      <span className="whitespace-pre-wrap break-words font-mono">{entry.created_by || "No created_by metadata."}</span>
+                    </MobileField>
+                    {entry.comment ? (
+                      <MobileField label="Comment" className="mt-3">{entry.comment}</MobileField>
+                    ) : null}
+                  </MobileDisclosureCard>
+                <div className="hidden rounded-lg border border-white/10 bg-slate-950/70 p-4 lg:block">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                     <p className="text-sm font-medium text-white">Step {entryIndex + 1}</p>
                     <p className="text-xs text-slate-400">{formatDateTime(entry.created || null, { timeZone })}</p>
                   </div>
@@ -86,6 +112,7 @@ export default async function RepoTagHistoryPage({ params }) {
                   {entry.comment ? (
                     <p className="mt-2 text-xs text-slate-400">{entry.comment}</p>
                   ) : null}
+                </div>
                 </li>
               ))}
             </ol>
@@ -97,7 +124,7 @@ export default async function RepoTagHistoryPage({ params }) {
               />
             </div>
           )}
-        </Panel>
+        </MobileCollapsiblePanel>
       ))}
     </div>
   );

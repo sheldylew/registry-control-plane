@@ -12,10 +12,18 @@ import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
 import FormDialog from "@/app/components/ui/form-dialog";
 import { Input } from "@/app/components/ui/form";
-import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
 import Pagination from "@/app/components/ui/pagination";
 import Switch from "@/app/components/ui/switch";
-import { Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
+import {
+  MobileCardList,
+  MobileDisclosureCard,
+  MobileField,
+  Table,
+  TableBody,
+  TableHead,
+  TableShell,
+} from "@/app/components/ui/table";
 import { FORM_NAME_MAX_LENGTH, hasNonEmptyValue, normalizeTextInput, readApiErrorDetail } from "@/app/lib/user-form";
 
 function readCookie(name) {
@@ -213,12 +221,12 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
   return (
     <>
       <div className="space-y-6">
-        <Panel className="p-6">
+        <Panel className="p-4 sm:p-6">
           <PanelHeader
             title="Repository permissions"
             description="Inspect the current access map first, then open focused add or edit flows when a change is needed."
             action={(
-              <Button type="button" onClick={openCreateDialog} size="lg">
+              <Button type="button" onClick={openCreateDialog} size="lg" className="w-full sm:w-auto">
                 Add permission
               </Button>
             )}
@@ -231,10 +239,57 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
           {error ? <Alert tone="rose" className="mt-6">{error}</Alert> : null}
         </Panel>
 
-        <Panel className="p-6">
+        <MobileCollapsiblePanel className="p-4 sm:p-6" title="Current permissions" summaryMeta={`${pagination.total} rules`}>
           <PanelHeader title="Current permissions" />
           <div className="mt-4">
-            <TableShell>
+            <TableShell
+              mobileCards={(
+                <MobileCardList>
+                  {initialPermissions.map((permission) => (
+                    <MobileDisclosureCard
+                      key={permission.id}
+                      summary={(
+                        <>
+                          <p className="text-base font-semibold text-white">{subjectLabel(permission)}</p>
+                          <p className="mt-1 break-all font-mono text-xs text-slate-400">{permission.repository_pattern}</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {permission.can_pull ? <Badge tone="emerald">Pull</Badge> : null}
+                            {permission.can_push ? <Badge tone="cyan">Push</Badge> : null}
+                            {permission.can_delete ? <Badge tone="amber">Delete tag</Badge> : null}
+                          </div>
+                        </>
+                      )}
+                    >
+                      <div className="flex justify-end">
+                        <ActionMenu
+                          items={[
+                            {
+                              label: "Edit",
+                              onSelect: () => beginEdit(permission),
+                            },
+                            {
+                              label: deletePendingId === permission.id ? "Deleting..." : "Delete permission",
+                              onSelect: () => removePermission(permission.id),
+                              loading: deletePendingId === permission.id,
+                            },
+                          ]}
+                          label={`Actions for ${subjectLabel(permission)}`}
+                        />
+                      </div>
+                      <dl className="mt-4 grid gap-4">
+                        <MobileField label="Access">
+                          <div className="flex flex-wrap gap-2">
+                            <Badge tone={permission.can_pull ? "emerald" : "slate"}>{permission.can_pull ? "Pull" : "No pull"}</Badge>
+                            <Badge tone={permission.can_push ? "cyan" : "slate"}>{permission.can_push ? "Push" : "No push"}</Badge>
+                            <Badge tone={permission.can_delete ? "amber" : "slate"}>{permission.can_delete ? "Delete tag" : "No delete"}</Badge>
+                          </div>
+                        </MobileField>
+                      </dl>
+                    </MobileDisclosureCard>
+                  ))}
+                </MobileCardList>
+              )}
+            >
               <Table>
                 <TableHead>
                   <tr>
@@ -304,7 +359,7 @@ export default function PermissionsPanel({ initialUsers, initialRobots, initialP
             label="rules"
             hrefForPage={buildPageHref}
           />
-        </Panel>
+        </MobileCollapsiblePanel>
       </div>
 
       <FormDialog

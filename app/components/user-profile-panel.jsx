@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import Alert from "@/app/components/ui/alert";
@@ -12,8 +12,9 @@ import EmptyState from "@/app/components/ui/empty-state";
 import FormDialog from "@/app/components/ui/form-dialog";
 import { Field, Input } from "@/app/components/ui/form";
 import Pagination from "@/app/components/ui/pagination";
-import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
 import Switch from "@/app/components/ui/switch";
+import { MobileDisclosureCard, MobileField } from "@/app/components/ui/table";
 import { formatDateTime } from "@/app/lib/date-format";
 import { isValidPassword, readApiErrorDetail } from "@/app/lib/user-form";
 
@@ -132,17 +133,17 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
   return (
     <>
       <div className="space-y-6">
-        <Panel className="p-6">
+        <Panel className="p-4 sm:p-6">
           <PanelHeader
             eyebrow="User profile"
             title={user.username}
             description="This profile keeps presentation data visible while mutations stay in focused controls."
             action={(
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button as={Link} href="/admin/users" prefetch={false} variant="secondary" size="sm">
+              <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                <Button as={Link} href="/admin/users" prefetch={false} variant="secondary" size="sm" className="w-full sm:w-auto">
                   Back to users
                 </Button>
-                <Button type="button" onClick={openPasswordReset} size="sm">
+                <Button type="button" onClick={openPasswordReset} size="sm" className="w-full sm:w-auto">
                   Reset password
                 </Button>
               </div>
@@ -176,12 +177,32 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
           </div>
         </Panel>
 
-        <Panel className="p-6">
+        <MobileCollapsiblePanel className="p-4 sm:p-6" title="Personal access tokens" summaryMeta={`${tokens.length} issued`}>
           <PanelHeader title="Personal access tokens" description="Issued CLI credentials for this user." />
           <div className="mt-4 space-y-3">
             {tokens.length ? tokens.map((token) => (
-              <div key={token.id} className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4">
-                <div className="flex items-center justify-between gap-4">
+              <Fragment key={token.id}>
+              <MobileDisclosureCard
+                className="lg:hidden"
+                summary={(
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-white">{token.name}</p>
+                      <Badge tone={token.revoked_at ? "amber" : "emerald"} dot>
+                        {token.revoked_at ? "Revoked" : "Active"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 truncate font-mono text-xs text-slate-400">prefix: {token.token_prefix}</p>
+                  </div>
+                )}
+              >
+                <dl className="grid gap-3">
+                  <MobileField label="Token prefix"><span className="break-all font-mono">{token.token_prefix}</span></MobileField>
+                  <MobileField label="Issued">{formatDateTime(token.created_at, { timeZone })}</MobileField>
+                </dl>
+              </MobileDisclosureCard>
+              <div className="hidden rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 lg:block">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                   <div>
                     <p className="text-sm font-semibold text-white">{token.name}</p>
                     <p className="mt-1 font-mono text-xs text-slate-400">prefix: {token.token_prefix}</p>
@@ -192,19 +213,40 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
                 </div>
                 <p className="mt-3 text-xs text-slate-500">Issued {formatDateTime(token.created_at, { timeZone })}</p>
               </div>
+              </Fragment>
             )) : (
               <EmptyState title="No personal access tokens" description="No CLI credentials have been issued for this user." />
             )}
           </div>
-        </Panel>
+        </MobileCollapsiblePanel>
 
-        <Panel className="p-6">
+        <MobileCollapsiblePanel className="p-4 sm:p-6" title="Repository permissions" summaryMeta={`${permissions.length} rules`}>
           <PanelHeader title="Repository permissions" description="Current repository access rules for this user." />
           <div className="mt-4 space-y-3">
             {permissions.length ? permissions.map((permission) => (
-              <div key={permission.id} className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <p className="font-mono text-sm text-white">{permission.repository_pattern}</p>
+              <Fragment key={permission.id}>
+              <MobileDisclosureCard
+                className="lg:hidden"
+                summary={(
+                  <div>
+                    <p className="break-all font-mono text-sm text-white">{permission.repository_pattern}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {permission.can_pull ? <Badge tone="emerald">Pull</Badge> : null}
+                      {permission.can_push ? <Badge tone="cyan">Push</Badge> : null}
+                      {permission.can_delete ? <Badge tone="amber">Delete tag</Badge> : null}
+                    </div>
+                  </div>
+                )}
+              >
+                <div className="flex flex-wrap gap-2">
+                  <Badge tone={permission.can_pull ? "emerald" : "slate"}>{permission.can_pull ? "Pull" : "No pull"}</Badge>
+                  <Badge tone={permission.can_push ? "cyan" : "slate"}>{permission.can_push ? "Push" : "No push"}</Badge>
+                  <Badge tone={permission.can_delete ? "amber" : "slate"}>{permission.can_delete ? "Delete tag" : "No delete"}</Badge>
+                </div>
+              </MobileDisclosureCard>
+              <div className="hidden rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 lg:block">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
+                  <p className="break-all font-mono text-sm text-white">{permission.repository_pattern}</p>
                   <div className="flex flex-wrap gap-2">
                     <Badge tone={permission.can_pull ? "emerald" : "slate"}>{permission.can_pull ? "Pull" : "No pull"}</Badge>
                     <Badge tone={permission.can_push ? "cyan" : "slate"}>{permission.can_push ? "Push" : "No push"}</Badge>
@@ -212,18 +254,31 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
                   </div>
                 </div>
               </div>
+              </Fragment>
             )) : (
               <EmptyState title="No repository permissions" description="This user does not currently have explicit repository access rules." />
             )}
           </div>
-        </Panel>
+        </MobileCollapsiblePanel>
 
-        <Panel className="p-6">
+        <MobileCollapsiblePanel className="p-4 sm:p-6" title="Recent activity" summaryMeta={`${recentActivity.length} events`}>
           <PanelHeader title="Recent activity" description="Latest user-related audit events." />
           <div className="mt-4 space-y-3">
             {recentActivity.length ? recentActivity.map((event) => (
-              <div key={event.id} className="rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4">
-                <div className="flex items-center justify-between gap-4">
+              <Fragment key={event.id}>
+              <MobileDisclosureCard
+                className="lg:hidden"
+                summary={(
+                  <div>
+                    <p className="text-sm font-medium text-white">{event.action}</p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">{formatDateTime(event.created_at, { timeZone })}</p>
+                  </div>
+                )}
+              >
+                <MobileField label="Actor">{event.actor_label || event.actor_type}</MobileField>
+              </MobileDisclosureCard>
+              <div className="hidden rounded-lg border border-white/10 bg-slate-950/60 px-4 py-4 lg:block">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                   <p className="text-sm font-medium text-white">{event.action}</p>
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{formatDateTime(event.created_at, { timeZone })}</p>
                 </div>
@@ -231,6 +286,7 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
                   Actor: {event.actor_label || event.actor_type}
                 </p>
               </div>
+              </Fragment>
             )) : (
               <EmptyState title="No recent activity" description="No user-related audit events were found for this profile." />
             )}
@@ -244,7 +300,7 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
               hrefForPage={buildActivityPageHref}
             />
           ) : null}
-        </Panel>
+        </MobileCollapsiblePanel>
       </div>
 
       <FormDialog

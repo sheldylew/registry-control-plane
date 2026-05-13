@@ -17,6 +17,30 @@ function readCookie(name) {
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
 }
 
+const maintenanceModes = [
+  {
+    value: "analyze",
+    label: "Analyze",
+    badge: "Safe",
+    badgeTone: "emerald",
+    detail: "Non-destructive analysis only. Records current storage usage and leaves the registry running.",
+  },
+  {
+    value: "standard",
+    label: "Run garbage collection",
+    badge: "Gate",
+    badgeTone: "cyan",
+    detail: "Enables the registry maintenance gate, runs official garbage collection locally, then reopens /v2/ traffic.",
+  },
+  {
+    value: "aggressive",
+    label: "Aggressive cleanup",
+    badge: "Destructive",
+    badgeTone: "amber",
+    detail: "Enables the registry maintenance gate, runs garbage collection with untagged cleanup, prunes empty directories, then reopens /v2/ traffic.",
+  },
+];
+
 export default function MaintenancePanel({ logRetentionDays }) {
   const router = useRouter();
   const [mode, setMode] = useState("analyze");
@@ -113,9 +137,48 @@ export default function MaintenancePanel({ logRetentionDays }) {
     router.refresh();
   }
 
+  function renderRebuildControls() {
+    return (
+      <>
+        {rebuildMessage ? <Alert tone="emerald" className="mt-4">{rebuildMessage}</Alert> : null}
+        {rebuildError ? <Alert tone="rose" className="mt-4">{rebuildError}</Alert> : null}
+        <Button
+          type="button"
+          onClick={onRebuildCache}
+          disabled={rebuildPending}
+          loading={rebuildPending}
+          variant="soft"
+          className="mt-5 w-full justify-center sm:w-auto"
+        >
+          {rebuildPending ? null : <ArrowPathIcon className="h-4 w-4" />}
+          {rebuildPending ? "Starting..." : "Rebuild registry state"}
+        </Button>
+      </>
+    );
+  }
+
+  function renderPruneControls() {
+    return (
+      <>
+        {pruneMessage ? <Alert tone="emerald" className="mt-4">{pruneMessage}</Alert> : null}
+        {pruneError ? <Alert tone="rose" className="mt-4">{pruneError}</Alert> : null}
+        <Button
+          type="button"
+          onClick={onPruneLogs}
+          disabled={prunePending}
+          loading={prunePending}
+          variant="secondary"
+          className="mt-5 w-full justify-center sm:w-auto"
+        >
+          {prunePending ? "Pruning..." : "Prune old logs now"}
+        </Button>
+      </>
+    );
+  }
+
   return (
-    <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <Panel as="form" onSubmit={onSubmit} className="p-6">
+    <section id="maintenance-actions" className="grid gap-6 scroll-mt-24 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <Panel as="form" onSubmit={onSubmit} className="p-4 sm:p-6">
         <PanelHeader
           eyebrow="Garbage collection"
           title="Schedule registry maintenance"
@@ -123,26 +186,10 @@ export default function MaintenancePanel({ logRetentionDays }) {
         />
 
         <div className="mt-6 grid gap-3">
-          {[
-            {
-              value: "analyze",
-              label: "Analyze",
-              detail: "Non-destructive analysis only. Records current storage usage and leaves the registry running.",
-            },
-            {
-              value: "standard",
-              label: "Run garbage collection",
-              detail: "Enables the registry maintenance gate, runs official garbage collection locally, then reopens /v2/ traffic.",
-            },
-            {
-              value: "aggressive",
-              label: "Aggressive cleanup",
-              detail: "Enables the registry maintenance gate, runs garbage collection with untagged cleanup, prunes empty directories, then reopens /v2/ traffic.",
-            },
-          ].map((option) => (
+          {maintenanceModes.map((option) => (
             <label
               key={option.value}
-              className={`rounded-lg border px-4 py-4 transition ${mode === option.value ? "border-cyan-400/40 bg-cyan-400/10" : "border-white/10 bg-slate-950/60"}`}
+              className={`rounded-lg border px-3 py-3 transition sm:px-4 sm:py-4 ${mode === option.value ? "border-cyan-400/40 bg-cyan-400/10" : "border-white/10 bg-slate-950/60"}`}
             >
               <div className="flex items-start gap-3">
                 <input
@@ -153,9 +200,12 @@ export default function MaintenancePanel({ logRetentionDays }) {
                   onChange={(event) => setMode(event.target.value)}
                   className="mt-1"
                 />
-                <div>
-                  <p className="text-sm font-semibold text-white">{option.label}</p>
-                  <p className="mt-1 text-sm text-slate-300">{option.detail}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-white">{option.label}</p>
+                    <Badge tone={option.badgeTone}>{option.badge}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">{option.detail}</p>
                 </div>
               </div>
             </label>
@@ -169,32 +219,51 @@ export default function MaintenancePanel({ logRetentionDays }) {
           disabled={pending}
           loading={pending}
           variant="soft"
-          className="mt-5"
+          className="mt-5 w-full justify-center sm:w-auto"
         >
           {pending ? "Submitting..." : "Create maintenance job"}
         </Button>
       </Panel>
 
-      <div className="space-y-6">
+      <div className="space-y-3 lg:hidden">
+        <details className="group rounded-lg border border-white/10 bg-slate-900/80 p-4 shadow-sm shadow-slate-950/20">
+          <summary className="cursor-pointer list-none marker:hidden">
+            <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Registry state</span>
+            <span className="mt-2 block text-lg font-semibold text-white">Rebuild registry state</span>
+            <span className="mt-2 block text-sm leading-6 text-slate-300">
+              Walk the registry catalog and repair missed notification updates.
+            </span>
+            <span className="mt-3 inline-flex text-sm font-medium text-cyan-200 group-open:hidden">Open rebuild action</span>
+            <span className="mt-3 hidden text-sm font-medium text-cyan-200 group-open:inline-flex">Hide rebuild action</span>
+          </summary>
+          <div className="mt-4 border-t border-white/10 pt-4">{renderRebuildControls()}</div>
+        </details>
+
+        <details className="group rounded-lg border border-white/10 bg-slate-900/80 p-4 shadow-sm shadow-slate-950/20">
+          <summary className="cursor-pointer list-none marker:hidden">
+            <span className="flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Log retention</span>
+              <Badge tone="cyan">{logRetentionDays} days</Badge>
+            </span>
+            <span className="mt-2 block text-lg font-semibold text-white">Prune retained logs</span>
+            <span className="mt-2 block text-sm leading-6 text-slate-300">
+              Delete audit and completed maintenance rows older than retention.
+            </span>
+            <span className="mt-3 inline-flex text-sm font-medium text-cyan-200 group-open:hidden">Open prune action</span>
+            <span className="mt-3 hidden text-sm font-medium text-cyan-200 group-open:inline-flex">Hide prune action</span>
+          </summary>
+          <div className="mt-4 border-t border-white/10 pt-4">{renderPruneControls()}</div>
+        </details>
+      </div>
+
+      <div className="hidden space-y-6 lg:block">
         <Panel as="article" className="p-6">
           <PanelHeader
             eyebrow="Registry state"
             title="Rebuild registry state"
             description="Walk the registry catalog, refresh repository/tag state, and repair missed notification updates."
           />
-          {rebuildMessage ? <Alert tone="emerald" className="mt-4">{rebuildMessage}</Alert> : null}
-          {rebuildError ? <Alert tone="rose" className="mt-4">{rebuildError}</Alert> : null}
-          <Button
-            type="button"
-            onClick={onRebuildCache}
-            disabled={rebuildPending}
-            loading={rebuildPending}
-            variant="soft"
-            className="mt-5"
-          >
-            {rebuildPending ? null : <ArrowPathIcon className="h-4 w-4" />}
-            {rebuildPending ? "Starting..." : "Rebuild registry state"}
-          </Button>
+          {renderRebuildControls()}
         </Panel>
 
         <Panel as="article" className="p-6">
@@ -204,18 +273,7 @@ export default function MaintenancePanel({ logRetentionDays }) {
             description={`Delete audit events and completed maintenance jobs older than ${logRetentionDays} days without scheduling a registry maintenance run.`}
             action={<Badge tone="cyan">{logRetentionDays} days</Badge>}
           />
-          {pruneMessage ? <Alert tone="emerald" className="mt-4">{pruneMessage}</Alert> : null}
-          {pruneError ? <Alert tone="rose" className="mt-4">{pruneError}</Alert> : null}
-          <Button
-            type="button"
-            onClick={onPruneLogs}
-            disabled={prunePending}
-            loading={prunePending}
-            variant="secondary"
-            className="mt-5"
-          >
-            {prunePending ? "Pruning..." : "Prune old logs now"}
-          </Button>
+          {renderPruneControls()}
         </Panel>
       </div>
     </section>

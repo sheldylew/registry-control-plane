@@ -14,6 +14,7 @@ import { Field, Input } from "@/app/components/ui/form";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import Pagination from "@/app/components/ui/pagination";
 import Switch from "@/app/components/ui/switch";
+import { MobileCardList, MobileDisclosureCard, MobileField, Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
 import {
   FORM_EMAIL_MAX_LENGTH,
   FORM_NAME_MAX_LENGTH,
@@ -229,7 +230,7 @@ export default function UsersPanel({
 
   return (
     <>
-      <Panel className="p-6">
+      <Panel className="p-4 sm:p-6">
         <PanelHeader
           title="Users"
           description="Review operator identities first, then open focused create, reset, and profile actions when needed."
@@ -238,6 +239,7 @@ export default function UsersPanel({
               type="button"
               onClick={openDialog}
               size="lg"
+              className="w-full sm:w-auto"
             >
               Create user
             </Button>
@@ -246,17 +248,89 @@ export default function UsersPanel({
 
         {statusError ? <Alert tone="rose" className="mt-6">{statusError}</Alert> : null}
 
-        <div className="mt-6 overflow-hidden rounded-lg border border-white/10">
-          <table className="min-w-full divide-y divide-white/10 text-sm">
-            <thead className="bg-white/5 text-xs uppercase tracking-[0.16em] text-slate-400">
+        <div className="mt-6">
+          <TableShell
+            mobileCards={(
+              <MobileCardList>
+                {initialUsers.map((user) => (
+                  <MobileDisclosureCard
+                    key={user.id}
+                    summary={(
+                      <>
+                        <Link
+                          prefetch={false}
+                          href={`/admin/users/${user.id}`}
+                          className="block truncate text-base font-semibold text-white transition hover:text-cyan-200"
+                        >
+                          {user.username}
+                        </Link>
+                        <p className="mt-1 break-all text-sm text-slate-400">{user.email}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Badge tone={user.is_active ? "emerald" : "amber"} dot>
+                            {user.is_active ? "Active" : "Disabled"}
+                          </Badge>
+                          <Badge tone={user.is_admin ? "cyan" : "slate"}>
+                            {user.is_admin ? "Admin" : "User"}
+                          </Badge>
+                        </div>
+                      </>
+                    )}
+                  >
+                    <dl className="mt-4 grid gap-4">
+                      <MobileField label="Role">
+                        <Badge tone={user.is_admin ? "cyan" : "slate"}>
+                          {user.is_admin ? "Admin" : "User"}
+                        </Badge>
+                      </MobileField>
+                      <MobileField label="Status">
+                        <Switch
+                          checked={user.is_active}
+                          onChange={(nextActive) => setUserActive(user, nextActive)}
+                          disabled={user.id === currentUserId && user.is_active}
+                          loading={pendingStatusUserId === user.id}
+                          srLabel={`Set ${user.username} ${user.is_active ? "inactive" : "active"}`}
+                          label={user.is_active ? "Enabled" : "Disabled"}
+                          description={user.id === currentUserId ? "Current operator" : "Access toggle"}
+                          align="start"
+                        />
+                      </MobileField>
+                    </dl>
+                    <div className="mt-4 flex items-center gap-2">
+                      <Button
+                        as={Link}
+                        href={`/admin/users/${user.id}`}
+                        prefetch={false}
+                        variant="soft"
+                        size="sm"
+                        className="flex-1 justify-center"
+                      >
+                        View profile
+                      </Button>
+                      <ActionMenu
+                        items={[
+                          {
+                            label: "Reset password",
+                            onSelect: () => openPasswordReset(user),
+                          },
+                        ]}
+                        label={`Actions for ${user.username}`}
+                      />
+                    </div>
+                  </MobileDisclosureCard>
+                ))}
+              </MobileCardList>
+            )}
+          >
+          <Table>
+            <TableHead>
               <tr>
                 <th className="px-4 py-3 text-left font-medium">User</th>
                 <th className="px-4 py-3 text-left font-medium">Role</th>
                 <th className="px-4 py-3 text-left font-medium">Status</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-white/10">
+            </TableHead>
+            <TableBody>
               {initialUsers.length ? initialUsers.map((user) => (
                 <tr key={user.id}>
                   <td className="px-4 py-3">
@@ -311,8 +385,9 @@ export default function UsersPanel({
                   </td>
                 </tr>
               )) : null}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
+          </TableShell>
         </div>
         {!initialUsers.length ? (
           <div className="mt-6">

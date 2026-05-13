@@ -1,11 +1,15 @@
+import { Fragment } from "react";
+
 import MaintenancePanel from "@/app/components/maintenance-panel";
 import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
 import Disclosure from "@/app/components/ui/disclosure";
 import EmptyState from "@/app/components/ui/empty-state";
-import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import FloatingButtonGroup from "@/app/components/ui/floating-button-group";
+import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
 import Pagination from "@/app/components/ui/pagination";
 import StatCard from "@/app/components/ui/stat-card";
+import { MobileDisclosureCard, MobileField } from "@/app/components/ui/table";
 import { formatDateTime } from "@/app/lib/date-format";
 import { apiFetch } from "@/app/lib/server-api";
 import { getUiTimezone } from "@/app/lib/ui-settings";
@@ -35,6 +39,16 @@ function summarizeMode(job) {
     return "Aggressive";
   }
   return "Standard";
+}
+
+function summarizeModeTone(job) {
+  if (job.dry_run) {
+    return "emerald";
+  }
+  if (job.delete_untagged || job.prune_empty_dirs) {
+    return "amber";
+  }
+  return "cyan";
 }
 
 function buildPageHref(page) {
@@ -72,68 +86,91 @@ export default async function AdminMaintenancePage({ searchParams }) {
 
   return (
     <div className="space-y-6">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <StatCard label="Registry status" value={payload.registry_status} />
-        <StatCard
-          label="Storage usage"
-          value={formatBytes(payload.storage_usage_bytes)}
-          detail={storageUsageDetail}
-          badge={payload.storage_usage_stale ? "Stale" : null}
-          badgeTone="amber"
-        />
-        <StatCard
-          label="Manifest summaries"
-          value={payload.cache.summaries_total}
-          detail={manifestSummaryDetail}
-          tone="cyan"
-        />
-        <StatCard
-          label="Refreshed in 24h"
-          value={payload.cache.seen_last_24h}
-          detail={manifestFreshnessDetail}
-          tone="emerald"
-        />
-        <StatCard
-          label="Last job"
-          value={payload.last_job ? payload.last_job.status : "None"}
-          detail={payload.last_job ? summarizeMode(payload.last_job) : "No maintenance jobs yet"}
-        />
-      </section>
+      <FloatingButtonGroup
+        items={[
+          { href: "#maintenance-actions", label: "Actions" },
+          { href: "#maintenance-jobs", label: "Jobs" },
+          { href: "#maintenance-rebuilds", label: "Rebuilds" },
+        ]}
+      />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          label="Active repositories"
-          value={payload.registry_state.active_repositories}
-          detail="Backed by the app database."
-          tone="cyan"
+      <Panel as="section" className="p-4 sm:p-6">
+        <PanelHeader
+          eyebrow="Maintenance status"
+          title="Registry health and state"
+          description="Review storage, manifest cache, registry state, and recent maintenance outcomes before running jobs."
         />
-        <StatCard
-          label="Active tags"
-          value={payload.registry_state.active_tags}
-          detail="Available without registry scans."
-          tone="emerald"
-        />
-        <StatCard
-          label="Inbox queued"
-          value={payload.registry_state.inbox_queued}
-          detail="Registry events awaiting processing."
-        />
-        <StatCard
-          label="Inbox failed"
-          value={payload.registry_state.inbox_failed}
-          detail="Needs rebuild or retry review."
-          tone={payload.registry_state.inbox_failed ? "rose" : "slate"}
-        />
-        <StatCard
-          label="Last rebuild"
-          value={payload.registry_state.last_rebuild ? payload.registry_state.last_rebuild.status : "None"}
-          detail={lastRebuildDetail}
-        />
-      </section>
+        <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-4 md:grid-cols-3 xl:grid-cols-5">
+          <StatCard label="Registry status" value={payload.registry_status} />
+          <StatCard
+            label="Storage usage"
+            value={formatBytes(payload.storage_usage_bytes)}
+            detail={storageUsageDetail}
+            badge={payload.storage_usage_stale ? "Stale" : null}
+            badgeTone="amber"
+          />
+          <StatCard
+            label="Manifest summaries"
+            value={payload.cache.summaries_total}
+            detail={manifestSummaryDetail}
+            tone="cyan"
+          />
+          <StatCard
+            label="Refreshed in 24h"
+            value={payload.cache.seen_last_24h}
+            detail={manifestFreshnessDetail}
+            tone="emerald"
+          />
+          <StatCard
+            label="Last job"
+            value={payload.last_job ? payload.last_job.status : "None"}
+            detail={payload.last_job ? summarizeMode(payload.last_job) : "No maintenance jobs yet"}
+            detailBadge={Boolean(payload.last_job)}
+            detailBadgeTone={payload.last_job ? summarizeModeTone(payload.last_job) : "slate"}
+          />
+          <StatCard
+            label="Active repositories"
+            value={payload.registry_state.active_repositories}
+            detail="Backed by the app database."
+            tone="cyan"
+          />
+          <StatCard
+            label="Active tags"
+            value={payload.registry_state.active_tags}
+            detail="Available without registry scans."
+            tone="emerald"
+          />
+          <StatCard
+            label="Inbox queued"
+            value={payload.registry_state.inbox_queued}
+            detail="Registry events awaiting processing."
+          />
+          <StatCard
+            label="Inbox failed"
+            value={payload.registry_state.inbox_failed}
+            detail="Needs rebuild or retry review."
+            tone={payload.registry_state.inbox_failed ? "rose" : "slate"}
+          />
+          <StatCard
+            label="Last rebuild"
+            value={payload.registry_state.last_rebuild ? payload.registry_state.last_rebuild.status : "None"}
+            detail={lastRebuildDetail}
+          />
+        </div>
+      </Panel>
 
       <MaintenancePanel logRetentionDays={payload.log_retention_days} />
 
-      <Panel as="section" className="p-6">
+      <MobileCollapsiblePanel
+        id="maintenance-jobs"
+        as="section"
+        className="scroll-mt-24 p-4 sm:p-6"
+        eyebrow="Job history"
+        title="Recent maintenance jobs"
+        summaryMeta={`${payload.pagination.total} jobs`}
+        openLabel="Open job history"
+        hideLabel="Hide job history"
+      >
         <PanelHeader
           eyebrow="Job history"
           title="Recent maintenance jobs"
@@ -142,18 +179,56 @@ export default async function AdminMaintenancePage({ searchParams }) {
         <div className="mt-6 space-y-4">
           {payload.jobs.length ? (
             payload.jobs.map((job) => (
-              <article key={job.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <Fragment key={job.id}>
+              <MobileDisclosureCard
+                className="lg:hidden"
+                summary={(
                   <div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-white">Job #{job.id}</p>
                       <Badge>{summarizeMode(job)}</Badge>
                       <Badge tone={job.status === "failed" ? "rose" : "slate"}>{job.status}</Badge>
                     </div>
-                    <p className="mt-2 text-sm text-slate-400">
+                    <p className="mt-1 text-xs text-slate-400">
+                      Started {formatDateTime(job.started_at, { timeZone, fallback: "Pending" })}
+                    </p>
+                  </div>
+                )}
+              >
+                <dl className="grid gap-3">
+                  <MobileField label="Finished">{formatDateTime(job.finished_at, { timeZone, fallback: "Pending" })}</MobileField>
+                  <MobileField label="Before">{formatBytes(job.bytes_before)}</MobileField>
+                  <MobileField label="After">{formatBytes(job.bytes_after)}</MobileField>
+                </dl>
+                {job.error ? (
+                  <Alert tone="rose" className="mt-4">{job.error}</Alert>
+                ) : null}
+                {job.log_output ? (
+                  <div className="mt-4">
+                    <Disclosure
+                      titleClosed="View output"
+                      titleOpen="Hide output"
+                      meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
+                    >
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200">
+                        {job.log_output}
+                      </pre>
+                    </Disclosure>
+                  </div>
+                ) : null}
+              </MobileDisclosureCard>
+              <article className="hidden rounded-lg border border-white/10 bg-slate-950/60 p-4 sm:p-5 lg:block">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <p className="text-sm font-semibold text-white">Job #{job.id}</p>
+                      <Badge>{summarizeMode(job)}</Badge>
+                      <Badge tone={job.status === "failed" ? "rose" : "slate"}>{job.status}</Badge>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
                       Started {formatDateTime(job.started_at, { timeZone, fallback: "Pending" })}. Finished {formatDateTime(job.finished_at, { timeZone, fallback: "Pending" })}.
                     </p>
-                    <p className="mt-2 text-sm text-slate-400">
+                    <p className="mt-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-300 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:text-slate-400">
                       Before: {formatBytes(job.bytes_before)}. After: {formatBytes(job.bytes_after)}.
                     </p>
                   </div>
@@ -168,13 +243,14 @@ export default async function AdminMaintenancePage({ searchParams }) {
                       titleOpen="Hide output"
                       meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
                     >
-                      <pre className="overflow-x-auto border-t border-white/10 px-4 py-4 text-xs text-slate-200">
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200 sm:max-h-none sm:overflow-x-auto sm:whitespace-pre sm:break-normal">
                         {job.log_output}
                       </pre>
                     </Disclosure>
                   </div>
                 ) : null}
               </article>
+              </Fragment>
             ))
           ) : (
             <EmptyState
@@ -190,9 +266,18 @@ export default async function AdminMaintenancePage({ searchParams }) {
           label="jobs"
           hrefForPage={buildPageHref}
         />
-      </Panel>
+      </MobileCollapsiblePanel>
 
-      <Panel as="section" className="p-6">
+      <MobileCollapsiblePanel
+        id="maintenance-rebuilds"
+        as="section"
+        className="scroll-mt-24 p-4 sm:p-6"
+        eyebrow="Registry state"
+        title="Recent registry state rebuild jobs"
+        summaryMeta={`${payload.rebuild_jobs.length} shown`}
+        openLabel="Open rebuild jobs"
+        hideLabel="Hide rebuild jobs"
+      >
         <PanelHeader
           eyebrow="Registry state"
           title="Recent registry state rebuild jobs"
@@ -201,17 +286,54 @@ export default async function AdminMaintenancePage({ searchParams }) {
         <div className="mt-6 space-y-4">
           {payload.rebuild_jobs.length ? (
             payload.rebuild_jobs.map((job) => (
-              <article key={job.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <Fragment key={job.id}>
+              <MobileDisclosureCard
+                className="lg:hidden"
+                summary={(
                   <div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-white">Rebuild #{job.id}</p>
                       <Badge tone={job.status === "failed" ? "rose" : "slate"}>{job.status}</Badge>
                     </div>
-                    <p className="mt-2 text-sm text-slate-400">
+                    <p className="mt-1 text-xs text-slate-400">
+                      {job.repositories_scanned} repositories, {job.tags_scanned} tags
+                    </p>
+                  </div>
+                )}
+              >
+                <dl className="grid gap-3">
+                  <MobileField label="Deleted tags">{job.tags_deleted}</MobileField>
+                  <MobileField label="Started">{formatDateTime(job.started_at, { timeZone, fallback: "Pending" })}</MobileField>
+                  <MobileField label="Finished">{formatDateTime(job.finished_at, { timeZone, fallback: "Pending" })}</MobileField>
+                </dl>
+                {job.error ? (
+                  <Alert tone="rose" className="mt-4">{job.error}</Alert>
+                ) : null}
+                {job.log_output ? (
+                  <div className="mt-4">
+                    <Disclosure
+                      titleClosed="View output"
+                      titleOpen="Hide output"
+                      meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
+                    >
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200">
+                        {job.log_output}
+                      </pre>
+                    </Disclosure>
+                  </div>
+                ) : null}
+              </MobileDisclosureCard>
+              <article className="hidden rounded-lg border border-white/10 bg-slate-950/60 p-4 sm:p-5 lg:block">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <p className="text-sm font-semibold text-white">Rebuild #{job.id}</p>
+                      <Badge tone={job.status === "failed" ? "rose" : "slate"}>{job.status}</Badge>
+                    </div>
+                    <p className="mt-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-300 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:text-slate-400">
                       Repositories: {job.repositories_scanned}. Tags: {job.tags_scanned}. Deleted tags: {job.tags_deleted}.
                     </p>
-                    <p className="mt-2 text-sm text-slate-400">
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
                       Started {formatDateTime(job.started_at, { timeZone, fallback: "Pending" })}. Finished {formatDateTime(job.finished_at, { timeZone, fallback: "Pending" })}.
                     </p>
                   </div>
@@ -226,13 +348,14 @@ export default async function AdminMaintenancePage({ searchParams }) {
                       titleOpen="Hide output"
                       meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
                     >
-                      <pre className="overflow-x-auto border-t border-white/10 px-4 py-4 text-xs text-slate-200">
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200 sm:max-h-none sm:overflow-x-auto sm:whitespace-pre sm:break-normal">
                         {job.log_output}
                       </pre>
                     </Disclosure>
                   </div>
                 ) : null}
               </article>
+              </Fragment>
             ))
           ) : (
             <EmptyState
@@ -241,7 +364,7 @@ export default async function AdminMaintenancePage({ searchParams }) {
             />
           )}
         </div>
-      </Panel>
+      </MobileCollapsiblePanel>
     </div>
   );
 }

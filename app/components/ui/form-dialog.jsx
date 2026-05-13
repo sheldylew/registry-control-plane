@@ -27,12 +27,13 @@ export default function FormDialog({
           {children}
         </div>
         {error ? <Alert tone="rose" className="mt-4">{error}</Alert> : null}
-        <div className="mt-5 flex items-center justify-end gap-3">
+        <div className="mt-5 grid gap-3 sm:flex sm:items-center sm:justify-end">
           <Button
             type="button"
             onClick={onClose}
             disabled={pending}
             variant="secondary"
+            className="w-full sm:w-auto"
           >
             Cancel
           </Button>
@@ -40,6 +41,7 @@ export default function FormDialog({
             type="submit"
             disabled={pending || disabled}
             loading={pending}
+            className="w-full sm:w-auto"
           >
             {pending ? submitPendingLabel : submitLabel}
           </Button>

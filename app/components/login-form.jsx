@@ -52,59 +52,79 @@ export default function LoginForm() {
   }
 
   return (
-    <Panel as="form" onSubmit={onSubmit} className="p-8 shadow-2xl shadow-slate-950/30">
-      <h1 className="text-3xl font-semibold text-white">Sign in</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-300">
-        Use an admin account to manage users, access tokens, and robots.
-      </p>
-
-      <Field label="Username" className="mt-6">
-        <Input
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
-          required
-          maxLength={255}
-          autoComplete="username"
-        />
-      </Field>
-
-      <Field label="Password" className="mt-5">
-        <div className="relative">
-          <LightInput
-            type={showPassword ? "text" : "password"}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            className="pr-12"
-            autoComplete="current-password"
-          />
-        <Button
-          type="button"
-          onClick={() => setShowPassword((current) => !current)}
-          variant="ghost"
-          size="iconMd"
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:bg-slate-200 hover:text-slate-900"
-          aria-label={showPassword ? "Hide password" : "Show password"}
-          aria-pressed={showPassword}
-        >
-          {showPassword ? <EyeSlashIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
-        </Button>
+    <div>
+      <div className="mb-5 flex flex-col items-center text-center sm:mb-6">
+        <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-cyan-300/30 bg-slate-950/70 text-base font-semibold tracking-[0.24em] text-white shadow-lg shadow-slate-950/30">
+          RCP
         </div>
-      </Field>
+        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">
+          Registry operations
+        </p>
+      </div>
 
-      {error ? (
-        <Alert tone="rose" className="mt-4">{error}</Alert>
-      ) : null}
-
-      <Button
-        type="submit"
-        disabled={pending || !canSubmit}
-        loading={pending}
-        className="mt-6 w-full"
-        size="lg"
+      <Panel
+        as="form"
+        onSubmit={onSubmit}
+        className="p-5 shadow-2xl shadow-slate-950/30 sm:p-8 border-white/12 bg-slate-950/72 backdrop-blur-xl"
       >
-        {pending ? "Signing in..." : "Sign in"}
-      </Button>
-    </Panel>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.26em] text-cyan-300">
+            Operator sign-in
+          </p>
+          <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">Sign in</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            Use a control plane account to manage users, tokens, repository access, and robots.
+          </p>
+        </div>
+
+        <Field label="Username" className="mt-6">
+          <Input
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            required
+            maxLength={255}
+            autoComplete="username"
+          />
+        </Field>
+
+        <Field label="Password" className="mt-5">
+          <div className="relative">
+            <LightInput
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              className="pr-12"
+              autoComplete="current-password"
+            />
+          <Button
+            type="button"
+            onClick={() => setShowPassword((current) => !current)}
+            variant="ghost"
+            size="iconMd"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            aria-pressed={showPassword}
+          >
+            {showPassword ? <EyeSlashIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
+          </Button>
+          </div>
+        </Field>
+
+        {error ? (
+          <Alert tone="rose" className="mt-4">{error}</Alert>
+        ) : null}
+
+        <Button
+          type="submit"
+          disabled={pending || !canSubmit}
+          loading={pending}
+          className="mt-6 w-full"
+          size="lg"
+        >
+          {pending ? "Signing in..." : "Sign in"}
+        </Button>
+      </Panel>
+    </div>
   );
 }

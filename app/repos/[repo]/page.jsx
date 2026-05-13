@@ -6,8 +6,16 @@ import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
 import EmptyState from "@/app/components/ui/empty-state";
 import Pagination from "@/app/components/ui/pagination";
-import { Panel, PanelHeader } from "@/app/components/ui/panel";
-import { Table, TableBody, TableHead, TableShell } from "@/app/components/ui/table";
+import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
+import {
+  MobileCardList,
+  MobileDisclosureCard,
+  MobileField,
+  Table,
+  TableBody,
+  TableHead,
+  TableShell,
+} from "@/app/components/ui/table";
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
 import RepositoryVisibilityPanel from "@/app/components/repository-visibility-panel";
 import { formatRelativeTime } from "@/app/lib/date-format";
@@ -104,7 +112,7 @@ export default async function RepoDetailPage({ params, searchParams }) {
 
   return (
     <div className="space-y-6">
-      <Panel className="p-6">
+      <Panel className="p-4 sm:p-6">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.95fr)] xl:items-start">
           <PanelHeader
             eyebrow="Repository"
@@ -135,11 +143,95 @@ export default async function RepoDetailPage({ params, searchParams }) {
         </div>
       </Panel>
 
-      <Panel className="p-6">
+      <MobileCollapsiblePanel
+        className="p-4 sm:p-6"
+        title="Tags"
+        summaryMeta={`${payload.pagination.total} total`}
+      >
         <PanelHeader title="Tags" action={<Badge tone="cyan">{payload.pagination.total} total</Badge>} />
         {payload.tags.length ? (
           <div className="mt-4">
-            <TableShell>
+            <TableShell
+              mobileCards={(
+                <MobileCardList>
+                  {payload.tags.map((tag) => (
+                    <MobileDisclosureCard
+                      key={tag.tag}
+                      summary={(
+                        <>
+                          <Link
+                            href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}`}
+                            prefetch={false}
+                            className="inline-flex max-w-full rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300"
+                          >
+                            <span className="truncate">{tag.tag}</span>
+                          </Link>
+                          <p className="mt-2 text-xs text-slate-400">
+                            Created {formatRelativeTime(tag.created_at, { timeZone })}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Badge tone="slate">{formatBytes(tag.total_size)}</Badge>
+                            {tag.history_count === null ? null : <Badge tone="cyan">{tag.history_count} history</Badge>}
+                          </div>
+                        </>
+                      )}
+                    >
+
+                      <dl className="mt-4 grid gap-4">
+                        <MobileField label="Content digest">
+                          <span className="break-all font-mono text-xs" title={tag.digest || "Unavailable"}>
+                            {formatDigest(tag.digest)}
+                          </span>
+                        </MobileField>
+                        <MobileField label="Platforms">
+                          <div className="flex flex-wrap gap-2">
+                            {tag.architectures.length ? (
+                              tag.architectures.map((arch) => (
+                                <span
+                                  key={arch}
+                                  className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-200"
+                                >
+                                  {formatPlatformLabel(arch)}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-slate-500">Unknown platform</span>
+                            )}
+                          </div>
+                        </MobileField>
+                      </dl>
+
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        <Button
+                          as={Link}
+                          href={`/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/history`}
+                          prefetch={false}
+                          variant="secondary"
+                          size="sm"
+                          className="justify-center"
+                        >
+                          History{tag.history_count === null ? "" : ` (${tag.history_count})`}
+                        </Button>
+                        {payload.can_delete_tag ? (
+                          <RepoDeletePanel
+                            compact
+                            title="Delete tag"
+                            description="This resolves the tag to its manifest digest and deletes that manifest from the registry. Disk space is not reclaimed until registry garbage collection runs."
+                            warning={buildSharedManifestWarning(tag)}
+                            confirmationValue={`${payload.repo}:${tag.tag}`}
+                            requireConfirmation={false}
+                            endpoint={`/api/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/delete`}
+                            redirectPath={buildTagDeleteRedirectPath(payload.repo, payload.pagination)}
+                            buttonLabel="Delete"
+                            successLabel="Deleting..."
+                          />
+                        ) : null}
+                      </div>
+                    </MobileDisclosureCard>
+                  ))}
+                </MobileCardList>
+              )}
+            >
               <Table>
                 <TableHead>
                   <tr>
@@ -248,7 +340,7 @@ export default async function RepoDetailPage({ params, searchParams }) {
           label="tags"
           hrefForPage={(page) => buildPageHref(payload.repo, page)}
         />
-      </Panel>
+      </MobileCollapsiblePanel>
     </div>
   );
 }

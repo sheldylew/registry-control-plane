@@ -139,26 +139,33 @@ function RepositoryPagination({ pagination, onNavigate, onPrefetch }) {
   }
 
   return (
-    <div className="mt-6 flex items-center justify-between border-t border-white/10 px-4 py-3 sm:px-6">
-      <div className="flex flex-1 justify-between sm:hidden">
-        <Link
-          {...linkProps(Math.max(currentPage - 1, 1))}
-          aria-disabled={currentPage <= 1}
-          className={`relative inline-flex items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
-            currentPage <= 1 ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
-          }`}
-        >
-          Previous
-        </Link>
-        <Link
-          {...linkProps(Math.min(currentPage + 1, totalPages))}
-          aria-disabled={currentPage >= totalPages}
-          className={`relative ml-3 inline-flex items-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
-            currentPage >= totalPages ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
-          }`}
-        >
-          Next
-        </Link>
+    <div className="mt-6 border-t border-white/10 px-4 py-3 sm:flex sm:items-center sm:justify-between sm:px-6">
+      <div className="space-y-3 sm:hidden">
+        <p className="text-center text-xs text-slate-400">
+          Showing <span className="font-medium text-white">{start}</span> to{" "}
+          <span className="font-medium text-white">{end}</span> of{" "}
+          <span className="font-medium text-white">{pagination.total}</span> repositories
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <Link
+            {...linkProps(Math.max(currentPage - 1, 1))}
+            aria-disabled={currentPage <= 1}
+            className={`relative inline-flex items-center justify-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
+              currentPage <= 1 ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
+            }`}
+          >
+            Previous
+          </Link>
+          <Link
+            {...linkProps(Math.min(currentPage + 1, totalPages))}
+            aria-disabled={currentPage >= totalPages}
+            className={`relative inline-flex items-center justify-center rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium ${
+              currentPage >= totalPages ? "pointer-events-none text-slate-500 opacity-50" : "text-slate-200 hover:bg-white/10"
+            }`}
+          >
+            Next
+          </Link>
+        </div>
       </div>
       <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
         <p className="text-sm text-slate-300">
@@ -299,7 +306,7 @@ export default function RepositoriesPanel({ initialPayload }) {
   const isRefreshing = pendingPage !== null;
 
   return (
-    <Panel className="p-6" aria-busy={isRefreshing || undefined}>
+    <Panel className="p-4 sm:p-6" aria-busy={isRefreshing || undefined}>
       <PanelHeader
         title="Visible repositories"
         action={<Badge tone="cyan">{payload.pagination.total} visible</Badge>}

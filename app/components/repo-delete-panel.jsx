@@ -97,7 +97,7 @@ export default function RepoDeletePanel({
   return (
     <>
       {compact ? null : (
-        <div className="rounded-lg border border-rose-400/20 bg-rose-500/5 p-6">
+        <div className="rounded-lg border border-rose-400/20 bg-rose-500/5 p-4 sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <p className="text-sm font-medium uppercase tracking-[0.18em] text-rose-200">
               {title}
@@ -142,12 +142,13 @@ export default function RepoDeletePanel({
           {error ? (
             <p className="mt-3 text-sm text-rose-200">{error}</p>
           ) : null}
-          <div className="mt-5 flex items-center justify-end gap-3">
+          <div className="mt-5 grid gap-3 sm:flex sm:items-center sm:justify-end">
             <Button
               type="button"
               onClick={closeDialog}
               disabled={pending}
               variant="secondary"
+              className="w-full sm:w-auto"
             >
               Cancel
             </Button>
@@ -156,6 +157,7 @@ export default function RepoDeletePanel({
               disabled={pending || !canSubmit}
               loading={pending}
               variant="danger"
+              className="w-full sm:w-auto"
             >
               {pending ? successLabel : buttonLabel}
             </Button>

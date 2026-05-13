@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import Alert from "@/app/components/ui/alert";
@@ -11,8 +11,9 @@ import DetailList from "@/app/components/ui/detail-list";
 import EmptyState from "@/app/components/ui/empty-state";
 import FormDialog from "@/app/components/ui/form-dialog";
 import { Field, Input } from "@/app/components/ui/form";
-import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
 import Switch from "@/app/components/ui/switch";
+import { MobileDisclosureCard, MobileField } from "@/app/components/ui/table";
 import RepoDeletePanel from "@/app/components/repo-delete-panel";
 import {
   FORM_DESCRIPTION_MAX_LENGTH,
@@ -182,12 +183,12 @@ export default function RobotsPanel({ initialRobots }) {
   return (
     <>
       <div className="space-y-6">
-        <Panel className="p-6">
+        <Panel className="p-4 sm:p-6">
           <PanelHeader
             title="Robot accounts"
             description="Keep robot administration in presentation mode by default, then use focused create and token flows when automation needs change."
             action={(
-              <Button type="button" onClick={openCreateDialog} size="lg">
+              <Button type="button" onClick={openCreateDialog} size="lg" className="w-full sm:w-auto">
                 Create robot
               </Button>
             )}
@@ -201,18 +202,120 @@ export default function RobotsPanel({ initialRobots }) {
           {statusError ? <Alert tone="rose" className="mt-6">{statusError}</Alert> : null}
         </Panel>
 
+        <MobileCollapsiblePanel className="p-4 lg:p-0 lg:border-0 lg:bg-transparent lg:shadow-none" title="Robot account list" summaryMeta={`${initialRobots.length} robots`}>
         <div className="space-y-4">
           {initialRobots.length ? initialRobots.map((robot) => {
             const activeTokenCount = robot.tokens.filter((token) => !token.revoked_at).length;
             return (
+              <Fragment key={robot.id}>
+              <MobileDisclosureCard
+                className="lg:hidden"
+                summary={(
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-base font-semibold text-white">{robot.name}</p>
+                      <Badge tone={robot.is_active ? "emerald" : "amber"} dot>
+                        {robot.is_active ? "Active" : "Disabled"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-400">{robot.description || "No description."}</p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-500">
+                      {activeTokenCount} active token{activeTokenCount === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                )}
+              >
+                <div className="grid gap-2">
+                  <Button as={Link} href={`/admin/robots/${robot.id}`} prefetch={false} variant="soft" size="xs" className="w-full">
+                    View profile
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => openTokenDialog(robot)}
+                    variant="secondary"
+                    size="xs"
+                    className="w-full"
+                  >
+                    Create token
+                  </Button>
+                  <RepoDeletePanel
+                    title={`Delete robot ${robot.name}`}
+                    description="This permanently removes the robot account and all of its tokens."
+                    confirmationLabel="Type the robot name to confirm"
+                    confirmationValue={robot.name}
+                    endpoint={`/api/admin/robots/${robot.id}/delete`}
+                    buttonLabel="Delete robot"
+                    successLabel="Deleting..."
+                    redirectPath="/admin/robots"
+                    compact
+                  />
+                </div>
+                <div className="mt-4">
+                  <DetailList
+                    compact
+                    items={[
+                      {
+                        label: "Status control",
+                        value: (
+                          <Switch
+                            checked={robot.is_active}
+                            onChange={(nextActive) => setRobotActive(robot, nextActive)}
+                            loading={pendingRobotId === robot.id}
+                            label={robot.is_active ? "Enabled" : "Disabled"}
+                            description="Toggle robot access"
+                            align="start"
+                          />
+                        ),
+                      },
+                      {
+                        label: "Active tokens",
+                        value: `${activeTokenCount} active token${activeTokenCount === 1 ? "" : "s"}`,
+                      },
+                    ]}
+                  />
+                </div>
+                <div className="mt-4 space-y-2">
+                  {robot.tokens.length ? robot.tokens.map((token) => (
+                    <MobileDisclosureCard
+                      key={token.id}
+                      summary={(
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="break-all text-sm font-medium text-white">{token.name}</p>
+                            {token.revoked_at ? <Badge>Revoked</Badge> : <Badge tone="emerald">Active</Badge>}
+                          </div>
+                          <p className="mt-1 truncate font-mono text-xs text-slate-400">prefix: {token.token_prefix}</p>
+                        </div>
+                      )}
+                    >
+                      <MobileField label="Token prefix"><span className="break-all font-mono">{token.token_prefix}</span></MobileField>
+                      {!token.revoked_at ? (
+                        <Button
+                          type="button"
+                          onClick={() => revokeRobotToken(robot.id, token.id)}
+                          variant="warning"
+                          size="xs"
+                          loading={pendingTokenId === token.id}
+                          className="mt-4 w-full"
+                        >
+                          Revoke
+                        </Button>
+                      ) : null}
+                    </MobileDisclosureCard>
+                  )) : (
+                    <div className="rounded-lg border border-dashed border-white/10 bg-slate-950/40 px-4 py-4 text-sm text-slate-400">
+                      No tokens issued yet.
+                    </div>
+                  )}
+                </div>
+              </MobileDisclosureCard>
               <Panel
                 as="article"
-                key={robot.id}
-                className="p-6"
+                className="hidden p-4 sm:p-6 lg:block"
               >
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
                       <Link prefetch={false} href={`/admin/robots/${robot.id}`} className="text-lg font-semibold text-white transition hover:text-cyan-200">
                         {robot.name}
                       </Link>
@@ -222,8 +325,8 @@ export default function RobotsPanel({ initialRobots }) {
                     </div>
                     <p className="mt-2 text-sm text-slate-300">{robot.description || "No description."}</p>
                   </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <Button as={Link} href={`/admin/robots/${robot.id}`} prefetch={false} variant="soft" size="xs">
+                  <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
+                    <Button as={Link} href={`/admin/robots/${robot.id}`} prefetch={false} variant="soft" size="xs" className="w-full sm:w-auto">
                       View profile
                     </Button>
                     <Button
@@ -231,6 +334,7 @@ export default function RobotsPanel({ initialRobots }) {
                       onClick={() => openTokenDialog(robot)}
                       variant="secondary"
                       size="xs"
+                      className="w-full sm:w-auto"
                     >
                       Create token
                     </Button>
@@ -277,10 +381,10 @@ export default function RobotsPanel({ initialRobots }) {
                   {robot.tokens.length ? robot.tokens.map((token) => (
                     <li
                       key={token.id}
-                      className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-300"
+                      className="flex flex-col gap-3 rounded-lg border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                     >
-                      <div>
-                        <span>{token.name} • prefix {token.token_prefix}</span>
+                      <div className="min-w-0">
+                        <span className="break-all">{token.name} • prefix {token.token_prefix}</span>
                         {token.revoked_at ? (
                           <span className="ml-3">
                             <Badge>Revoked</Badge>
@@ -306,6 +410,7 @@ export default function RobotsPanel({ initialRobots }) {
                   )}
                 </ul>
               </Panel>
+              </Fragment>
             );
           }) : (
             <EmptyState
@@ -319,6 +424,7 @@ export default function RobotsPanel({ initialRobots }) {
             />
           )}
         </div>
+        </MobileCollapsiblePanel>
       </div>
 
       <FormDialog
