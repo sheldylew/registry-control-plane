@@ -1845,6 +1845,10 @@ def test_admin_can_update_public_registry_origin(settings) -> None:
     assert response.json()["registry_restart_required"] is True
     assert response.json()["restart_command"] == "docker compose restart registry"
     assert settings_response.status_code == 200
+    assert settings_response.json()["build"]["version"] == settings.app_version
+    assert settings_response.json()["build"]["revision"] == settings.app_revision
+    assert settings_response.json()["build"]["built_at"] == settings.app_build_time
+    assert settings_response.json()["build"]["image_tag"] == settings.app_image_tag
     assert settings_response.json()["public_registry_origin"] == "https://registry.example.com"
     assert settings_response.json()["ui_timezone"] == "America/New_York"
     assert settings_response.json()["repository_tags_page_size"] == 25

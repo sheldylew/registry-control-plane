@@ -18,6 +18,7 @@ export default async function SettingsPage() {
         />
       </Panel>
       <SettingsPanel
+        build={payload.build}
         initialPublicOrigin={payload.public_registry_origin}
         initialTimeZone={payload.ui_timezone}
         initialRepositoryTagsPageSize={payload.repository_tags_page_size}

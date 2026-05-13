@@ -6,6 +6,10 @@ variable "VERSION" {
   default = "dev"
 }
 
+variable "BUILD_TIME" {
+  default = ""
+}
+
 # Single-platform target used when images need to be loaded into the local
 # Docker image store, for example by scripts/docker-save.sh before docker save.
 variable "PLATFORM" {
@@ -56,6 +60,12 @@ group "publish" {
 target "common" {
   context = "."
   dockerfile = "Dockerfile"
+  args = {
+    APP_VERSION = VERSION
+    APP_REVISION = REVISION
+    APP_BUILD_TIME = BUILD_TIME
+    APP_IMAGE_TAG = IMAGE_TAG
+  }
   # Reuse a runner-local BuildKit cache across validation and publish jobs.
   cache-from = ["type=local,src=/tmp/buildkit-registry-control-plane"]
   # Export updated cache contents back to the same path after each build.

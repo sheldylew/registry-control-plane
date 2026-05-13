@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -13,6 +14,18 @@ def _get_bool_env(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _read_package_version() -> str:
+    package_json = Path(__file__).resolve().parent.parent / "package.json"
+    try:
+        for line in package_json.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith('"version":'):
+                return stripped.split(":", 1)[1].strip().strip('",')
+    except OSError:
+        pass
+    return "dev"
 
 
 @dataclass(frozen=True)
@@ -31,6 +44,10 @@ class Settings:
     auth_private_key_path: str
     auth_public_cert_path: str
     internal_api_base_url: str
+    app_version: str = "dev"
+    app_revision: str = "dev"
+    app_build_time: Optional[str] = None
+    app_image_tag: Optional[str] = None
     csrf_trusted_origins: tuple[str, ...] = ()
     auth_bootstrap_marker_path: str = ".local-data/auth/bootstrap-complete"
     setup_token_path: str = ".local-data/setup-token.json"
@@ -83,8 +100,16 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    app_version = os.getenv("APP_VERSION", _read_package_version()).strip() or "dev"
+    app_revision = os.getenv("APP_REVISION", os.getenv("REVISION", "dev")).strip() or "dev"
+    app_build_time = os.getenv("APP_BUILD_TIME", "").strip() or None
+    app_image_tag = os.getenv("APP_IMAGE_TAG", "").strip() or None
     return Settings(
         app_env=os.getenv("APP_ENV", "development").lower(),
+        app_version=app_version,
+        app_revision=app_revision,
+        app_build_time=app_build_time,
+        app_image_tag=app_image_tag,
         database_url=os.getenv("DATABASE_URL", "sqlite:///./.local-data/app.db"),
         registry_internal_url=os.getenv("REGISTRY_INTERNAL_URL", "http://registry:5000"),
         registry_storage_root=os.getenv(

@@ -22,8 +22,17 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements-auth-init.txt
 
 FROM python:3.12.9-slim-bookworm AS api
 
+ARG APP_VERSION=dev
+ARG APP_REVISION=dev
+ARG APP_BUILD_TIME=
+ARG APP_IMAGE_TAG=
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    APP_VERSION=${APP_VERSION} \
+    APP_REVISION=${APP_REVISION} \
+    APP_BUILD_TIME=${APP_BUILD_TIME} \
+    APP_IMAGE_TAG=${APP_IMAGE_TAG}
 
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin app
 
@@ -82,8 +91,17 @@ RUN npm run build:docker
 
 FROM node:20.18.3-alpine3.20 AS web
 
+ARG APP_VERSION=dev
+ARG APP_REVISION=dev
+ARG APP_BUILD_TIME=
+ARG APP_IMAGE_TAG=
+
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    APP_VERSION=${APP_VERSION} \
+    APP_REVISION=${APP_REVISION} \
+    APP_BUILD_TIME=${APP_BUILD_TIME} \
+    APP_IMAGE_TAG=${APP_IMAGE_TAG}
 WORKDIR /web
 
 RUN addgroup -g 10001 -S app && adduser -S -D -H -u 10001 -G app app

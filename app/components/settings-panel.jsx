@@ -109,6 +109,17 @@ function auditLogRetentionPresetForValue(value) {
   return AUDIT_LOG_RETENTION_OPTIONS.some((option) => option.value === normalized) ? normalized : "custom";
 }
 
+function formatBuildTimestamp(value) {
+  if (!value) {
+    return "Unavailable";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toISOString();
+}
+
 function standardTimeZones(selectedTimeZone) {
   const supportedTimeZones =
     typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function"
@@ -303,6 +314,7 @@ function AuditLogRetentionPicker({ value, onPresetChange }) {
 }
 
 export default function SettingsPanel({
+  build,
   initialPublicOrigin,
   initialTimeZone,
   initialRepositoryTagsPageSize = 10,
@@ -499,6 +511,36 @@ export default function SettingsPanel({
             <code className="mt-2 block break-all rounded-lg bg-slate-950 px-3 py-2 text-amber-50">{message}</code>
           </Alert>
         ) : null}
+      </Panel>
+
+      <Panel className="p-4 sm:p-6">
+        <PanelHeader
+          title="Build information"
+          description="Read-only metadata for the running control-plane build."
+        />
+
+        <div className="mt-6">
+          <DetailList
+            items={[
+              {
+                label: "Version",
+                value: <code className="break-all text-sm text-white">{build?.version || "dev"}</code>,
+              },
+              {
+                label: "Revision",
+                value: <code className="break-all text-sm text-white">{build?.revision || "dev"}</code>,
+              },
+              {
+                label: "Built at",
+                value: <code className="break-all text-sm text-white">{formatBuildTimestamp(build?.built_at)}</code>,
+              },
+              {
+                label: "Image tag",
+                value: <code className="break-all text-sm text-white">{build?.image_tag || "Unavailable"}</code>,
+              },
+            ]}
+          />
+        </div>
       </Panel>
 
       <FormDialog

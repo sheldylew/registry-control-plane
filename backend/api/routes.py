@@ -1931,6 +1931,12 @@ def admin_settings(
     settings: Settings = Depends(get_settings),
 ):
     return {
+        "build": {
+            "version": settings.app_version,
+            "revision": settings.app_revision,
+            "built_at": settings.app_build_time,
+            "image_tag": settings.app_image_tag,
+        },
         "public_registry_origin": effective_public_registry_origin(db, settings),
         "ui_timezone": effective_ui_timezone(db),
         "repository_tags_page_size": effective_default_page_size(db),
