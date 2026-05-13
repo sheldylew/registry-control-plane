@@ -423,6 +423,10 @@ test("compose builds pass runtime build metadata into app images", async () => {
     assert.match(source, /APP_REVISION: \$\{APP_REVISION:-dev\}/);
     assert.match(source, /APP_IMAGE_TAG:/);
   }
+  assert.equal([...dockerfile.matchAll(/ARG APP_VERSION=dev/g)].length, 2);
+  assert.equal([...dockerfile.matchAll(/ARG APP_REVISION=dev/g)].length, 2);
+  assert.equal([...dockerfile.matchAll(/ARG APP_BUILD_TIME=/g)].length, 2);
+  assert.equal([...dockerfile.matchAll(/ARG APP_IMAGE_TAG=/g)].length, 2);
   assert.match(dockerfile, /> \/srv\/build-info\.env/);
   assert.match(dockerfile, /> \/web\/build-info\.env/);
   assert.match(dockerfile, /printf 'APP_BUILD_TIME=%s\\n' "\$APP_BUILD_TIME"/);

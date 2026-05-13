@@ -28,3 +28,17 @@ def test_load_settings_prefers_image_build_info_file_over_stale_env(monkeypatch,
     assert settings.app_revision == "file-revision"
     assert settings.app_build_time == "2026-05-13T00:00:00Z"
     assert settings.app_image_tag == "file-tag"
+
+
+def test_load_settings_tolerates_missing_build_info(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("APP_BUILD_INFO_PATH", str(tmp_path / "missing-build-info.env"))
+    for name in ("APP_VERSION", "APP_REVISION", "REVISION", "APP_BUILD_TIME", "APP_IMAGE_TAG"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = load_settings()
+
+    assert settings.app_version
+    assert settings.app_revision == "dev"
+    assert settings.app_build_time is None
+    assert settings.app_image_tag is None
