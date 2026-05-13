@@ -437,6 +437,10 @@ test("forgejo docker workflow exports build time into bake metadata", async () =
 
   assert.match(workflow, /build_time="\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)"/);
   assert.match(workflow, /echo "build_time=\$\{build_time\}"/);
+  assert.match(workflow, /name: Log image build metadata/);
+  assert.match(workflow, /echo "Build information:"/);
+  assert.match(workflow, /echo "  Built at: \$\{\{ steps\.meta\.outputs\.build_time \}\}"/);
+  assert.match(workflow, /echo "  Image tag: \$\{\{ steps\.meta\.outputs\.image_tag \}\}"/);
   assert.match(workflow, /export BUILD_TIME="\$\{\{ steps\.meta\.outputs\.build_time \}\}"/);
   assert.match(dockerBake, /"org\.opencontainers\.image\.created" = BUILD_TIME/);
   assert.match(dockerBake, /"org\.opencontainers\.image\.ref\.name" = IMAGE_TAG/);

@@ -113,6 +113,24 @@ jobs:
             echo "build_time=${build_time}"
           } >>"${GITHUB_OUTPUT}"
 
+      - name: Log image build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image_tag_alt="${{ steps.meta.outputs.image_tag_alt }}"
+
+          echo "Build information:"
+          echo "  Version: ${{ steps.meta.outputs.version }}"
+          echo "  Revision: ${GITHUB_SHA}"
+          echo "  Built at: ${{ steps.meta.outputs.build_time }}"
+          echo "  Image tag: ${{ steps.meta.outputs.image_tag }}"
+          echo "  Image prefix: ${{ steps.meta.outputs.image_prefix }}"
+          echo "  Publish: ${{ steps.meta.outputs.publish }}"
+          if [[ -n "${image_tag_alt}" ]]; then
+            echo "  Additional image tag: ${image_tag_alt}"
+          fi
+
       - name: Install arm64 emulation
         if: steps.meta.outputs.publish == 'true'
         # Validation stays native-arch. Publish runs still need binfmt on amd64
