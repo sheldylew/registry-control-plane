@@ -1,3 +1,4 @@
+import BuildInfoDialog from "@/app/components/build-info-dialog";
 import SettingsPanel from "@/app/components/settings-panel";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
 import { readWebBuildInfo } from "@/app/lib/build-info";
@@ -12,6 +13,10 @@ export default async function SettingsPage() {
     throw new Error("Failed to load settings.");
   }
   const payload = await response.json();
+  const build = {
+    api: payload.build,
+    web: webBuild,
+  };
 
   return (
     <div className="space-y-6">
@@ -19,13 +24,10 @@ export default async function SettingsPage() {
         <PanelHeader
           title="Settings"
           description="Configure registry-facing values and runtime UI defaults for the control plane."
+          action={<BuildInfoDialog build={build} />}
         />
       </Panel>
       <SettingsPanel
-        build={{
-          api: payload.build,
-          web: webBuild,
-        }}
         initialPublicOrigin={payload.public_registry_origin}
         initialTimeZone={payload.ui_timezone}
         initialRepositoryTagsPageSize={payload.repository_tags_page_size}

@@ -109,38 +109,6 @@ function auditLogRetentionPresetForValue(value) {
   return AUDIT_LOG_RETENTION_OPTIONS.some((option) => option.value === normalized) ? normalized : "custom";
 }
 
-function formatBuildTimestamp(value) {
-  if (!value) {
-    return "Unavailable";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toISOString();
-}
-
-function buildInfoItems(build) {
-  return [
-    {
-      label: "Version",
-      value: <code className="break-all text-sm text-white">{build?.version || "dev"}</code>,
-    },
-    {
-      label: "Revision",
-      value: <code className="break-all text-sm text-white">{build?.revision || "dev"}</code>,
-    },
-    {
-      label: "Built at",
-      value: <code className="break-all text-sm text-white">{formatBuildTimestamp(build?.built_at)}</code>,
-    },
-    {
-      label: "Image tag",
-      value: <code className="break-all text-sm text-white">{build?.image_tag || "Unavailable"}</code>,
-    },
-  ];
-}
-
 function standardTimeZones(selectedTimeZone) {
   const supportedTimeZones =
     typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function"
@@ -335,7 +303,6 @@ function AuditLogRetentionPicker({ value, onPresetChange }) {
 }
 
 export default function SettingsPanel({
-  build,
   initialPublicOrigin,
   initialTimeZone,
   initialRepositoryTagsPageSize = 10,
@@ -532,24 +499,6 @@ export default function SettingsPanel({
             <code className="mt-2 block break-all rounded-lg bg-slate-950 px-3 py-2 text-amber-50">{message}</code>
           </Alert>
         ) : null}
-      </Panel>
-
-      <Panel className="p-4 sm:p-6">
-        <PanelHeader
-          title="Build information"
-          description="Read-only metadata baked into the running API and web images."
-        />
-
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">API image</h3>
-            <DetailList columns={1} compact items={buildInfoItems(build?.api || build)} />
-          </div>
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Web image</h3>
-            <DetailList columns={1} compact items={buildInfoItems(build?.web)} />
-          </div>
-        </div>
       </Panel>
 
       <FormDialog

@@ -437,18 +437,24 @@ test("compose builds pass runtime build metadata into app images", async () => {
   }
 });
 
-test("settings page shows separate API and web image metadata", async () => {
-  const [settingsPage, settingsPanel, buildInfo] = await Promise.all([
+test("settings page opens separate API and web image metadata from header", async () => {
+  const [settingsPage, settingsPanel, buildInfo, buildDialog] = await Promise.all([
     readFile(new URL("../app/admin/settings/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/settings-panel.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/lib/build-info.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/build-info-dialog.jsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(settingsPage, /readWebBuildInfo\(\)/);
   assert.match(settingsPage, /api: payload\.build/);
   assert.match(settingsPage, /web: webBuild/);
-  assert.match(settingsPanel, /API image/);
-  assert.match(settingsPanel, /Web image/);
+  assert.match(settingsPage, /action=\{<BuildInfoDialog build=\{build\} \/>\}/);
+  assert.doesNotMatch(settingsPanel, /Build information/);
+  assert.match(buildDialog, /InformationCircleIcon/);
+  assert.match(buildDialog, /aria-label="Show build information"/);
+  assert.match(buildDialog, /Build information/);
+  assert.match(buildDialog, /API image/);
+  assert.match(buildDialog, /Web image/);
   assert.match(buildInfo, /\/web\/build-info\.env/);
   assert.match(buildInfo, /buildInfo\.APP_VERSION \|\| process\.env\.APP_VERSION/);
 });
