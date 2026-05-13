@@ -71,6 +71,8 @@ target "common" {
   # Export updated cache contents back to the same path after each build.
   cache-to = ["type=local,dest=/tmp/buildkit-registry-control-plane,mode=max"]
   labels = {
+    "org.opencontainers.image.created" = BUILD_TIME
+    "org.opencontainers.image.ref.name" = IMAGE_TAG
     "org.opencontainers.image.revision" = REVISION
     "org.opencontainers.image.version" = VERSION
   }

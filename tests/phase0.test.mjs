@@ -430,11 +430,16 @@ test("compose builds pass runtime build metadata into app images", async () => {
 });
 
 test("forgejo docker workflow exports build time into bake metadata", async () => {
-  const workflow = await readFile(new URL("../.forgejo/workflows/docker.yml", import.meta.url), "utf8");
+  const [workflow, dockerBake] = await Promise.all([
+    readFile(new URL("../.forgejo/workflows/docker.yml", import.meta.url), "utf8"),
+    readFile(new URL("../docker-bake.hcl", import.meta.url), "utf8"),
+  ]);
 
   assert.match(workflow, /build_time="\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)"/);
   assert.match(workflow, /echo "build_time=\$\{build_time\}"/);
   assert.match(workflow, /export BUILD_TIME="\$\{\{ steps\.meta\.outputs\.build_time \}\}"/);
+  assert.match(dockerBake, /"org\.opencontainers\.image\.created" = BUILD_TIME/);
+  assert.match(dockerBake, /"org\.opencontainers\.image\.ref\.name" = IMAGE_TAG/);
 });
 
 test("server auth skips session API calls when no session cookie exists", async () => {
