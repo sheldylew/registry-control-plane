@@ -3,6 +3,11 @@ services:
     build:
       context: .
       target: auth-init
+      args:
+        APP_VERSION: ${APP_VERSION:-development}
+        APP_REVISION: ${APP_REVISION:-dev}
+        APP_BUILD_TIME: ${APP_BUILD_TIME:-}
+        APP_IMAGE_TAG: ${APP_IMAGE_TAG:-development}
     user: "0:0"
     restart: "no"
     command:
@@ -68,6 +73,11 @@ services:
     build:
       context: .
       target: api
+      args:
+        APP_VERSION: ${APP_VERSION:-development}
+        APP_REVISION: ${APP_REVISION:-dev}
+        APP_BUILD_TIME: ${APP_BUILD_TIME:-}
+        APP_IMAGE_TAG: ${APP_IMAGE_TAG:-development}
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -137,6 +147,11 @@ services:
     build:
       context: .
       target: web
+      args:
+        APP_VERSION: ${APP_VERSION:-development}
+        APP_REVISION: ${APP_REVISION:-dev}
+        APP_BUILD_TIME: ${APP_BUILD_TIME:-}
+        APP_IMAGE_TAG: ${APP_IMAGE_TAG:-development}
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_PATH: /api

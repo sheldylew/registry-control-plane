@@ -78,6 +78,7 @@ jobs:
           ref_name="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
           ref="${GITHUB_REF:-}"
           image_tag_alt=""
+          build_time="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
           # Branches publish moving aliases; SemVer tags publish immutable versions.
           # Stable SemVer tags also get "latest". Any other ref falls back to a short SHA.
@@ -109,6 +110,7 @@ jobs:
             echo "image_tag=${image_tag}"
             echo "image_tag_alt=${image_tag_alt}"
             echo "version=${ref_name}"
+            echo "build_time=${build_time}"
           } >>"${GITHUB_OUTPUT}"
 
       - name: Install arm64 emulation
@@ -157,6 +159,7 @@ jobs:
           # Validation intentionally stays on the runner's native architecture.
           export REVISION="${GITHUB_SHA}"
           export VERSION="${GITHUB_REF_NAME:-${GITHUB_SHA}}"
+          export BUILD_TIME="${{ steps.meta.outputs.build_time }}"
           export IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}"
           export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
           export PLATFORM="${platform}"
@@ -172,6 +175,7 @@ jobs:
           # Publish uses the same metadata plus version/revision labels for the pushed images.
           export REVISION="${GITHUB_SHA}"
           export VERSION="${{ steps.meta.outputs.version }}"
+          export BUILD_TIME="${{ steps.meta.outputs.build_time }}"
           export IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}"
           export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
           export IMAGE_TAG_ALT="${{ steps.meta.outputs.image_tag_alt }}"

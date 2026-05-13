@@ -23,6 +23,12 @@ else
   : "${ADMIN_EMAIL:?Set ADMIN_EMAIL or ALLOW_DEV_DEFAULT_CREDENTIALS=1 for local defaults.}"
 fi
 APP_ENV="${APP_ENV:-development}"
+APP_VERSION="${APP_VERSION:-$(git branch --show-current 2>/dev/null || true)}"
+APP_VERSION="${APP_VERSION:-development}"
+APP_REVISION="${APP_REVISION:-$(git rev-parse HEAD 2>/dev/null || true)}"
+APP_REVISION="${APP_REVISION:-dev}"
+APP_BUILD_TIME="${APP_BUILD_TIME:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
+APP_IMAGE_TAG="${APP_IMAGE_TAG:-$APP_VERSION}"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PUBLIC_REGISTRY_ORIGIN="${PUBLIC_REGISTRY_ORIGIN:-http://localhost:8080}"
 

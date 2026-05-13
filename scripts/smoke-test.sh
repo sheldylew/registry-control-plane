@@ -16,6 +16,12 @@ else
   : "${ADMIN_EMAIL:?Set ADMIN_EMAIL or ALLOW_DEV_DEFAULT_CREDENTIALS=1 for local defaults.}"
 fi
 APP_ENV="${APP_ENV:-development}"
+APP_VERSION="${APP_VERSION:-$(git branch --show-current 2>/dev/null || true)}"
+APP_VERSION="${APP_VERSION:-development}"
+APP_REVISION="${APP_REVISION:-$(git rev-parse HEAD 2>/dev/null || true)}"
+APP_REVISION="${APP_REVISION:-dev}"
+APP_BUILD_TIME="${APP_BUILD_TIME:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
+APP_IMAGE_TAG="${APP_IMAGE_TAG:-$APP_VERSION}"
 REGISTRY_SERVICE="${REGISTRY_SERVICE:-sheldylew-registry}"
 SMOKE_IMAGE="${SMOKE_IMAGE:-localhost:8080/test/smoke:phase3}"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
@@ -53,6 +59,10 @@ compose() {
 echo "==> Starting Docker stack"
 echo "==> Rebuilding Docker stack without cache"
 APP_ENV="$APP_ENV" \
+APP_VERSION="$APP_VERSION" \
+APP_REVISION="$APP_REVISION" \
+APP_BUILD_TIME="$APP_BUILD_TIME" \
+APP_IMAGE_TAG="$APP_IMAGE_TAG" \
 ADMIN_USERNAME="$ADMIN_USERNAME" \
 ADMIN_PASSWORD="$ADMIN_PASSWORD" \
 ADMIN_EMAIL="$ADMIN_EMAIL" \
@@ -61,6 +71,10 @@ compose build --no-cache
 # Recreate containers after the rebuild so nginx, web, api, and registry all use the latest images.
 echo "==> Recreating Docker stack"
 APP_ENV="$APP_ENV" \
+APP_VERSION="$APP_VERSION" \
+APP_REVISION="$APP_REVISION" \
+APP_BUILD_TIME="$APP_BUILD_TIME" \
+APP_IMAGE_TAG="$APP_IMAGE_TAG" \
 ADMIN_USERNAME="$ADMIN_USERNAME" \
 ADMIN_PASSWORD="$ADMIN_PASSWORD" \
 ADMIN_EMAIL="$ADMIN_EMAIL" \

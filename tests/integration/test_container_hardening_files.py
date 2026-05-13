@@ -18,6 +18,8 @@ def test_compose_file_contains_runtime_hardening() -> None:
     assert 'PUBLIC_REGISTRY_ORIGIN: ${PUBLIC_REGISTRY_ORIGIN:-}' in compose_text
     assert 'SETUP_TOKEN_PATH: /data/setup-token.json' in compose_text
     assert 'ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}' in compose_text
+    assert 'APP_BUILD_TIME: ${APP_BUILD_TIME:-}' in compose_text
+    assert 'APP_REVISION: ${APP_REVISION:-dev}' in compose_text
 
 
 def test_dockerfile_runs_api_and_web_as_non_root() -> None:

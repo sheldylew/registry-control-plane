@@ -19,6 +19,12 @@ if [[ "${ALLOW_DEV_DEFAULT_CREDENTIALS:-0}" == "1" ]]; then
   ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
 fi
 APP_ENV="${APP_ENV:-development}"
+APP_VERSION="${APP_VERSION:-$(git branch --show-current 2>/dev/null || true)}"
+APP_VERSION="${APP_VERSION:-development}"
+APP_REVISION="${APP_REVISION:-$(git rev-parse HEAD 2>/dev/null || true)}"
+APP_REVISION="${APP_REVISION:-dev}"
+APP_BUILD_TIME="${APP_BUILD_TIME:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
+APP_IMAGE_TAG="${APP_IMAGE_TAG:-$APP_VERSION}"
 
 workdir="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -30,6 +36,10 @@ compose() {
 
 echo "==> Building Docker images"
 APP_ENV="$APP_ENV" \
+APP_VERSION="$APP_VERSION" \
+APP_REVISION="$APP_REVISION" \
+APP_BUILD_TIME="$APP_BUILD_TIME" \
+APP_IMAGE_TAG="$APP_IMAGE_TAG" \
 ADMIN_USERNAME="$ADMIN_USERNAME" \
 ADMIN_PASSWORD="$ADMIN_PASSWORD" \
 ADMIN_EMAIL="$ADMIN_EMAIL" \
@@ -37,6 +47,10 @@ compose build
 
 echo "==> Recreating running containers"
 APP_ENV="$APP_ENV" \
+APP_VERSION="$APP_VERSION" \
+APP_REVISION="$APP_REVISION" \
+APP_BUILD_TIME="$APP_BUILD_TIME" \
+APP_IMAGE_TAG="$APP_IMAGE_TAG" \
 ADMIN_USERNAME="$ADMIN_USERNAME" \
 ADMIN_PASSWORD="$ADMIN_PASSWORD" \
 ADMIN_EMAIL="$ADMIN_EMAIL" \

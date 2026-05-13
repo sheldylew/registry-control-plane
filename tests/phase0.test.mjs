@@ -408,6 +408,35 @@ test("release compose files keep internal service DNS aliases explicit", async (
   }
 });
 
+test("compose builds pass runtime build metadata into app images", async () => {
+  const [compose, bindCompose, rebuildStack, smokeTest, upgradeStack] = await Promise.all([
+    readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/rebuild-stack.sh", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/smoke-test.sh", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/upgrade-stack.sh", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of [compose, bindCompose]) {
+    assert.match(source, /APP_BUILD_TIME: \$\{APP_BUILD_TIME:-\}/);
+    assert.match(source, /APP_REVISION: \$\{APP_REVISION:-dev\}/);
+    assert.match(source, /APP_IMAGE_TAG:/);
+  }
+  for (const source of [rebuildStack, smokeTest, upgradeStack]) {
+    assert.match(source, /APP_BUILD_TIME="\$\{APP_BUILD_TIME:-\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)\}"/);
+    assert.match(source, /APP_REVISION="\$\{APP_REVISION:-\$\(git rev-parse HEAD 2>\/dev\/null \|\| true\)\}"/);
+    assert.match(source, /APP_VERSION="\$\{APP_VERSION:-\$\(git branch --show-current 2>\/dev\/null \|\| true\)\}"/);
+  }
+});
+
+test("forgejo docker workflow exports build time into bake metadata", async () => {
+  const workflow = await readFile(new URL("../.forgejo/workflows/docker.yml", import.meta.url), "utf8");
+
+  assert.match(workflow, /build_time="\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)"/);
+  assert.match(workflow, /echo "build_time=\$\{build_time\}"/);
+  assert.match(workflow, /export BUILD_TIME="\$\{\{ steps\.meta\.outputs\.build_time \}\}"/);
+});
+
 test("server auth skips session API calls when no session cookie exists", async () => {
   const serverApi = await readFile(new URL("../app/lib/server-api.js", import.meta.url), "utf8");
 
