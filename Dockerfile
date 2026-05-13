@@ -38,6 +38,13 @@ RUN groupadd --gid 10001 app && useradd --uid 10001 --gid 10001 --create-home --
 
 WORKDIR /srv
 
+RUN { \
+      printf 'APP_VERSION=%s\n' "$APP_VERSION"; \
+      printf 'APP_REVISION=%s\n' "$APP_REVISION"; \
+      printf 'APP_BUILD_TIME=%s\n' "$APP_BUILD_TIME"; \
+      printf 'APP_IMAGE_TAG=%s\n' "$APP_IMAGE_TAG"; \
+    } > /srv/build-info.env
+
 COPY --from=registrybin --chown=app:app /bin/registry /usr/local/bin/registry
 COPY --from=api-builder /install /usr/local
 COPY --chown=app:app backend ./backend
@@ -103,6 +110,13 @@ ENV NODE_ENV=production \
     APP_BUILD_TIME=${APP_BUILD_TIME} \
     APP_IMAGE_TAG=${APP_IMAGE_TAG}
 WORKDIR /web
+
+RUN { \
+      printf 'APP_VERSION=%s\n' "$APP_VERSION"; \
+      printf 'APP_REVISION=%s\n' "$APP_REVISION"; \
+      printf 'APP_BUILD_TIME=%s\n' "$APP_BUILD_TIME"; \
+      printf 'APP_IMAGE_TAG=%s\n' "$APP_IMAGE_TAG"; \
+    } > /web/build-info.env
 
 RUN addgroup -g 10001 -S app && adduser -S -D -H -u 10001 -G app app
 

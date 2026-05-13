@@ -28,6 +28,22 @@ def _read_package_version() -> str:
     return "dev"
 
 
+def _read_build_info_file(path: str | Path = "/srv/build-info.env") -> dict[str, str]:
+    build_info_path = Path(path)
+    try:
+        lines = build_info_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+
+    values: dict[str, str] = {}
+    for line in lines:
+        if not line or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
 @dataclass(frozen=True)
 class Settings:
     app_env: str
@@ -100,10 +116,15 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    app_version = os.getenv("APP_VERSION", _read_package_version()).strip() or "dev"
-    app_revision = os.getenv("APP_REVISION", os.getenv("REVISION", "dev")).strip() or "dev"
-    app_build_time = os.getenv("APP_BUILD_TIME", "").strip() or None
-    app_image_tag = os.getenv("APP_IMAGE_TAG", "").strip() or None
+    build_info = _read_build_info_file(os.getenv("APP_BUILD_INFO_PATH", "/srv/build-info.env"))
+    app_version = (
+        build_info.get("APP_VERSION") or os.getenv("APP_VERSION", _read_package_version())
+    ).strip() or "dev"
+    app_revision = (
+        build_info.get("APP_REVISION") or os.getenv("APP_REVISION", os.getenv("REVISION", "dev"))
+    ).strip() or "dev"
+    app_build_time = (build_info.get("APP_BUILD_TIME") or os.getenv("APP_BUILD_TIME", "")).strip() or None
+    app_image_tag = (build_info.get("APP_IMAGE_TAG") or os.getenv("APP_IMAGE_TAG", "")).strip() or None
     return Settings(
         app_env=os.getenv("APP_ENV", "development").lower(),
         app_version=app_version,

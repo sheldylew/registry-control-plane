@@ -409,9 +409,10 @@ test("release compose files keep internal service DNS aliases explicit", async (
 });
 
 test("compose builds pass runtime build metadata into app images", async () => {
-  const [compose, bindCompose, rebuildStack, smokeTest, upgradeStack] = await Promise.all([
+  const [compose, bindCompose, dockerfile, rebuildStack, smokeTest, upgradeStack] = await Promise.all([
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
     readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
+    readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
     readFile(new URL("../scripts/rebuild-stack.sh", import.meta.url), "utf8"),
     readFile(new URL("../scripts/smoke-test.sh", import.meta.url), "utf8"),
     readFile(new URL("../scripts/upgrade-stack.sh", import.meta.url), "utf8"),
@@ -422,11 +423,30 @@ test("compose builds pass runtime build metadata into app images", async () => {
     assert.match(source, /APP_REVISION: \$\{APP_REVISION:-dev\}/);
     assert.match(source, /APP_IMAGE_TAG:/);
   }
+  assert.match(dockerfile, /> \/srv\/build-info\.env/);
+  assert.match(dockerfile, /> \/web\/build-info\.env/);
+  assert.match(dockerfile, /printf 'APP_BUILD_TIME=%s\\n' "\$APP_BUILD_TIME"/);
   for (const source of [rebuildStack, smokeTest, upgradeStack]) {
     assert.match(source, /APP_BUILD_TIME="\$\{APP_BUILD_TIME:-\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)\}"/);
     assert.match(source, /APP_REVISION="\$\{APP_REVISION:-\$\(git rev-parse HEAD 2>\/dev\/null \|\| true\)\}"/);
     assert.match(source, /APP_VERSION="\$\{APP_VERSION:-\$\(git branch --show-current 2>\/dev\/null \|\| true\)\}"/);
   }
+});
+
+test("settings page shows separate API and web image metadata", async () => {
+  const [settingsPage, settingsPanel, buildInfo] = await Promise.all([
+    readFile(new URL("../app/admin/settings/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/settings-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/build-info.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(settingsPage, /readWebBuildInfo\(\)/);
+  assert.match(settingsPage, /api: payload\.build/);
+  assert.match(settingsPage, /web: webBuild/);
+  assert.match(settingsPanel, /API image/);
+  assert.match(settingsPanel, /Web image/);
+  assert.match(buildInfo, /\/web\/build-info\.env/);
+  assert.match(buildInfo, /buildInfo\.APP_VERSION \|\| process\.env\.APP_VERSION/);
 });
 
 test("forgejo docker workflow exports build time into bake metadata", async () => {

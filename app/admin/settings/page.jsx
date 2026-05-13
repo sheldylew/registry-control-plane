@@ -1,9 +1,13 @@
 import SettingsPanel from "@/app/components/settings-panel";
 import { Panel, PanelHeader } from "@/app/components/ui/panel";
+import { readWebBuildInfo } from "@/app/lib/build-info";
 import { apiFetch } from "@/app/lib/server-api";
 
 export default async function SettingsPage() {
-  const response = await apiFetch("/api/admin/settings");
+  const [response, webBuild] = await Promise.all([
+    apiFetch("/api/admin/settings"),
+    readWebBuildInfo(),
+  ]);
   if (!response.ok) {
     throw new Error("Failed to load settings.");
   }
@@ -18,7 +22,10 @@ export default async function SettingsPage() {
         />
       </Panel>
       <SettingsPanel
-        build={payload.build}
+        build={{
+          api: payload.build,
+          web: webBuild,
+        }}
         initialPublicOrigin={payload.public_registry_origin}
         initialTimeZone={payload.ui_timezone}
         initialRepositoryTagsPageSize={payload.repository_tags_page_size}
