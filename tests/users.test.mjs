@@ -106,12 +106,15 @@ test("first boot setup page and settings panel use setup APIs", async () => {
   const setupForm = await readFile(new URL("../app/components/setup-form.jsx", import.meta.url), "utf8");
   const settingsPage = await readFile(new URL("../app/admin/settings/page.jsx", import.meta.url), "utf8");
   const settingsPanel = await readFile(new URL("../app/components/settings-panel.jsx", import.meta.url), "utf8");
+  const buildInfoDialog = await readFile(new URL("../app/components/build-info-dialog.jsx", import.meta.url), "utf8");
 
   assert.match(setupPage, /\/api\/setup\/status/);
   assert.match(setupForm, /\/api\/setup\/complete/);
   assert.match(setupForm, /docker compose restart registry/);
   assert.match(setupForm, /Continue to sign in after restart/);
-  assert.match(settingsPage, /build=\{payload\.build\}/);
+  assert.match(settingsPage, /api: payload\.build/);
+  assert.match(settingsPage, /web: webBuild/);
+  assert.match(settingsPage, /BuildInfoDialog build=\{build\}/);
   assert.match(settingsPanel, /\/api\/admin\/settings/);
   assert.match(settingsPanel, /X-CSRF-Token/);
   assert.match(settingsPanel, /ComboboxInput/);
@@ -122,13 +125,12 @@ test("first boot setup page and settings panel use setup APIs", async () => {
   assert.match(settingsPanel, /Audit pruning retention/);
   assert.match(settingsPanel, /storage_usage_refresh_interval_seconds/);
   assert.match(settingsPanel, /Storage usage refresh interval/);
-  assert.match(settingsPanel, /Build information/);
-  assert.match(settingsPanel, /Read-only metadata for the running control-plane build/);
-  assert.match(settingsPanel, /function formatBuildTimestamp/);
-  assert.match(settingsPanel, /build\?\.version/);
-  assert.match(settingsPanel, /build\?\.revision/);
-  assert.match(settingsPanel, /build\?\.built_at/);
-  assert.match(settingsPanel, /build\?\.image_tag/);
+  assert.match(buildInfoDialog, /Build information/);
+  assert.match(buildInfoDialog, /Read-only metadata baked into the running API and web images/);
+  assert.match(buildInfoDialog, /function formatBuildTimestamp/);
+  assert.match(buildInfoDialog, /build\?\.api/);
+  assert.match(buildInfoDialog, /build\?\.web/);
+  assert.match(buildInfoDialog, /image_tag/);
   assert.match(settingsPanel, /function AuditLogRetentionPicker/);
   assert.match(settingsPanel, /function StorageUsageIntervalPicker/);
   assert.match(settingsPanel, /function DefaultPageSizePicker/);

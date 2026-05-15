@@ -58,6 +58,7 @@ Default list page size is runtime-configurable from `/admin/settings` and defaul
 ### Network and binding
 
 - `RCP_HTTP_BIND`: nginx bind target, defaulting to `127.0.0.1:8080`.
+- Registry pushes through the built-in nginx are capped at 1GB per request.
 
 If you are publishing the stack behind another reverse proxy, keep `RCP_HTTP_BIND` localhost-only and terminate public TLS at the outer proxy.
 

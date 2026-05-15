@@ -12,6 +12,7 @@ test("nginx routes app, auth, and registry paths to the expected upstreams", asy
   assert.match(nginxConf, /proxy_pass_request_body off;/);
   assert.match(nginxConf, /proxy_set_header Content-Length "";/);
   assert.match(nginxConf, /location \/v2\/ \{/);
+  assert.match(nginxConf, /client_max_body_size 1g;/);
   assert.match(nginxConf, /proxy_pass http:\/\/registry:5000;/);
   assert.match(nginxConf, /location \/api\/ \{/);
   assert.match(nginxConf, /proxy_pass http:\/\/api:8000\/api\/;/);
