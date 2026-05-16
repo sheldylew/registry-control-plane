@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClockIcon } from "@heroicons/react/24/outline";
 
@@ -95,6 +95,72 @@ function formatDigest(digest) {
     return digest;
   }
   return `${digest.slice(0, 15)}...${digest.slice(-8)}`;
+}
+
+function DigestTooltip({ digest }) {
+  const tooltipId = useId();
+  const [tooltipPosition, setTooltipPosition] = useState(null);
+  const fullDigest = digest || "Unavailable";
+  const isAvailable = Boolean(digest);
+
+  function showTooltip(event) {
+    if (!isAvailable) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const gap = 10;
+    const horizontalPadding = 16;
+    const left = Math.min(
+      Math.max(rect.left + rect.width / 2, horizontalPadding),
+      window.innerWidth - horizontalPadding,
+    );
+    const placeBelow = rect.top < 96;
+    setTooltipPosition({
+      left,
+      top: placeBelow ? rect.bottom + gap : rect.top - gap,
+      placement: placeBelow ? "bottom" : "top",
+    });
+  }
+
+  function hideTooltip() {
+    setTooltipPosition(null);
+  }
+
+  return (
+    <>
+      <span
+        className={`inline-flex max-w-full rounded-sm font-mono text-xs transition ${
+          isAvailable
+            ? "cursor-help text-slate-100 underline decoration-cyan-300/40 decoration-dotted underline-offset-4 hover:text-cyan-100 focus:text-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-300/20"
+            : "text-slate-500"
+        }`}
+        tabIndex={isAvailable ? 0 : undefined}
+        aria-describedby={tooltipPosition ? tooltipId : undefined}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onFocus={showTooltip}
+        onBlur={hideTooltip}
+      >
+        <span className="truncate">{formatDigest(digest)}</span>
+      </span>
+      {tooltipPosition ? (
+        <span
+          id={tooltipId}
+          role="tooltip"
+          className="pointer-events-none fixed z-50 max-w-[min(44rem,calc(100vw-2rem))] rounded-lg border border-cyan-300/20 bg-slate-950/95 px-3 py-2 text-left text-xs leading-5 text-slate-100 shadow-xl shadow-slate-950/50 ring-1 ring-white/10 backdrop-blur"
+          style={{
+            left: `${tooltipPosition.left}px`,
+            top: `${tooltipPosition.top}px`,
+            transform: tooltipPosition.placement === "top" ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+          }}
+        >
+          <span className="block text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-cyan-200">Full digest</span>
+          <span className="mt-1 block break-all font-mono text-slate-50">{fullDigest}</span>
+        </span>
+      ) : null}
+    </>
+  );
 }
 
 function formatPlatformLabel(value) {
@@ -260,9 +326,7 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
 
                     <dl className="mt-4 grid gap-4">
                       <MobileField label="Content digest">
-                        <span className="break-all font-mono text-xs" title={tag.digest || "Unavailable"}>
-                          {formatDigest(tag.digest)}
-                        </span>
+                        <DigestTooltip digest={tag.digest} />
                       </MobileField>
                       <MobileField label="Platforms">
                         <div className="flex flex-wrap gap-2">
@@ -355,9 +419,7 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
                     </td>
                     <td className="px-4 py-4 align-top text-slate-300">{formatBytes(tag.total_size)}</td>
                     <td className="px-4 py-4 align-top">
-                      <div className="font-mono text-xs text-slate-200" title={tag.digest || "Unavailable"}>
-                        {formatDigest(tag.digest)}
-                      </div>
+                      <DigestTooltip digest={tag.digest} />
                     </td>
                     <td className="px-4 py-4 align-top text-center">
                       <Link
