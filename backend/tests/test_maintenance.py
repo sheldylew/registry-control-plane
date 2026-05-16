@@ -36,6 +36,35 @@ def _login(client: TestClient, username: str, password: str):
     return client.post("/api/session/login", json={"username": username, "password": password})
 
 
+class FakeStorageStat:
+    def __init__(self, *, st_dev: int, st_ino: int, st_blocks: int, st_size: int):
+        self.st_dev = st_dev
+        self.st_ino = st_ino
+        self.st_blocks = st_blocks
+        self.st_size = st_size
+
+
+class FakeStoragePath:
+    def __init__(self, file_stat: FakeStorageStat):
+        self._file_stat = file_stat
+
+    def exists(self) -> bool:
+        return True
+
+    def lstat(self) -> FakeStorageStat:
+        return self._file_stat
+
+
+def test_compute_storage_usage_counts_directories_and_deduplicates_inodes(monkeypatch) -> None:
+    root = FakeStoragePath(FakeStorageStat(st_dev=1, st_ino=1, st_blocks=8, st_size=4096))
+    directory = FakeStoragePath(FakeStorageStat(st_dev=1, st_ino=2, st_blocks=4, st_size=4096))
+    blob = FakeStoragePath(FakeStorageStat(st_dev=1, st_ino=3, st_blocks=2, st_size=5))
+    hardlink = FakeStoragePath(FakeStorageStat(st_dev=1, st_ino=3, st_blocks=2, st_size=5))
+    monkeypatch.setattr("backend.maintenance._storage_paths", lambda _storage_root: [root, directory, blob, hardlink])
+
+    assert compute_storage_usage_bytes(root) == (8 + 4 + 2) * 512
+
+
 def test_storage_usage_root_defaults_to_registry_v2_parent(settings) -> None:
     custom_settings = replace(
         settings,

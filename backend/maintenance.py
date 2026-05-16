@@ -29,12 +29,16 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _file_storage_usage_bytes(path: Path) -> int:
-    file_stat = path.stat()
+def _stat_storage_usage_bytes(file_stat: os.stat_result) -> int:
     allocated_blocks = getattr(file_stat, "st_blocks", 0)
     if allocated_blocks:
         return int(allocated_blocks) * 512
     return file_stat.st_size
+
+
+def _storage_paths(storage_root: Path):
+    yield storage_root
+    yield from storage_root.rglob("*")
 
 
 def compute_storage_usage_bytes(storage_root: Path) -> int:
@@ -42,9 +46,17 @@ def compute_storage_usage_bytes(storage_root: Path) -> int:
         return 0
 
     total = 0
-    for path in storage_root.rglob("*"):
-        if path.is_file():
-            total += _file_storage_usage_bytes(path)
+    seen: set[tuple[int, int]] = set()
+    for path in _storage_paths(storage_root):
+        try:
+            file_stat = path.lstat()
+        except OSError:
+            continue
+        inode_key = (file_stat.st_dev, file_stat.st_ino)
+        if inode_key in seen:
+            continue
+        seen.add(inode_key)
+        total += _stat_storage_usage_bytes(file_stat)
     return total
 
 
