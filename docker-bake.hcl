@@ -74,6 +74,7 @@ target "common" {
     "org.opencontainers.image.created" = BUILD_TIME
     "org.opencontainers.image.ref.name" = IMAGE_TAG
     "org.opencontainers.image.revision" = REVISION
+    "org.opencontainers.image.source" = "https://github.com/sheldylew/registry-control-plane"
     "org.opencontainers.image.version" = VERSION
   }
 }

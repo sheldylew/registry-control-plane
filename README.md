@@ -65,7 +65,36 @@ That state can be created either through the first-boot setup wizard or by suppl
 
 ## Quick start
 
-For local Docker development:
+Most users should start from the public GHCR images:
+
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Open `http://localhost:8080/`.
+
+This uses Docker-managed named volumes for persistent state, keeps the service
+bound to localhost by default, and starts in first-boot setup mode. To complete
+setup through the browser, read the one-time setup token from:
+
+```bash
+docker compose -f docker-compose.ghcr.yml logs auth-init
+```
+
+The default image tag is `release`. To pin a specific version:
+
+```bash
+RCP_IMAGE_TAG=v0.1.0 docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Use the bind-local variant only when you specifically want persistent state in
+visible host folders under `./data`:
+
+```bash
+docker compose -f docker-compose.bind-local.yml up -d
+```
+
+For local source development:
 
 ```bash
 ALLOW_DEV_DEFAULT_CREDENTIALS=1 \
@@ -73,16 +102,6 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
 Then open `http://localhost:8080/`.
-
-For a persistent deployment from the public GHCR images:
-
-```bash
-cp .env.example .env
-docker compose -f docker-compose.bind-local.yml pull
-docker compose -f docker-compose.bind-local.yml up -d
-```
-
-The published app images use the `ghcr.io/sheldylew/registry-control-plane-*` prefix. Set `RCP_IMAGE_TAG` to pin a specific release tag, or leave it unset to use the moving `release` tag.
 
 For source-based deployment or detailed production configuration, follow the deployment guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 

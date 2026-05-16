@@ -439,10 +439,11 @@ test("release compose files keep internal service DNS aliases explicit", async (
 });
 
 test("compose builds pass runtime build metadata into app images", async () => {
-  const [compose, bindCompose, dockerfile, rebuildStack, smokeTest, upgradeStack] = await Promise.all([
+  const [compose, bindCompose, dockerfile, bakeFile, rebuildStack, smokeTest, upgradeStack] = await Promise.all([
     readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
     readFile(new URL("../docker-compose.bind-local.yml", import.meta.url), "utf8"),
     readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+    readFile(new URL("../docker-bake.hcl", import.meta.url), "utf8"),
     readFile(new URL("../scripts/rebuild-stack.sh", import.meta.url), "utf8"),
     readFile(new URL("../scripts/smoke-test.sh", import.meta.url), "utf8"),
     readFile(new URL("../scripts/upgrade-stack.sh", import.meta.url), "utf8"),
@@ -461,6 +462,7 @@ test("compose builds pass runtime build metadata into app images", async () => {
   assert.match(dockerfile, /COPY --from=build-metadata --chown=10001:10001 \/out\/srv\/build-info\.env \/srv\/build-info\.env/);
   assert.match(dockerfile, /COPY --from=build-metadata --chown=10001:10001 \/out\/web\/build-info\.env \/web\/build-info\.env/);
   assert.match(dockerfile, /printf 'APP_BUILD_TIME=%s\\n' "\$APP_BUILD_TIME"/);
+  assert.match(bakeFile, /"org\.opencontainers\.image\.source" = "https:\/\/github\.com\/sheldylew\/registry-control-plane"/);
   for (const source of [rebuildStack, smokeTest, upgradeStack]) {
     assert.match(source, /APP_BUILD_TIME="\$\{APP_BUILD_TIME:-\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)\}"/);
     assert.match(source, /APP_REVISION="\$\{APP_REVISION:-\$\(git rev-parse HEAD 2>\/dev\/null \|\| true\)\}"/);

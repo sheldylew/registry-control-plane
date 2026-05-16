@@ -1,0 +1,155 @@
+# Simple public runtime for the published GHCR images.
+#
+# This file is intended for casual installs and quick evaluation:
+# - no source build context is required
+# - persistent state uses Docker-managed named volumes
+# - nginx stays bound to localhost by default
+#
+# For production exposure, keep RCP_HTTP_BIND local to the host and put HTTPS in
+# front of the stack. Set PUBLIC_REGISTRY_ORIGIN to that HTTPS origin.
+services:
+  auth-init:
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-auth-init:${RCP_IMAGE_TAG:-release}
+    user: "0:0"
+    restart: "no"
+    command:
+      - ./scripts/auth-init.py
+    environment:
+      APP_ENV: production
+      SESSION_COOKIE_SECURE: "true"
+      AUTH_PRIVATE_KEY_PATH: /auth-private/auth-private.pem
+      AUTH_PUBLIC_CERT_PATH: /auth-public/auth-cert.pem
+      AUTH_BOOTSTRAP_MARKER_PATH: /data/auth-bootstrap-complete
+      SETUP_TOKEN_PATH: /data/setup-token.json
+      SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - app-data:/data
+      - registry-data:/var/lib/registry
+      - auth-private-data:/auth-private
+      - auth-public-data:/auth-public
+      - registry-config-data:/registry-config
+
+  api:
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-api:${RCP_IMAGE_TAG:-release}
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      SESSION_COOKIE_SECURE: "true"
+      DATABASE_URL: sqlite:////data/app.db
+      REGISTRY_STORAGE_ROOT: /var/lib/registry/docker/registry/v2/repositories
+      AUTH_PRIVATE_KEY_PATH: /run/auth-private/auth-private.pem
+      AUTH_PUBLIC_CERT_PATH: /run/auth-public/auth-cert.pem
+      SETUP_TOKEN_PATH: /data/setup-token.json
+      SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
+      REGISTRY_RENDERED_CONFIG_PATH: /etc/docker/registry/config.yml
+      FORWARDED_ALLOW_IPS: "*"
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - app-data:/data
+      - registry-data:/var/lib/registry
+      - auth-private-data:/run/auth-private:ro
+      - auth-public-data:/run/auth-public:ro
+      - registry-config-data:/etc/docker/registry
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import urllib.request
+          urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=2)
+      interval: 1m
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      auth-init:
+        condition: service_completed_successfully
+
+  web:
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-web:${RCP_IMAGE_TAG:-release}
+    restart: unless-stopped
+    environment:
+      INTERNAL_API_BASE_URL: http://api:8000
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null "http://$(hostname):3000/"
+      interval: 1m
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  registry:
+    image: registry:2.8.3
+    restart: unless-stopped
+    user: "10001:10001"
+    volumes:
+      - registry-data:/var/lib/registry
+      - registry-config-data:/etc/docker/registry:ro
+      - auth-public-data:/certs:ro
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    depends_on:
+      auth-init:
+        condition: service_completed_successfully
+
+  nginx:
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-nginx:${RCP_IMAGE_TAG:-release}
+    restart: unless-stopped
+    user: "101:101"
+    ports:
+      - "${RCP_HTTP_BIND:-127.0.0.1:8080}:8080"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      registry:
+        condition: service_started
+
+volumes:
+  app-data:
+  registry-data:
+  auth-private-data:
+  auth-public-data:
+  registry-config-data:
