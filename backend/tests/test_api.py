@@ -2612,6 +2612,7 @@ def test_repo_tags_return_paginated_summary_rows(settings) -> None:
         response = client.get("/api/repos/sheldylew/app/tags")
 
     assert response.status_code == 200
+    assert response.json()["sorting"] == {"sort": "created", "direction": "desc"}
     assert response.json()["visibility"] == "private"
     assert response.json()["public_registry_origin"] == settings.public_registry_origin
     assert response.json()["can_manage_visibility"] is False
@@ -2694,8 +2695,8 @@ def test_repo_tags_return_truncation_metadata(settings) -> None:
 
     assert response.status_code == 200
     assert len(response.json()["tags"]) == 1
-    assert response.json()["tags"][0]["tag"] == "two"
-    assert response.json()["tags"][0]["digest"] == "sha256:two"
+    assert response.json()["tags"][0]["tag"] == "one"
+    assert response.json()["tags"][0]["digest"] == "sha256:one"
     assert response.json()["truncation"] == {"truncated": True, "returned": 1, "available": 2}
     assert response.json()["pagination"] == {
         "page": 2,
@@ -2802,7 +2803,7 @@ def test_repo_tag_manifest_includes_shared_digest_warning_metadata(settings) -> 
     assert manifest["shared_manifest_tags"] == ["edge", "release"]
 
 
-def test_repo_tags_are_sorted_by_most_recent_push_first(settings) -> None:
+def test_repo_tags_are_sorted_by_most_recent_created_first(settings) -> None:
     app = create_app(settings)
 
     with TestClient(app) as client:
@@ -2822,13 +2823,13 @@ def test_repo_tags_are_sorted_by_most_recent_push_first(settings) -> None:
                 session,
                 repository_name="sheldylew/app",
                 manifest_digest="sha256:old",
-                tag_created_at="2026-05-04T10:20:30Z",
+                tag_created_at="2026-05-05T10:20:30Z",
             )
             _seed_manifest_summary(
                 session,
                 repository_name="sheldylew/app",
                 manifest_digest="sha256:new",
-                tag_created_at="2026-05-05T10:20:30Z",
+                tag_created_at="2026-05-04T10:20:30Z",
             )
             session.commit()
             _grant_reader(session, username="recent-reader", password="recent-reader-pass")
@@ -2838,7 +2839,74 @@ def test_repo_tags_are_sorted_by_most_recent_push_first(settings) -> None:
         response = client.get("/api/repos/sheldylew/app/tags")
 
     assert response.status_code == 200
-    assert [tag["tag"] for tag in response.json()["tags"]] == ["a-new", "z-old"]
+    assert [tag["tag"] for tag in response.json()["tags"]] == ["z-old", "a-new"]
+    assert response.json()["sorting"] == {"sort": "created", "direction": "desc"}
+
+
+def test_repo_tags_support_created_and_tag_sorting(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("z-old", "a-new", "middle"))
+            tag_rows = {
+                tag.name: tag
+                for tag in session.scalars(
+                    select(RepositoryTag).where(RepositoryTag.repository_id == repository.id)
+                ).all()
+            }
+            tag_rows["z-old"].pushed_at = datetime(2026, 5, 4, 10, 20, 30, tzinfo=timezone.utc)
+            tag_rows["middle"].pushed_at = datetime(2026, 5, 5, 10, 20, 30, tzinfo=timezone.utc)
+            tag_rows["a-new"].pushed_at = datetime(2026, 5, 6, 10, 20, 30, tzinfo=timezone.utc)
+            summaries = {
+                "z-old": ("sha256:old", "2026-05-04T10:20:30Z"),
+                "middle": ("sha256:middle", "2026-05-05T10:20:30Z"),
+                "a-new": ("sha256:new", "2026-05-06T10:20:30Z"),
+            }
+            for tag_name, (digest, created_at) in summaries.items():
+                tag_rows[tag_name].manifest_digest = digest
+                _seed_manifest_summary(
+                    session,
+                    repository_name="sheldylew/app",
+                    manifest_digest=digest,
+                    tag_created_at=created_at,
+                )
+            session.commit()
+            _grant_reader(session, username="sort-reader", password="sort-reader-pass")
+
+        login = _login(client, "sort-reader", "sort-reader-pass")
+        assert login.status_code == 200
+        created_asc = client.get("/api/repos/sheldylew/app/tags?sort=created&direction=asc")
+        tag_asc = client.get("/api/repos/sheldylew/app/tags?sort=tag&direction=asc")
+        tag_desc = client.get("/api/repos/sheldylew/app/tags?sort=tag&direction=desc")
+
+    assert created_asc.status_code == 200
+    assert [tag["tag"] for tag in created_asc.json()["tags"]] == ["z-old", "middle", "a-new"]
+    assert created_asc.json()["sorting"] == {"sort": "created", "direction": "asc"}
+    assert [tag["tag"] for tag in tag_asc.json()["tags"]] == ["a-new", "middle", "z-old"]
+    assert tag_asc.json()["sorting"] == {"sort": "tag", "direction": "asc"}
+    assert [tag["tag"] for tag in tag_desc.json()["tags"]] == ["z-old", "middle", "a-new"]
+    assert tag_desc.json()["sorting"] == {"sort": "tag", "direction": "desc"}
+
+
+def test_repo_tags_reject_unsupported_sorting(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/app", tags=("latest",))
+            session.commit()
+            _grant_reader(session, username="bad-sort-reader", password="bad-sort-reader-pass")
+
+        login = _login(client, "bad-sort-reader", "bad-sort-reader-pass")
+        assert login.status_code == 200
+        bad_sort = client.get("/api/repos/sheldylew/app/tags?sort=size")
+        bad_direction = client.get("/api/repos/sheldylew/app/tags?direction=sideways")
+
+    assert bad_sort.status_code == 400
+    assert bad_sort.json()["detail"] == "Unsupported tag sort."
+    assert bad_direction.status_code == 400
+    assert bad_direction.json()["detail"] == "Unsupported tag sort direction."
 
 
 def test_repo_tags_exclude_soft_deleted_tags(settings) -> None:

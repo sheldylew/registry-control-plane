@@ -8,8 +8,12 @@ import RepositoryVisibilityPanel from "@/app/components/repository-visibility-pa
 import { apiFetch } from "@/app/lib/server-api";
 import { getUiTimezone } from "@/app/lib/ui-settings";
 
-function buildApiPath(repoPath, page) {
-  return `/api/repos/${repoPath}/tags?page=${String(page)}`;
+function buildApiPath(repoPath, page, sort, direction) {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("sort", sort);
+  params.set("direction", direction);
+  return `/api/repos/${repoPath}/tags?${params.toString()}`;
 }
 
 export default async function RepoDetailPage({ params, searchParams }) {
@@ -18,7 +22,9 @@ export default async function RepoDetailPage({ params, searchParams }) {
   const resolvedSearchParams = await searchParams;
   const repoPath = decodeURIComponent(resolvedParams.repo);
   const page = Math.max(Number(resolvedSearchParams?.page || "1") || 1, 1);
-  const response = await apiFetch(buildApiPath(repoPath, page));
+  const sort = ["created", "tag"].includes(resolvedSearchParams?.sort) ? resolvedSearchParams.sort : "created";
+  const direction = ["asc", "desc"].includes(resolvedSearchParams?.direction) ? resolvedSearchParams.direction : "desc";
+  const response = await apiFetch(buildApiPath(repoPath, page, sort, direction));
 
   if (response.status === 404) {
     notFound();

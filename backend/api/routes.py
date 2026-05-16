@@ -2303,8 +2303,17 @@ def list_repository_tags(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
     page: int = 1,
+    sort: str = "created",
+    direction: str = "desc",
 ):
     safe_page = max(page, 1)
+    safe_sort = sort.lower()
+    safe_direction = direction.lower()
+    if safe_sort not in {"created", "tag"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported tag sort.")
+    if safe_direction not in {"asc", "desc"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported tag sort direction.")
+
     page_size = effective_default_page_size(db)
     repository = db.scalar(
         select(Repository).where(
@@ -2328,17 +2337,34 @@ def list_repository_tags(
     ) or 0
     page_start = (safe_page - 1) * page_size
     page_end = page_start + page_size
+    if safe_sort == "tag":
+        sort_order = (
+            RepositoryTag.name.asc() if safe_direction == "asc" else RepositoryTag.name.desc(),
+            RepositoryTag.pushed_at.is_(None),
+            RepositoryTag.pushed_at.desc(),
+        )
+    else:
+        sort_order = (
+            CachedManifestSummary.created_at.is_(None),
+            CachedManifestSummary.created_at.asc() if safe_direction == "asc" else CachedManifestSummary.created_at.desc(),
+            RepositoryTag.pushed_at.is_(None),
+            RepositoryTag.pushed_at.asc() if safe_direction == "asc" else RepositoryTag.pushed_at.desc(),
+            RepositoryTag.name.asc(),
+        )
     tag_rows = db.scalars(
         select(RepositoryTag)
+        .outerjoin(
+            CachedManifestSummary,
+            and_(
+                CachedManifestSummary.repository_name == repo_name,
+                CachedManifestSummary.manifest_digest == RepositoryTag.manifest_digest,
+            ),
+        )
         .where(
             RepositoryTag.repository_id == repository.id,
             RepositoryTag.deleted_at.is_(None),
         )
-        .order_by(
-            RepositoryTag.pushed_at.is_(None),
-            RepositoryTag.pushed_at.desc(),
-            RepositoryTag.name.asc(),
-        )
+        .order_by(*sort_order)
         .offset(page_start)
         .limit(page_size)
     ).all()
@@ -2400,6 +2426,10 @@ def list_repository_tags(
             for tag in tags
         ],
         "truncation": truncation,
+        "sorting": {
+            "sort": safe_sort,
+            "direction": safe_direction,
+        },
         "pagination": {
             "page": safe_page,
             "page_size": page_size,

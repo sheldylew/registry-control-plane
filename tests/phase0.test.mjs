@@ -79,6 +79,11 @@ test("repository tag page shows the paginated total count", async () => {
   assert.match(tagsPanel, /formatRelativeTime/);
   assert.match(tagsPanel, /formatDigest/);
   assert.match(tagsPanel, /function DigestTooltip/);
+  assert.match(tagsPanel, /function SortHeader/);
+  assert.match(tagsPanel, /function buildSortHref/);
+  assert.match(tagsPanel, /normalizeSortState\(payload\.sorting\)/);
+  assert.match(tagsPanel, /href=\{buildSortHref\(payload\.repo, "created", sortingForLinks\)\}/);
+  assert.match(tagsPanel, /href=\{buildSortHref\(payload\.repo, "tag", sortingForLinks\)\}/);
   assert.match(tagsPanel, /role="tooltip"/);
   assert.match(tagsPanel, /Full digest/);
   assert.match(tagsPanel, /digest\.slice\(0, 15\)/);
@@ -97,7 +102,8 @@ test("repository tag deletes redirect to the remaining tag page", async () => {
   assert.match(tagsPanel, /const remainingTags = Math\.max\(Number\(pagination\?\.total \|\| 0\) - deleteCount, 0\)/);
   assert.match(tagsPanel, /if \(remainingTags === 0\) \{\s*return "\/repos";\s*\}/);
   assert.match(tagsPanel, /const lastPageAfterDelete = Math\.max\(Math\.ceil\(remainingTags \/ pageSize\), 1\)/);
-  assert.match(tagsPanel, /redirectPath=\{buildTagDeleteRedirectPath\(payload\.repo, payload\.pagination\)\}/);
+  assert.match(tagsPanel, /paginationForRedirects = \{ \.\.\.payload\.pagination, sorting: sortingForLinks \}/);
+  assert.match(tagsPanel, /redirectPath=\{buildTagDeleteRedirectPath\(payload\.repo, paginationForRedirects\)\}/);
 });
 
 test("repository tag deletes warn when a manifest is shared", async () => {

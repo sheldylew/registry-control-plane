@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClockIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronUpDownIcon, ChevronUpIcon } from "@heroicons/react/20/solid";
 
 import ActionMenu from "@/app/components/ui/action-menu";
 import Badge from "@/app/components/ui/badge";
@@ -31,14 +32,34 @@ function readCookie(name) {
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
 }
 
-function buildPageHref(repoPath, page) {
+const SORT_OPTIONS = new Set(["created", "tag"]);
+const DIRECTION_OPTIONS = new Set(["asc", "desc"]);
+
+function normalizeSortState(sorting) {
+  const sort = SORT_OPTIONS.has(sorting?.sort) ? sorting.sort : "created";
+  const direction = DIRECTION_OPTIONS.has(sorting?.direction) ? sorting.direction : "desc";
+  return { sort, direction };
+}
+
+function buildPageHref(repoPath, page, sorting) {
+  const { sort, direction } = normalizeSortState(sorting);
   const basePath = `/repos/${encodeURIComponent(repoPath)}`;
-  if (page <= 1) {
-    return basePath;
-  }
   const params = new URLSearchParams();
-  params.set("page", String(page));
-  return `${basePath}?${params.toString()}`;
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+  if (sort !== "created" || direction !== "desc") {
+    params.set("sort", sort);
+    params.set("direction", direction);
+  }
+  const query = params.toString();
+  return query ? `${basePath}?${query}` : basePath;
+}
+
+function buildSortHref(repoPath, sortKey, currentSorting) {
+  const { sort, direction } = normalizeSortState(currentSorting);
+  const nextDirection = sort === sortKey && direction === "asc" ? "desc" : "asc";
+  return buildPageHref(repoPath, 1, { sort: sortKey, direction: nextDirection });
 }
 
 function buildTagDeleteRedirectPath(repoPath, pagination) {
@@ -54,7 +75,33 @@ function buildBulkTagDeleteRedirectPath(repoPath, pagination, deleteCount) {
   const pageSize = Math.max(Number(pagination?.page_size || 1), 1);
   const currentPage = Math.max(Number(pagination?.page || 1), 1);
   const lastPageAfterDelete = Math.max(Math.ceil(remainingTags / pageSize), 1);
-  return buildPageHref(repoPath, Math.min(currentPage, lastPageAfterDelete));
+  return buildPageHref(repoPath, Math.min(currentPage, lastPageAfterDelete), pagination?.sorting);
+}
+
+function SortHeader({ repoPath, sorting, sortKey, align = "left", children }) {
+  const { sort, direction } = normalizeSortState(sorting);
+  const active = sort === sortKey;
+  const nextDirection = active && direction === "asc" ? "desc" : "asc";
+  const directionLabel = nextDirection === "asc" ? "ascending" : "descending";
+  const SortIcon = active ? (direction === "asc" ? ChevronUpIcon : ChevronDownIcon) : ChevronUpDownIcon;
+
+  return (
+    <Link
+      href={buildSortHref(repoPath, sortKey, sorting)}
+      prefetch={false}
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
+      aria-label={`Sort by ${children} ${directionLabel}`}
+      className={`inline-flex items-center gap-1.5 rounded-md text-slate-300 transition hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-300/20 ${
+        align === "center" ? "justify-center" : ""
+      }`}
+    >
+      <span>{children}</span>
+      <SortIcon
+        className={`h-4 w-4 ${active ? "text-cyan-200" : "text-slate-500"}`}
+        aria-hidden="true"
+      />
+    </Link>
+  );
 }
 
 function buildSharedManifestWarning(item) {
@@ -178,6 +225,9 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
   const [bulkError, setBulkError] = useState("");
   const [bulkPending, setBulkPending] = useState(false);
   const tags = Array.isArray(payload.tags) ? payload.tags : [];
+  const sorting = normalizeSortState(payload.sorting);
+  const sortingForLinks = { ...sorting };
+  const paginationForRedirects = { ...payload.pagination, sorting: sortingForLinks };
   const selectableTags = useMemo(() => tags.map((tag) => tag.tag), [tags]);
   const selectedTagList = selectableTags.filter((tag) => selectedTags.has(tag));
   const selectedItems = tags.filter((tag) => selectedTags.has(tag.tag));
@@ -242,7 +292,7 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
         return;
       }
 
-      const redirectPath = buildBulkTagDeleteRedirectPath(payload.repo, payload.pagination, selectedCount);
+      const redirectPath = buildBulkTagDeleteRedirectPath(payload.repo, paginationForRedirects, selectedCount);
       setSelectedTags(new Set());
       setBulkDialogOpen(false);
       router.push(redirectPath);
@@ -287,6 +337,30 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
       <PanelHeader title="Tags" action={headerAction} />
       {tags.length ? (
         <div className="mt-4">
+          <div className="mb-3 grid grid-cols-2 gap-2 lg:hidden">
+            <Button
+              as={Link}
+              href={buildSortHref(payload.repo, "created", sortingForLinks)}
+              prefetch={false}
+              variant={sorting.sort === "created" ? "primary" : "secondary"}
+              size="sm"
+              className="justify-center"
+            >
+              <ChevronUpDownIcon className="h-4 w-4" aria-hidden="true" />
+              Created {sorting.sort === "created" ? (sorting.direction === "asc" ? "oldest" : "newest") : ""}
+            </Button>
+            <Button
+              as={Link}
+              href={buildSortHref(payload.repo, "tag", sortingForLinks)}
+              prefetch={false}
+              variant={sorting.sort === "tag" ? "primary" : "secondary"}
+              size="sm"
+              className="justify-center"
+            >
+              <ChevronUpDownIcon className="h-4 w-4" aria-hidden="true" />
+              Tag {sorting.sort === "tag" ? (sorting.direction === "asc" ? "A-Z" : "Z-A") : ""}
+            </Button>
+          </div>
           <TableShell
             mobileCards={(
               <MobileCardList>
@@ -366,7 +440,7 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
                           confirmationValue={`${payload.repo}:${tag.tag}`}
                           requireConfirmation={false}
                           endpoint={`/api/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/delete`}
-                          redirectPath={buildTagDeleteRedirectPath(payload.repo, payload.pagination)}
+                          redirectPath={buildTagDeleteRedirectPath(payload.repo, paginationForRedirects)}
                           buttonLabel="Delete"
                           successLabel="Deleting..."
                         />
@@ -391,10 +465,18 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
                       />
                     </th>
                   ) : null}
-                  <th className="px-4 py-4 font-medium">Created</th>
+                  <th className="px-4 py-4 font-medium">
+                    <SortHeader repoPath={payload.repo} sorting={sortingForLinks} sortKey="created">
+                      Created
+                    </SortHeader>
+                  </th>
                   <th className="px-4 py-4 font-medium">Size</th>
                   <th className="px-4 py-4 font-medium">Content Digest</th>
-                  <th className="px-4 py-4 text-center font-medium">Tag</th>
+                  <th className="px-4 py-4 text-center font-medium">
+                    <SortHeader repoPath={payload.repo} sorting={sortingForLinks} sortKey="tag" align="center">
+                      Tag
+                    </SortHeader>
+                  </th>
                   <th className="px-4 py-4 font-medium">Arch</th>
                   <th className="px-4 py-4 font-medium">History</th>
                   {payload.can_delete_tag ? <th className="px-4 py-4 text-right font-medium">Delete</th> : null}
@@ -467,7 +549,7 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
                           confirmationValue={`${payload.repo}:${tag.tag}`}
                           requireConfirmation={false}
                           endpoint={`/api/repos/${encodeURIComponent(payload.repo)}/tags/${encodeURIComponent(tag.tag)}/delete`}
-                          redirectPath={buildTagDeleteRedirectPath(payload.repo, payload.pagination)}
+                          redirectPath={buildTagDeleteRedirectPath(payload.repo, paginationForRedirects)}
                           buttonLabel="Delete"
                           successLabel="Deleting..."
                         />
@@ -503,7 +585,7 @@ export default function RepositoryTagsPanel({ payload, timeZone }) {
         pageSize={payload.pagination.page_size}
         total={payload.pagination.total}
         label="tags"
-        hrefForPage={(page) => buildPageHref(payload.repo, page)}
+        hrefForPage={(page) => buildPageHref(payload.repo, page, sortingForLinks)}
       />
 
       <Dialog
