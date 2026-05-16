@@ -390,6 +390,9 @@ networks:
     name: \${RCP_NETWORK_NAME:-registry-control-plane}
 EOF
 
+cp "$ROOT_DIR/scripts/rcp" "$RELEASE_DIR/rcp"
+chmod 755 "$RELEASE_DIR/rcp"
+
 cat >"$RELEASE_DIR/README.md" <<EOF
 Release package for image tag: ${IMAGE_TAG}
 Built for platform: ${PLATFORM}
@@ -413,7 +416,21 @@ Load images:
 
 2. Start the stack:
 
-   docker compose -f docker-compose.yml up -d
+   ./rcp up
+
+Useful operator commands:
+
+- ./rcp help
+- ./rcp doctor
+- ./rcp backup --full
+- ./rcp logs
+
+Optional cleanup after first-boot setup completes:
+
+- docker compose rm -f auth-init
+
+Keep the auth-init service in docker-compose.yml. It is a one-shot bootstrap
+job that may be rerun by future starts, restores, or upgrades.
 EOF
 
 echo "Release package prepared at: $RELEASE_DIR"

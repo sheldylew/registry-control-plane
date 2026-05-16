@@ -107,16 +107,18 @@ Avoid turning the table page itself into a full data-entry form plus a listing u
 
 ## Current repo implications
 
-The current codebase already has the beginnings of this model:
+The current codebase now follows this model across the primary admin surfaces:
 
-- `users-panel.jsx` already uses dialogs for user creation and password reset
-- `repo-delete-panel.jsx` already uses a confirmation dialog for destructive action
+- `admin-shell.jsx` uses a desktop sidebar and a top-sliding mobile command menu; non-admin users only see the repository browser entry.
+- `users-panel.jsx` and `tokens-panel.jsx` use paginated presentation tables or cards, with create/reset/revoke work in dialogs or action menus.
+- `user-profile-panel.jsx` and `robot-profile-panel.jsx` use profile-style detail pages for identity summary, related tokens, permissions, and recent activity.
+- `robots-panel.jsx` uses cards and dialogs for robot creation and token issuance, while profile pages handle per-robot inspection.
+- `permissions-panel.jsx` keeps the page in presentation mode, then uses a focused dialog with switches for pull, push, and delete-tag access.
+- `settings-panel.jsx` presents current runtime settings in a detail list and uses one edit dialog for origin, UI timezone, page size, audit retention, automatic rebuild, and storage refresh interval.
+- `maintenance`, `sessions`, `audit`, registry inbox, and repository tag views use mobile disclosure panels, pagination, or mobile card lists where dense desktop tables would be hard to use.
+- `repository-visibility-panel.jsx` uses a switch for public/private state, and `repo-delete-panel.jsx` uses a confirmation dialog for destructive action.
 
-The next UI pass should bring the rest of the admin surfaces into the same shape:
-
-- move permission creation and editing out of the always-open inline form
-- make settings feel like stateful controls and editable values rather than a lone raw form
-- use reusable admin primitives so new pages do not invent their own patterns
+Future admin work should preserve that shape: default to inspection first, keep mutation flows focused, and reuse the existing primitives instead of inventing page-local controls.
 
 ## Reusable primitives
 
@@ -127,7 +129,10 @@ As the admin UI grows, prefer shared primitives for:
 - `ConfirmDialog`
 - `DetailList`
 - `ActionMenu`
-- `StatusBadge`
+- `Badge`
 - `EmptyState`
+- `Pagination`
+- `MobileCollapsiblePanel`
+- `MobileCardList`
 
 The goal is consistent operator-facing behavior across the admin area, not one-off page-specific interaction rules.

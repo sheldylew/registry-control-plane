@@ -1,0 +1,796 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Registry Control Plane operator wrapper.
+#
+# This script is intentionally a thin layer over Docker Compose. The application
+# still runs as several containers because those service boundaries are useful:
+# nginx is the public entrypoint, the API owns state and auth, the web container
+# serves the dashboard, auth-init performs first-boot setup, and registry:2 keeps
+# the registry API/runtime separate.
+#
+# The wrapper gives operators one memorable command for routine work while still
+# leaving the Compose files as the source of truth. If a deployment needs a raw
+# Docker command, nothing here prevents that.
+#
+# The script is also written to work from two locations:
+#
+#   - source checkout: ./scripts/rcp
+#   - release bundle:  ./rcp
+#
+# That lets the offline package include the exact same operator interface without
+# rewriting paths after scripts/docker-save.sh creates a release directory.
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+
+if [[ -f "${SCRIPT_DIR}/docker-compose.yml" ]]; then
+  ROOT_DIR="$SCRIPT_DIR"
+elif [[ -f "${SCRIPT_DIR}/../docker-compose.yml" ]]; then
+  ROOT_DIR="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
+else
+  ROOT_DIR="$(pwd)"
+fi
+
+USE_LOCAL_COMPOSE=0
+COMPOSE_ARGS=()
+BACKUP_RESTART_STACK=0
+
+usage() {
+  cat <<'EOF'
+Usage:
+  rcp [global options] COMMAND [command options]
+
+Operator wrapper for the Registry Control Plane Docker Compose stack.
+
+Global options:
+  --root DIR             Run against a specific install/source directory
+  --local                Use docker-compose.local.yml in addition to the base file
+  -f, --compose-file YML Add a Compose file. May be passed more than once.
+  -h, --help            Show this help
+
+Commands:
+  help [COMMAND]         Show general help or command-specific help
+  doctor                 Validate Docker, Compose config, runtime state, and HTTP paths
+  backup                 Create a full or database-only backup
+  up                     Start the stack in detached mode
+  down                   Stop and remove stack containers, preserving volumes
+  restart [SERVICE...]   Restart the full stack or specific services
+  status                 Show docker compose ps output
+  logs [SERVICE...]      Follow recent logs
+  upgrade                Backup, update/rebuild containers, and run doctor again
+  bundle                 Create an offline image bundle with scripts/docker-save.sh
+  config                 Render the resolved Compose configuration
+
+Examples:
+  ./scripts/rcp doctor
+  ./scripts/rcp backup --full
+  ./scripts/rcp backup --db-only --output ./backups
+  ./scripts/rcp up
+  ./scripts/rcp logs api
+  ./scripts/rcp --local up
+  ./scripts/rcp upgrade --build
+
+Notes:
+  - Full backups contain registry blobs and signing material. Treat them as
+    sensitive artifacts.
+  - The default Compose file keeps nginx bound to 127.0.0.1:8080. Put TLS in
+    front of that listener for LAN or public access.
+EOF
+}
+
+doctor_usage() {
+  cat <<'EOF'
+Usage:
+  rcp doctor [--preflight-only]
+
+Validate the installation and print actionable failures.
+
+Checks include:
+  - docker and docker compose availability
+  - rendered Compose configuration
+  - required services in the Compose model
+  - important production configuration from .env/environment
+  - running container state when containers exist
+  - nginx /healthz, /api/healthz, and /v2/ HTTP paths when curl is available
+
+Options:
+  --preflight-only       Skip runtime container and HTTP checks
+  -h, --help            Show this help
+EOF
+}
+
+backup_usage() {
+  cat <<'EOF'
+Usage:
+  rcp backup [--full|--db-only] [--output DIR] [--no-stop]
+
+Create a backup under DIR, defaulting to ./backups.
+
+Modes:
+  --full                 Archive app state, registry blobs, signing material,
+                         rendered registry config, metadata, and .env if present
+                         (default)
+  --db-only              Copy only /data/app.db from the API container
+
+Options:
+  --output DIR           Backup root directory (default: ./backups)
+  --no-stop              Do not stop running services before a full backup
+  -h, --help            Show this help
+
+Notes:
+  - --db-only is convenient before small admin changes, but it is not enough for
+    full disaster recovery because it does not include registry blobs or signing
+    material.
+  - Full backup stops the running stack by default so registry data and app state
+    are captured together. The stack is started again afterward.
+EOF
+}
+
+upgrade_usage() {
+  cat <<'EOF'
+Usage:
+  rcp upgrade [--pull|--build]
+
+Backup the current installation, refresh containers, and run doctor again.
+
+Options:
+  --pull                 Pull images, then recreate containers (default)
+  --build                Use ./scripts/upgrade-stack.sh when available, otherwise
+                         docker compose build before recreating containers
+  -h, --help            Show this help
+EOF
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+info() {
+  printf '%s\n' "$*"
+}
+
+compose() {
+  docker compose "${COMPOSE_ARGS[@]}" "$@"
+}
+
+trim_value() {
+  local value="$1"
+
+  # Keep .env parsing intentionally narrow. We only use this for non-secret
+  # operational knobs in doctor output; the application remains responsible for
+  # real config parsing.
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+
+  if [[ "$value" == \"*\" && "$value" == *\" && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  printf '%s' "$value"
+}
+
+config_value() {
+  local key="$1"
+  local default_value="$2"
+  local value=""
+  local line=""
+
+  if value="$(printenv "$key" 2>/dev/null)"; then
+    trim_value "$value"
+    return 0
+  fi
+
+  if [[ -f "${ROOT_DIR}/.env" ]]; then
+    line="$(
+      sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?${key}=//p" "${ROOT_DIR}/.env" |
+        tail -n 1
+    )"
+    if [[ -n "$line" ]]; then
+      trim_value "$line"
+      return 0
+    fi
+  fi
+
+  printf '%s' "$default_value"
+}
+
+ensure_root() {
+  [[ -d "$ROOT_DIR" ]] || die "root directory does not exist: $ROOT_DIR"
+  cd "$ROOT_DIR"
+
+  if [[ ${#COMPOSE_ARGS[@]} -eq 0 ]]; then
+    COMPOSE_ARGS=(-f docker-compose.yml)
+    if [[ "$USE_LOCAL_COMPOSE" -eq 1 ]]; then
+      COMPOSE_ARGS+=(-f docker-compose.local.yml)
+    fi
+  fi
+}
+
+parse_global_options() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --root)
+        ROOT_DIR="${2:?missing value for --root}"
+        shift 2
+        ;;
+      --local)
+        USE_LOCAL_COMPOSE=1
+        shift
+        ;;
+      -f|--compose-file)
+        COMPOSE_ARGS+=(-f "${2:?missing value for $1}")
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        die "unknown global option: $1"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  REMAINING_ARGS=("$@")
+}
+
+DOCTOR_PASSES=0
+DOCTOR_WARNINGS=0
+DOCTOR_FAILURES=0
+
+doctor_pass() {
+  DOCTOR_PASSES=$((DOCTOR_PASSES + 1))
+  printf 'PASS %-24s %s\n' "$1" "$2"
+}
+
+doctor_warn() {
+  DOCTOR_WARNINGS=$((DOCTOR_WARNINGS + 1))
+  printf 'WARN %-24s %s\n' "$1" "$2"
+}
+
+doctor_fail() {
+  DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+  printf 'FAIL %-24s %s\n' "$1" "$2"
+}
+
+doctor_summary() {
+  printf '\nDoctor summary: %s passed, %s warnings, %s failures\n' \
+    "$DOCTOR_PASSES" "$DOCTOR_WARNINGS" "$DOCTOR_FAILURES"
+
+  if [[ "$DOCTOR_FAILURES" -gt 0 ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
+service_in_list() {
+  local service="$1"
+  local services="$2"
+
+  printf '%s\n' "$services" | grep -qx "$service"
+}
+
+base_http_url() {
+  local bind_value
+  local host
+  local port
+
+  bind_value="$(config_value RCP_HTTP_BIND "127.0.0.1:8080")"
+
+  if [[ "$bind_value" == *":"* ]]; then
+    host="${bind_value%:*}"
+    port="${bind_value##*:}"
+  else
+    host="127.0.0.1"
+    port="$bind_value"
+  fi
+
+  case "$host" in
+    ""|"0.0.0.0"|"::"|"[::]")
+      host="127.0.0.1"
+      ;;
+  esac
+
+  printf 'http://%s:%s' "$host" "$port"
+}
+
+check_http_code() {
+  local label="$1"
+  local url="$2"
+  local expected_pattern="$3"
+  local code
+
+  code="$(curl -k -sS -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)"
+  if [[ "$code" =~ $expected_pattern ]]; then
+    doctor_pass "$label" "$url returned HTTP $code"
+  else
+    doctor_fail "$label" "$url returned HTTP ${code:-000}; inspect docker compose logs nginx api registry"
+  fi
+}
+
+check_container() {
+  local service="$1"
+  local mode="$2"
+  local cid=""
+  local state=""
+  local health=""
+  local exit_code=""
+
+  # Use --all here so one-shot services such as auth-init can be evaluated
+  # after they exit successfully.
+  cid="$(compose ps --all -q "$service" 2>/dev/null || true)"
+  if [[ -z "$cid" ]]; then
+    doctor_warn "$service container" "no container exists yet"
+    return 0
+  fi
+
+  state="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || true)"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+  exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$cid" 2>/dev/null || true)"
+
+  case "$mode" in
+    healthy)
+      if [[ "$health" == "healthy" ]]; then
+        doctor_pass "$service container" "healthy"
+      elif [[ "$state" == "running" && -z "$health" ]]; then
+        doctor_warn "$service container" "running but no healthcheck is reported"
+      else
+        doctor_fail "$service container" "state=${state:-unknown} health=${health:-none}; inspect docker compose logs $service"
+      fi
+      ;;
+    running)
+      if [[ "$state" == "running" ]]; then
+        doctor_pass "$service container" "running"
+      else
+        doctor_fail "$service container" "state=${state:-unknown}; inspect docker compose logs $service"
+      fi
+      ;;
+    completed)
+      if [[ "$state" == "exited" && "$exit_code" == "0" ]]; then
+        doctor_pass "$service container" "completed successfully"
+      elif [[ "$state" == "running" ]]; then
+        doctor_warn "$service container" "still running; first-boot setup may still be preparing volumes"
+      else
+        doctor_fail "$service container" "state=${state:-unknown} exit=${exit_code:-unknown}; inspect docker compose logs $service"
+      fi
+      ;;
+  esac
+}
+
+cmd_doctor() {
+  local preflight_only=0
+  local services=""
+  local expected_service=""
+  local app_env=""
+  local public_origin=""
+  local secure_cookie=""
+  local bind_value=""
+  local base_url=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --preflight-only)
+        preflight_only=1
+        shift
+        ;;
+      -h|--help)
+        doctor_usage
+        return 0
+        ;;
+      *)
+        die "unknown doctor option: $1"
+        ;;
+    esac
+  done
+
+  DOCTOR_PASSES=0
+  DOCTOR_WARNINGS=0
+  DOCTOR_FAILURES=0
+
+  info "Doctor root: $ROOT_DIR"
+  info "Compose files: ${COMPOSE_ARGS[*]}"
+  printf '\n'
+
+  if command -v docker >/dev/null 2>&1; then
+    doctor_pass "docker command" "$(command -v docker)"
+  else
+    doctor_fail "docker command" "docker is not installed or not in PATH"
+    doctor_summary
+    return $?
+  fi
+
+  if docker info >/dev/null 2>&1; then
+    doctor_pass "docker daemon" "reachable"
+  else
+    doctor_fail "docker daemon" "not reachable; start Docker and rerun doctor"
+  fi
+
+  if docker compose version >/dev/null 2>&1; then
+    doctor_pass "docker compose" "$(docker compose version --short 2>/dev/null || docker compose version)"
+  else
+    doctor_fail "docker compose" "Docker Compose v2 is required"
+  fi
+
+  if [[ -f docker-compose.yml ]]; then
+    doctor_pass "compose file" "docker-compose.yml found"
+  else
+    doctor_fail "compose file" "docker-compose.yml missing in $ROOT_DIR"
+  fi
+
+  if compose config >/dev/null 2>&1; then
+    doctor_pass "compose config" "renders successfully"
+    services="$(compose config --services 2>/dev/null || true)"
+  else
+    doctor_fail "compose config" "failed; run 'docker compose ${COMPOSE_ARGS[*]} config' for details"
+  fi
+
+  for expected_service in auth-init nginx api web registry; do
+    if service_in_list "$expected_service" "$services"; then
+      doctor_pass "service $expected_service" "present in Compose config"
+    else
+      doctor_fail "service $expected_service" "missing from Compose config"
+    fi
+  done
+
+  if [[ -f .env ]]; then
+    doctor_pass ".env" "found"
+  else
+    doctor_warn ".env" "not found; Compose defaults or exported environment will be used"
+  fi
+
+  app_env="$(config_value APP_ENV "production")"
+  public_origin="$(config_value PUBLIC_REGISTRY_ORIGIN "")"
+  secure_cookie="$(config_value SESSION_COOKIE_SECURE "true")"
+  bind_value="$(config_value RCP_HTTP_BIND "127.0.0.1:8080")"
+
+  if [[ "$app_env" == "production" ]]; then
+    doctor_pass "APP_ENV" "production"
+
+    if [[ -z "$public_origin" ]]; then
+      doctor_warn "PUBLIC_REGISTRY_ORIGIN" "blank; first-boot wizard must save an HTTPS origin before production use"
+    elif [[ "$public_origin" == https://* ]]; then
+      doctor_pass "PUBLIC_REGISTRY_ORIGIN" "$public_origin"
+    else
+      doctor_fail "PUBLIC_REGISTRY_ORIGIN" "production origin must use https://, got '$public_origin'"
+    fi
+
+    if [[ "$secure_cookie" == "true" ]]; then
+      doctor_pass "SESSION_COOKIE_SECURE" "true"
+    else
+      doctor_fail "SESSION_COOKIE_SECURE" "must stay true in production"
+    fi
+  else
+    doctor_warn "APP_ENV" "$app_env; production security checks relaxed for this run"
+  fi
+
+  case "$bind_value" in
+    127.0.0.1:*|localhost:*)
+      doctor_pass "RCP_HTTP_BIND" "$bind_value"
+      ;;
+    *)
+      doctor_warn "RCP_HTTP_BIND" "$bind_value; make sure this is intentional and protected by TLS if exposed"
+      ;;
+  esac
+
+  if [[ "$preflight_only" -eq 1 ]]; then
+    doctor_summary
+    return $?
+  fi
+
+  if [[ -z "$(compose ps -q 2>/dev/null || true)" ]]; then
+    doctor_warn "runtime state" "no Compose containers exist yet; start the stack with 'rcp up'"
+    doctor_summary
+    return $?
+  fi
+
+  check_container auth-init completed
+  check_container api healthy
+  check_container web healthy
+  check_container registry running
+  check_container nginx running
+
+  if command -v curl >/dev/null 2>&1; then
+    base_url="$(base_http_url)"
+    check_http_code "nginx healthz" "${base_url}/healthz" '^(200)$'
+    check_http_code "api healthz" "${base_url}/api/healthz" '^(200)$'
+    check_http_code "registry v2" "${base_url}/v2/" '^(200|401)$'
+  else
+    doctor_warn "curl command" "not found; skipped HTTP endpoint checks"
+  fi
+
+  doctor_summary
+  return $?
+}
+
+write_backup_metadata() {
+  local target_dir="$1"
+  local metadata_dir="${target_dir}/metadata"
+
+  mkdir -p "$metadata_dir"
+
+  {
+    printf 'created_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'root_dir=%s\n' "$ROOT_DIR"
+    printf 'compose_files=%s\n' "${COMPOSE_ARGS[*]}"
+    printf 'app_env=%s\n' "$(config_value APP_ENV "production")"
+    printf 'public_registry_origin=%s\n' "$(config_value PUBLIC_REGISTRY_ORIGIN "")"
+    printf 'rcp_http_bind=%s\n' "$(config_value RCP_HTTP_BIND "127.0.0.1:8080")"
+  } >"${metadata_dir}/backup-info.env"
+
+  compose config >"${metadata_dir}/compose-config.yml" 2>"${metadata_dir}/compose-config.stderr" || true
+  compose ps >"${metadata_dir}/compose-ps.txt" 2>"${metadata_dir}/compose-ps.stderr" || true
+  docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedSince}} {{.Size}}' \
+    >"${metadata_dir}/docker-images.txt" 2>"${metadata_dir}/docker-images.stderr" || true
+
+  if [[ -f .env ]]; then
+    cp .env "${target_dir}/env.sensitive"
+    chmod 600 "${target_dir}/env.sensitive"
+  fi
+}
+
+backup_restore_stack() {
+  if [[ "${BACKUP_RESTART_STACK:-0}" -eq 1 ]]; then
+    echo "Restoring stack after backup interruption..."
+    compose up -d >/dev/null 2>&1 || true
+  fi
+}
+
+cmd_backup() {
+  local mode="full"
+  local output_dir="./backups"
+  local stop_stack=1
+  local timestamp=""
+  local target_dir=""
+  local target_abs=""
+  local running_services=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --full)
+        mode="full"
+        shift
+        ;;
+      --db-only)
+        mode="db"
+        shift
+        ;;
+      --output)
+        output_dir="${2:?missing value for --output}"
+        shift 2
+        ;;
+      --no-stop)
+        stop_stack=0
+        shift
+        ;;
+      -h|--help)
+        backup_usage
+        return 0
+        ;;
+      *)
+        die "unknown backup option: $1"
+        ;;
+    esac
+  done
+
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  umask 077
+  mkdir -p "$output_dir"
+
+  if [[ "$mode" == "db" ]]; then
+    target_dir="${output_dir}/${timestamp}-db"
+    mkdir -p "$target_dir"
+    write_backup_metadata "$target_dir"
+
+    info "Copying API database to ${target_dir}/app.db"
+    compose cp api:/data/app.db "${target_dir}/app.db"
+    chmod 600 "${target_dir}/app.db"
+
+    info "Database backup written to ${target_dir}/app.db"
+    info "This is not a full registry disaster-recovery backup."
+    return 0
+  fi
+
+  target_dir="${output_dir}/${timestamp}-full"
+  mkdir -p "$target_dir"
+  target_abs="$(CDPATH= cd -- "$target_dir" && pwd)"
+
+  write_backup_metadata "$target_dir"
+
+  if [[ "$stop_stack" -eq 1 ]]; then
+    running_services="$(compose ps --services --filter status=running 2>/dev/null || true)"
+    if [[ -n "$running_services" ]]; then
+      info "Stopping running services for a consistent full backup..."
+      BACKUP_RESTART_STACK=1
+      trap backup_restore_stack EXIT
+      compose stop nginx web api registry >/dev/null
+    fi
+  else
+    info "Creating live full backup because --no-stop was passed."
+  fi
+
+  info "Archiving application volumes to ${target_dir}/rcp-volumes.tar.gz"
+  compose run --rm --no-deps \
+    --user 0:0 \
+    --entrypoint /bin/sh \
+    -v "${target_abs}:/backup" \
+    api \
+    -c 'set -eu
+      command -v tar >/dev/null 2>&1 || {
+        echo "tar is required in the api image for full backups" >&2
+        exit 1
+      }
+      tar -czf /backup/rcp-volumes.tar.gz \
+        -C / \
+        data \
+        var/lib/registry \
+        run/auth-private \
+        run/auth-public \
+        etc/docker/registry'
+
+  if [[ "$BACKUP_RESTART_STACK" -eq 1 ]]; then
+    info "Restarting stack after full backup..."
+    compose up -d >/dev/null
+    BACKUP_RESTART_STACK=0
+    trap - EXIT
+  fi
+
+  info "Full backup written to ${target_dir}"
+  info "Treat this directory as sensitive; it contains registry data and signing material."
+}
+
+cmd_up() {
+  compose up -d "$@"
+}
+
+cmd_down() {
+  compose down "$@"
+}
+
+cmd_restart() {
+  compose restart "$@"
+}
+
+cmd_status() {
+  compose ps "$@"
+}
+
+cmd_logs() {
+  local args=(-f --tail=200)
+  args+=("$@")
+  compose logs "${args[@]}"
+}
+
+cmd_upgrade() {
+  local mode="pull"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pull)
+        mode="pull"
+        shift
+        ;;
+      --build)
+        mode="build"
+        shift
+        ;;
+      -h|--help)
+        upgrade_usage
+        return 0
+        ;;
+      *)
+        die "unknown upgrade option: $1"
+        ;;
+    esac
+  done
+
+  info "Running pre-upgrade doctor checks..."
+  cmd_doctor --preflight-only
+
+  info "Creating pre-upgrade full backup..."
+  cmd_backup --full
+
+  if [[ "$mode" == "build" ]]; then
+    if [[ -x "${ROOT_DIR}/scripts/upgrade-stack.sh" ]]; then
+      info "Rebuilding through scripts/upgrade-stack.sh..."
+      "${ROOT_DIR}/scripts/upgrade-stack.sh"
+    else
+      info "Building images through docker compose build..."
+      compose build
+      compose up -d --force-recreate
+    fi
+  else
+    info "Pulling images and recreating containers..."
+    compose pull
+    compose up -d --force-recreate
+  fi
+
+  info "Running post-upgrade doctor checks..."
+  cmd_doctor
+}
+
+cmd_bundle() {
+  if [[ -x "${ROOT_DIR}/scripts/docker-save.sh" ]]; then
+    "${ROOT_DIR}/scripts/docker-save.sh" "$@"
+  else
+    die "scripts/docker-save.sh is not available from this install. Bundle creation is a source-tree operation."
+  fi
+}
+
+cmd_config() {
+  compose config "$@"
+}
+
+dispatch() {
+  local command="${1:-help}"
+
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$command" in
+    help)
+      if [[ "${1:-}" == "doctor" ]]; then
+        doctor_usage
+      elif [[ "${1:-}" == "backup" ]]; then
+        backup_usage
+      elif [[ "${1:-}" == "upgrade" ]]; then
+        upgrade_usage
+      else
+        usage
+      fi
+      ;;
+    doctor)
+      cmd_doctor "$@"
+      ;;
+    backup)
+      cmd_backup "$@"
+      ;;
+    up)
+      cmd_up "$@"
+      ;;
+    down)
+      cmd_down "$@"
+      ;;
+    restart)
+      cmd_restart "$@"
+      ;;
+    status|ps)
+      cmd_status "$@"
+      ;;
+    logs)
+      cmd_logs "$@"
+      ;;
+    upgrade)
+      cmd_upgrade "$@"
+      ;;
+    bundle)
+      cmd_bundle "$@"
+      ;;
+    config)
+      cmd_config "$@"
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      die "unknown command: $command"
+      ;;
+  esac
+}
+
+parse_global_options "$@"
+ensure_root
+dispatch "${REMAINING_ARGS[@]}"

@@ -14,8 +14,10 @@ Deployment shape:
 
 - leave `PUBLIC_REGISTRY_ORIGIN`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_EMAIL` blank to use the first-boot wizard
 - or set all four values to complete first-boot setup automatically from `.env`
-- review `TOKEN_ISSUER`, `TOKEN_SERVICE`, `TOKEN_TTL_SECONDS`, `SESSION_COOKIE_SECURE`, `CSRF_TRUSTED_ORIGINS`, `WEB_SESSION_RETENTION_DAYS`, `TOKEN_RECORD_RETENTION_DAYS`, `FORWARDED_ALLOW_IPS`, and `RCP_HTTP_BIND`
+- review `TOKEN_ISSUER`, `TOKEN_SERVICE`, `TOKEN_TTL_SECONDS`, response-size limits, rate limits, `SESSION_COOKIE_SECURE`, `CSRF_TRUSTED_ORIGINS`, `WEB_SESSION_RETENTION_DAYS`, `TOKEN_RECORD_RETENTION_DAYS`, `FORWARDED_ALLOW_IPS`, and `RCP_HTTP_BIND`
 - start with `docker compose up --build -d`
+
+The source checkout also includes `./scripts/rcp`, a thin operator wrapper around Docker Compose. It does not replace Compose as the source of truth; it provides one command surface for routine operations such as `doctor`, `up`, `logs`, `backup`, `upgrade`, and `bundle`.
 
 ## Configuration reference
 
@@ -48,14 +50,37 @@ Deployment shape:
 - `MANIFEST_CHILDREN_MAX_ITEMS`: max manifest-child entries returned for a manifest detail view.
 - `HISTORY_ENTRIES_MAX_ITEMS`: max history entries returned for a repository view.
 
-Default list page size is runtime-configurable from `/admin/settings` and defaults to `10`. Changing it does not require a service restart.
+### Runtime admin settings
+
+These values are stored in SQLite and changed from `/admin/settings` after setup:
+
+- Public registry origin: the source of truth for Docker auth challenges and copied pull commands. Changing it renders a new registry config and requires `docker compose restart registry`.
+- UI timezone: IANA timezone used when rendering timestamps in the admin UI. Defaults to `America/Los_Angeles`.
+- Default list page size: used by repository tags, admin lists, maintenance jobs, audit events, and similar paginated views. Defaults to `10` and must stay between `1` and `100`.
+- Audit pruning retention: retention window for audit rows and completed maintenance job logs. Defaults to `30` days.
+- Automatic registry state rebuild: when enabled, the API rebuilds the database-backed repository/tag state from the registry on startup.
+- Storage usage refresh interval: background interval for registry storage measurements. Defaults to `3600` seconds; `0` disables scheduled refresh.
+
+Only public-origin changes require a registry restart. The timezone, page size, audit retention, startup rebuild, and storage refresh settings apply without restarting services.
 
 ### Maintenance and retention
 
-- Audit pruning retention is runtime-configurable from `/admin/settings` and defaults to `30` days. `LOG_RETENTION_DAYS` remains the fallback default before an operator saves a runtime override.
+- `LOG_RETENTION_DAYS`: fallback audit and maintenance-job retention before an operator saves a runtime override.
 - `WEB_SESSION_RETENTION_DAYS`: retention window for expired or revoked browser session rows. Defaults to `30`.
 - `TOKEN_RECORD_RETENTION_DAYS`: retention window for expired or revoked PAT and robot-token rows. Defaults to `90`.
 - `MAINTENANCE_MIN_GATE_SECONDS`: minimum time the destructive maintenance gate stays up during a destructive GC run.
+
+### Registry state and notifications
+
+The registry config includes a notification endpoint at `/api/internal/registry-events`. The API authenticates those notifications with a generated bearer secret stored at `REGISTRY_NOTIFICATIONS_TOKEN_PATH`, then updates the database-backed repository/tag state cache.
+
+Operational notes:
+
+- push and delete notifications update the repository browser without walking the full registry catalog on every page load
+- failed notifications are visible at `/admin/maintenance/inbox` and can be retried from the UI
+- `/admin/maintenance` can manually rebuild cached registry state from the live registry
+- the startup rebuild setting in `/admin/settings` controls whether that rebuild runs automatically when the API boots
+- registry storage usage is measured from `REGISTRY_STORAGE_USAGE_ROOT`
 
 ### Network and binding
 
@@ -152,6 +177,7 @@ Traefik secures this project on a LAN by encrypting the only hop that carries us
 - full `.env` bootstrap requires all four values: `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_EMAIL`, and `PUBLIC_REGISTRY_ORIGIN`
 - local Docker runs should include `docker-compose.local.yml`, which switches cookies and app mode back to development
 - `auth-init` renders the initial registry config, prepares ownership, generates signing material on first install, and generates the one-time setup token when needed
+- after first-boot setup completes and the stack is healthy, the stopped `auth-init` container can be removed with `docker compose rm -f auth-init`; keep the `auth-init` service in Compose so future starts, restores, and upgrades can rerun the idempotent initialization step
 - the API container runs `alembic upgrade head` on boot
 - services use `restart: unless-stopped`
 - external container images are pinned to fixed tags instead of floating tags
@@ -174,6 +200,14 @@ After setup completes, restart only the registry so it reloads the rendered auth
 ```bash
 docker compose restart registry
 ```
+
+Optional cleanup after setup:
+
+```bash
+docker compose rm -f auth-init
+```
+
+Only do this after setup is complete and the stack is healthy. The stopped container can contain the one-time setup token in its logs; removing it is reasonable cleanup after the token has been used, but the `auth-init` service should remain in the Compose file for future starts, restores, and upgrades.
 
 ## Automated bootstrap
 
@@ -222,6 +256,14 @@ That workflow:
 - lets the API apply migrations on startup
 
 If you only need to refresh containers after source changes without treating it as an upgrade step, `./scripts/rebuild-stack.sh` is still fine.
+
+The wrapper exposes the same operational path as:
+
+```bash
+./scripts/rcp upgrade --build
+```
+
+For packaged installs created by `./scripts/docker-save.sh`, the same wrapper is copied into the release directory as `./rcp`.
 
 ## Restore notes
 

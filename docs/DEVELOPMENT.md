@@ -41,6 +41,14 @@ Rebuild images and replace running containers after code changes:
 
 That command can start in first-boot setup mode with no credentials. Use `ALLOW_DEV_DEFAULT_CREDENTIALS=1 ./scripts/rebuild-stack.sh` only when you intentionally want the documented local admin defaults.
 
+For routine local stack operations, the operator wrapper can include the local Compose overlay:
+
+```bash
+./scripts/rcp --local doctor
+./scripts/rcp --local up
+./scripts/rcp --local logs
+```
+
 Open the UI:
 
 ```text
@@ -54,6 +62,14 @@ Useful endpoints:
 - `GET /auth/token` through nginx: `http://localhost:8080/auth/token`
 - `GET /v2/` through nginx: `http://localhost:8080/v2/`
 - `GET /metrics` directly from the API process: `http://127.0.0.1:8000/metrics` in local direct-run mode
+
+Useful local UI surfaces:
+
+- `/setup` for first-boot setup when bootstrap values are omitted
+- `/admin` for the operator dashboard and admin shell
+- `/repos` for the visible repository browser
+- `/admin/maintenance/inbox` for registry notification processing failures
+- `/admin/settings` for runtime settings stored in SQLite
 
 ## Local Node workflow
 
@@ -149,7 +165,7 @@ ALLOW_DEV_DEFAULT_CREDENTIALS=1 \
 ./scripts/e2e-test.sh
 ```
 
-This script builds on the smoke test. It seeds the Phase 4 permission matrix in the running API container, then exercises real allow and deny cases for admin, reader, developer, and robot paths, plus tag delete, empty-repository delete, and live maintenance-gated garbage collection flows.
+This script builds on the smoke test. It seeds the permission matrix in the running API container, then exercises real allow and deny cases for admin, reader, developer, and robot paths, plus tag delete, empty-repository delete, and live maintenance-gated garbage collection flows.
 
 Run Alembic migrations manually:
 

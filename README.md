@@ -10,8 +10,8 @@ This project layers a web control plane in front of a Docker Registry deployment
 
 - `nginx` is the public entrypoint on `http://localhost:8080`
 - `registry:2` serves the registry API behind `/v2/`
-- FastAPI serves app APIs, auth, and health endpoints
-- Next.js serves the dashboard UI
+- FastAPI serves app APIs, registry auth, setup, health, and operational state endpoints
+- Next.js serves the landing page, login/setup screens, admin UI, and repository browser
 - SQLite-backed application state persists in a Docker volume
 - RS256-signed bearer tokens back Docker client authentication
 
@@ -22,9 +22,12 @@ This project layers a web control plane in front of a Docker Registry deployment
 - Repository-level permissions with public or private visibility controls
 - Anonymous pull-only access for repositories marked `public`
 - Bounded catalog, tag, manifest, and history queries for larger registries
-- Maintenance controls for analysis-only runs, garbage collection, and aggressive cleanup
+- Database-backed repository and tag state from registry push/delete notifications
+- Maintenance controls for analysis-only runs, registry-state rebuilds, garbage collection, aggressive cleanup, and notification retries
+- Runtime admin settings for the public origin, UI timezone, default page size, audit retention, startup rebuilds, and storage-usage refreshes
 - Audit history plus retained maintenance job logs with configurable pruning
 - Non-root container runtime hardening with generated signing material kept out of git
+- Operator wrapper for stack checks, backups, logs, upgrades, and offline bundle operations
 - Docker-backed smoke and end-to-end verification scripts
 
 ## Deployment model
@@ -33,8 +36,8 @@ The supported package format is Docker Compose.
 
 - `nginx` is the only public entrypoint and publishes port `8080`
 - `registry:2` stays behind nginx and serves `/v2/`
-- FastAPI owns auth, identity, permissions, setup, maintenance, and token issuance
-- Next.js owns the dashboard UI
+- FastAPI owns auth, identity, permissions, setup, settings, registry state, maintenance, and token issuance
+- Next.js owns the public entry screens, admin shell, repository browser, and dashboard UI
 - SQLite application state persists in `app-data`
 - Registry blobs persist in `registry-data`
 - Signing material and rendered registry auth config live in dedicated Docker volumes
@@ -59,6 +62,14 @@ Then open `http://localhost:8080/`.
 
 For a persistent deployment, copy `.env.example` to `.env` and follow the deployment guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+Routine Compose operations can also go through the wrapper:
+
+```bash
+./scripts/rcp doctor
+./scripts/rcp up
+./scripts/rcp logs
+```
+
 ## Configuration
 
 The minimum production-facing configuration is:
@@ -76,7 +87,8 @@ The repo also supports optional controls for:
 - session lifetime and cookie security
 - CSRF trusted origins and forwarded proxy handling
 - repository list and history response bounds
-- maintenance gate timing and retained log lifetime
+- UI timezone, default list page size, storage usage refresh interval, and automatic registry-state rebuild behavior
+- maintenance gate timing, audit pruning, session/token record retention, and retained job log lifetime
 
 ### Browser login from LAN hostnames
 
@@ -108,4 +120,4 @@ There are also backend, frontend, and integration test commands in [docs/DEVELOP
 
 ## Status
 
-As of May 7, 2026, the hardened Docker workflow, first-boot setup path, and Docker-backed end-to-end verification are documented and working in this repository.
+As of May 16, 2026, the documentation reflects the current Docker Compose runtime, first-boot setup path, admin UI and repository browser, registry notification/state-cache flow, and Docker-backed verification paths.

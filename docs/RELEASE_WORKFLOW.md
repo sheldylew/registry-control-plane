@@ -17,21 +17,28 @@ git switch -c release
 
 ## Creating a release
 
-For each release:
+For each release, start from a clean `development` branch and run the Docker-backed gate before promoting branch heads:
 
 ```bash
+git switch development
+ALLOW_DEV_DEFAULT_CREDENTIALS=1 ./scripts/e2e-test.sh
+
 git switch master
 git merge --ff-only development
+git push origin master
+
 git switch release
 git merge --ff-only development
-./scripts/release-tag.sh patch
+git push origin release
 ```
 
-To publish the tag to `origin`:
+Create and publish the release tag from `release` in one helper invocation:
 
 ```bash
 ./scripts/release-tag.sh patch --push
 ```
+
+If you create a tag without `--push`, publish that exact tag with `git push origin vX.Y.Z`. Do not rerun `./scripts/release-tag.sh patch --push` afterward; that would calculate and create the next patch tag.
 
 ## Release helper behavior
 
@@ -41,6 +48,7 @@ The release helper:
 - defaults to tagging from the `release` branch
 - refuses dirty worktrees unless `--force-dirty` is passed
 - supports `major`, `minor`, `patch`, or an explicit version
+- supports `--push` to push the newly created tag to the configured remote
 - supports `--dry-run` for validation without creating a tag
 
 ## Offline image package
@@ -59,9 +67,10 @@ This creates a folder under `releases/` (for example, `releases/latest` by defau
 - `web-<tag>.tar`
 - `nginx-<tag>.tar`
 - `docker-compose.yml`
+- `rcp`
 - `README.md`
 
-Load the tarballs first (`docker load -i <tarfile>`) before running the generated compose file.
+Load the tarballs first (`docker load -i <tarfile>`), then use `./rcp up` or run the generated compose file directly.
 
 Validation examples:
 
