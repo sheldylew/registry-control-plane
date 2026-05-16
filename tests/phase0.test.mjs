@@ -441,12 +441,13 @@ test("compose builds pass runtime build metadata into app images", async () => {
     assert.match(source, /APP_REVISION: \$\{APP_REVISION:-dev\}/);
     assert.match(source, /APP_IMAGE_TAG:/);
   }
-  assert.equal([...dockerfile.matchAll(/ARG APP_VERSION=dev/g)].length, 2);
-  assert.equal([...dockerfile.matchAll(/ARG APP_REVISION=dev/g)].length, 2);
-  assert.equal([...dockerfile.matchAll(/ARG APP_BUILD_TIME=/g)].length, 2);
-  assert.equal([...dockerfile.matchAll(/ARG APP_IMAGE_TAG=/g)].length, 2);
-  assert.match(dockerfile, /> \/srv\/build-info\.env/);
-  assert.match(dockerfile, /> \/web\/build-info\.env/);
+  assert.equal([...dockerfile.matchAll(/ARG APP_VERSION=dev/g)].length, 3);
+  assert.equal([...dockerfile.matchAll(/ARG APP_REVISION=dev/g)].length, 3);
+  assert.equal([...dockerfile.matchAll(/ARG APP_BUILD_TIME=/g)].length, 3);
+  assert.equal([...dockerfile.matchAll(/ARG APP_IMAGE_TAG=/g)].length, 3);
+  assert.match(dockerfile, /FROM --platform=\$BUILDPLATFORM alpine:3\.20 AS build-metadata/);
+  assert.match(dockerfile, /COPY --from=build-metadata --chown=10001:10001 \/out\/srv\/build-info\.env \/srv\/build-info\.env/);
+  assert.match(dockerfile, /COPY --from=build-metadata --chown=10001:10001 \/out\/web\/build-info\.env \/web\/build-info\.env/);
   assert.match(dockerfile, /printf 'APP_BUILD_TIME=%s\\n' "\$APP_BUILD_TIME"/);
   for (const source of [rebuildStack, smokeTest, upgradeStack]) {
     assert.match(source, /APP_BUILD_TIME="\$\{APP_BUILD_TIME:-\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)\}"/);

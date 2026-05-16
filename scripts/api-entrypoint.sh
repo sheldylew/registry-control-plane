@@ -52,12 +52,12 @@ PY
 )"
 
 if [ -n "$legacy_revision" ]; then
-  alembic -c backend/alembic.ini stamp "$legacy_revision"
+  python -m alembic -c backend/alembic.ini stamp "$legacy_revision"
 fi
 
-alembic -c backend/alembic.ini upgrade head
+python -m alembic -c backend/alembic.ini upgrade head
 
-exec uvicorn backend.main:app \
+exec python -m uvicorn backend.main:app \
   --host 0.0.0.0 \
   --port 8000 \
   --proxy-headers \

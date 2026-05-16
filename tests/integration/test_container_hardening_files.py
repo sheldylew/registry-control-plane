@@ -25,6 +25,7 @@ def test_compose_file_contains_runtime_hardening() -> None:
 def test_dockerfile_runs_api_and_web_as_non_root() -> None:
     dockerfile_text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "useradd --uid 10001" in dockerfile_text
-    assert "USER app" in dockerfile_text
-    assert "adduser -S -D -H -u 10001" in dockerfile_text
+    assert dockerfile_text.count("USER 10001:10001") == 2
+    assert "--chown=10001:10001" in dockerfile_text
+    assert "useradd --uid 10001" not in dockerfile_text
+    assert "adduser -S -D -H -u 10001" not in dockerfile_text
