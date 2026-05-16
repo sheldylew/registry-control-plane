@@ -147,6 +147,28 @@ def authenticate_basic_principal(
     )
 
 
+def _anonymous_subject() -> AuthenticatedSubject:
+    return AuthenticatedSubject(
+        subject_type="anonymous",
+        subject_id=None,
+        subject_name="anonymous",
+        is_admin=False,
+    )
+
+
+def _anonymous_pull_request_allowed(
+    requested_scopes: list[RequestedScope],
+    *,
+    require_scope: bool = False,
+) -> bool:
+    if require_scope and not requested_scopes:
+        return False
+    return all(
+        scope.resource_type == "repository" and set(scope.actions).issubset({"pull"})
+        for scope in requested_scopes
+    )
+
+
 def build_registry_token_response(
     session: Session,
     *,
@@ -170,24 +192,20 @@ def build_registry_token_response(
         ) from exc
 
     if authorization:
-        username, secret = parse_basic_credentials(authorization)
-        subject = authenticate_basic_principal(session, username=username, secret=secret)
+        try:
+            username, secret = parse_basic_credentials(authorization)
+            subject = authenticate_basic_principal(session, username=username, secret=secret)
+        except HTTPException:
+            if not _anonymous_pull_request_allowed(requested_scopes, require_scope=True):
+                raise
+            subject = _anonymous_subject()
     else:
-        anonymous_requested_repo_pull_only = all(
-            scope.resource_type == "repository" and set(scope.actions).issubset({"pull"})
-            for scope in requested_scopes
-        )
-        if not anonymous_requested_repo_pull_only:
+        if not _anonymous_pull_request_allowed(requested_scopes):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Basic authentication is required.",
             )
-        subject = AuthenticatedSubject(
-            subject_type="anonymous",
-            subject_id=None,
-            subject_name="anonymous",
-            is_admin=False,
-        )
+        subject = _anonymous_subject()
 
     allowed_access = resolve_allowed_access(
         session,
@@ -196,7 +214,10 @@ def build_registry_token_response(
         is_admin=subject.is_admin,
         requested_scopes=requested_scopes,
     )
-    if not authorization and any(set(access.actions) != set(scope.actions) for scope, access in zip(requested_scopes, allowed_access)):
+    if subject.subject_type == "anonymous" and any(
+        set(access.actions) != set(scope.actions)
+        for scope, access in zip(requested_scopes, allowed_access)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Basic authentication is required.",

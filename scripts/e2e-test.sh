@@ -42,6 +42,7 @@ REVOKED_ROBOT_TOKEN="${REVOKED_ROBOT_TOKEN:-rcr_robot_d2d2d2d2.fedcba9876543210f
 PAGINATION_DEFAULT_PAGE_SIZE="${PAGINATION_DEFAULT_PAGE_SIZE:-25}"
 
 FIXTURE_IMAGE="${FIXTURE_IMAGE:-localhost:8080/sheldylew/fixture:e2e}"
+PUBLIC_IMAGE="${PUBLIC_IMAGE:-localhost:8080/sheldylew/public-fixture:e2e}"
 READER_DENIED_IMAGE="${READER_DENIED_IMAGE:-localhost:8080/sheldylew/reader-denied:e2e}"
 DEVELOPER_OK_IMAGE="${DEVELOPER_OK_IMAGE:-localhost:8080/sheldylew/developer-ok:e2e}"
 DEVELOPER_DENIED_IMAGE="${DEVELOPER_DENIED_IMAGE:-localhost:8080/otherns/developer-denied:e2e}"
@@ -52,7 +53,8 @@ GC_IMAGE="${GC_IMAGE:-localhost:8080/sheldylew/gc-me:e2e}"
 workdir="$(cd "$(dirname "$0")/.." && pwd)"
 admin_cookie_jar="$(mktemp)"
 admin_login_body="$(mktemp)"
-trap 'rm -f "$admin_cookie_jar" "$admin_login_body"' EXIT
+anonymous_docker_config="$(mktemp -d)"
+trap 'rm -f "$admin_cookie_jar" "$admin_login_body"; rm -rf "$anonymous_docker_config"' EXIT
 
 json_get() {
   local path="$1"
@@ -409,6 +411,22 @@ build_local_image "$FIXTURE_IMAGE"
 echo "==> Pushing admin fixture image"
 docker_login "$ADMIN_USERNAME" "$ADMIN_PASSWORD"
 docker push "$FIXTURE_IMAGE" >/dev/null
+
+echo "==> Verifying anonymous public Docker pull"
+build_local_image "$PUBLIC_IMAGE"
+docker_login "$ADMIN_USERNAME" "$ADMIN_PASSWORD"
+docker push "$PUBLIC_IMAGE" >/dev/null
+curl -fsS \
+  -b "$admin_cookie_jar" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $csrf_token" \
+  -d '{"repository_name":"sheldylew/public-fixture","visibility":"public"}' \
+  "$BASE_URL/api/admin/repositories/visibility" >/dev/null
+curl -fsS \
+  -H "Authorization: Basic Zm9vOmJhcg==" \
+  "$BASE_URL/auth/token?service=sheldylew-registry&scope=repository:sheldylew/public-fixture:pull" | grep -q '"token"'
+docker image rm "$PUBLIC_IMAGE" >/dev/null 2>&1 || true
+docker --config "$anonymous_docker_config" pull "$PUBLIC_IMAGE" >/dev/null
 
 echo "==> Verifying reader can pull allowed repo"
 docker image rm "$FIXTURE_IMAGE" >/dev/null 2>&1 || true

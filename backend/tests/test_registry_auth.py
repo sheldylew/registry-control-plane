@@ -121,6 +121,44 @@ def test_auth_token_allows_anonymous_pull_for_public_repository(settings) -> Non
     assert metrics_snapshot()["registry_public_pull_tokens_issued_total"] == 1
 
 
+def test_auth_token_treats_empty_basic_public_pull_as_anonymous(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(Repository(name="public/app", visibility="public"))
+            session.commit()
+
+        response = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:public/app:pull"},
+            headers=_basic_auth("", ""),
+        )
+
+    assert response.status_code == 200
+    payload = _decode_token(app, response.json()["token"], settings.token_service)
+    assert payload["sub"] == "anonymous"
+    assert payload["access"][0]["actions"] == ["pull"]
+
+
+def test_auth_token_falls_back_to_anonymous_for_stale_basic_public_pull(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(Repository(name="public/app", visibility="public"))
+            session.commit()
+
+        response = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:public/app:pull"},
+            headers=_basic_auth("stale-user", "stale-secret"),
+        )
+
+    assert response.status_code == 200
+    payload = _decode_token(app, response.json()["token"], settings.token_service)
+    assert payload["sub"] == "anonymous"
+    assert payload["access"][0]["actions"] == ["pull"]
+
+
 def test_auth_token_denies_anonymous_pull_for_soft_deleted_public_repository(settings) -> None:
     app = create_app(settings)
     with TestClient(app) as client:
@@ -141,6 +179,23 @@ def test_auth_token_denies_anonymous_pull_for_soft_deleted_public_repository(set
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Basic authentication is required."
+
+
+def test_auth_token_rejects_stale_basic_public_push_request(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(Repository(name="public/app", visibility="public"))
+            session.commit()
+
+        response = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:public/app:pull,push"},
+            headers=_basic_auth("stale-user", "stale-secret"),
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid registry credentials."
 
 
 def test_auth_token_requires_basic_auth_for_anonymous_push_on_public_repository(settings) -> None:
