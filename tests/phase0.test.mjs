@@ -73,48 +73,65 @@ test("protected repo navigation disables automatic prefetch", async () => {
 });
 
 test("repository tag page shows the paginated total count", async () => {
-  const repoPage = await readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8");
+  const tagsPanel = await readFile(new URL("../app/components/repository-tags-panel.jsx", import.meta.url), "utf8");
 
-  assert.match(repoPage, /payload\.pagination\.total/);
-  assert.match(repoPage, /formatRelativeTime/);
-  assert.match(repoPage, /formatDigest/);
-  assert.match(repoPage, /tag\.architectures/);
-  assert.match(repoPage, /ClockIcon/);
-  assert.doesNotMatch(repoPage, /payload\.tags\.length} total/);
+  assert.match(tagsPanel, /payload\.pagination\.total/);
+  assert.match(tagsPanel, /formatRelativeTime/);
+  assert.match(tagsPanel, /formatDigest/);
+  assert.match(tagsPanel, /tag\.architectures/);
+  assert.match(tagsPanel, /ClockIcon/);
+  assert.doesNotMatch(tagsPanel, /payload\.tags\.length} total/);
 });
 
 test("repository tag deletes redirect to the remaining tag page", async () => {
-  const repoPage = await readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8");
+  const tagsPanel = await readFile(new URL("../app/components/repository-tags-panel.jsx", import.meta.url), "utf8");
 
-  assert.match(repoPage, /function buildTagDeleteRedirectPath\(repoPath, pagination\)/);
-  assert.match(repoPage, /const remainingTags = Math\.max\(Number\(pagination\?\.total \|\| 0\) - 1, 0\)/);
-  assert.match(repoPage, /if \(remainingTags === 0\) \{\s*return "\/repos";\s*\}/);
-  assert.match(repoPage, /const lastPageAfterDelete = Math\.max\(Math\.ceil\(remainingTags \/ pageSize\), 1\)/);
-  assert.match(repoPage, /redirectPath=\{buildTagDeleteRedirectPath\(payload\.repo, payload\.pagination\)\}/);
+  assert.match(tagsPanel, /function buildTagDeleteRedirectPath\(repoPath, pagination\)/);
+  assert.match(tagsPanel, /return buildBulkTagDeleteRedirectPath\(repoPath, pagination, 1\)/);
+  assert.match(tagsPanel, /function buildBulkTagDeleteRedirectPath\(repoPath, pagination, deleteCount\)/);
+  assert.match(tagsPanel, /const remainingTags = Math\.max\(Number\(pagination\?\.total \|\| 0\) - deleteCount, 0\)/);
+  assert.match(tagsPanel, /if \(remainingTags === 0\) \{\s*return "\/repos";\s*\}/);
+  assert.match(tagsPanel, /const lastPageAfterDelete = Math\.max\(Math\.ceil\(remainingTags \/ pageSize\), 1\)/);
+  assert.match(tagsPanel, /redirectPath=\{buildTagDeleteRedirectPath\(payload\.repo, payload\.pagination\)\}/);
 });
 
 test("repository tag deletes warn when a manifest is shared", async () => {
-  const [deletePanel, repoPage, tagPage, routes] = await Promise.all([
+  const [deletePanel, tagsPanel, tagPage, routes] = await Promise.all([
     readFile(new URL("../app/components/repo-delete-panel.jsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/repository-tags-panel.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/repos/[repo]/tags/[tag]/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../backend/api/routes.py", import.meta.url), "utf8"),
   ]);
 
   assert.match(deletePanel, /warning,/);
   assert.match(deletePanel, /border-amber-300\/30 bg-amber-300\/10/);
-  assert.match(repoPage, /function buildSharedManifestWarning\(item\)/);
-  assert.match(repoPage, /warning=\{buildSharedManifestWarning\(tag\)\}/);
+  assert.match(tagsPanel, /function buildSharedManifestWarning\(item\)/);
+  assert.match(tagsPanel, /warning=\{buildSharedManifestWarning\(tag\)\}/);
   assert.match(tagPage, /function buildSharedManifestWarning\(item\)/);
   assert.match(tagPage, /warning=\{buildSharedManifestWarning\(manifest\)\}/);
   assert.match(routes, /shared_manifest_tag_count/);
   assert.match(routes, /shared_manifest_tags/);
 });
 
+test("repository tag list exposes bulk delete selection", async () => {
+  const [tagsPanel, routes] = await Promise.all([
+    readFile(new URL("../app/components/repository-tags-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../backend/api/routes.py", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(tagsPanel, /ActionMenu/);
+  assert.match(tagsPanel, /type="checkbox"/);
+  assert.match(tagsPanel, /Select all tags/);
+  assert.match(tagsPanel, /Delete selected/);
+  assert.match(tagsPanel, /\/api\/repos\/\$\{encodeURIComponent\(payload\.repo\)\}\/tags\/delete/);
+  assert.match(routes, /class DeleteTagsPayload\(BaseModel\)/);
+  assert.match(routes, /@router\.post\("\/repos\/\{repo_name:path\}\/tags\/delete"\)/);
+});
+
 test("high-density lists expose mobile card layouts without dropping desktop tables", async () => {
-  const [tableUi, repoPage, usersPanel, permissionsPanel, pagination, reposPanel, adminShell] = await Promise.all([
+  const [tableUi, tagsPanel, usersPanel, permissionsPanel, pagination, reposPanel, adminShell] = await Promise.all([
     readFile(new URL("../app/components/ui/table.jsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/repos/[repo]/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/repository-tags-panel.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/permissions-panel.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/ui/pagination.jsx", import.meta.url), "utf8"),
@@ -129,7 +146,7 @@ test("high-density lists expose mobile card layouts without dropping desktop tab
   assert.match(tableUi, /<details className=\{`group rounded-lg/);
   assert.match(tableUi, /group-open:hidden/);
   assert.match(tableUi, /group-open:inline-flex/);
-  for (const source of [repoPage, usersPanel, permissionsPanel]) {
+  for (const source of [tagsPanel, usersPanel, permissionsPanel]) {
     assert.match(source, /mobileCards=\{/);
     assert.match(source, /MobileCardList/);
     assert.match(source, /MobileDisclosureCard/);

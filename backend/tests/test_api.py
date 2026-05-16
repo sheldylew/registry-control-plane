@@ -3712,6 +3712,112 @@ def test_admin_can_delete_tag_without_explicit_repo_permission(settings) -> None
     assert tag.deleted_at is not None
 
 
+def test_bulk_delete_tags_deletes_manifests_and_records_audit(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/bulk-delete", "one"): {
+                "name": "sheldylew/bulk-delete",
+                "tag": "one",
+                "digest": "sha256:sheldylew-bulk-delete-one",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config-one",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            },
+            ("sheldylew/bulk-delete", "two"): {
+                "name": "sheldylew/bulk-delete",
+                "tag": "two",
+                "digest": "sha256:sheldylew-bulk-delete-two",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config-two",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 64,
+                "architectures": ["linux/arm64"],
+                "created_at": "2026-05-04T10:25:30Z",
+                "history_count": 1,
+            },
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/bulk-delete", tags=("one", "two"))
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/bulk-delete/tags/delete",
+            json={"tags": ["one", "two"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            events = session.scalars(
+                select(AuditEvent).where(AuditEvent.action == "repository_tag_deleted").order_by(AuditEvent.id.asc())
+            ).all()
+            tags = session.scalars(
+                select(RepositoryTag).join(Repository).where(Repository.name == "sheldylew/bulk-delete")
+            ).all()
+            storage_usage_stale = session.get(AppSetting, REGISTRY_STORAGE_USAGE_STALE_KEY)
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 2
+    assert fake_registry.deleted_manifests == [
+        ("sheldylew/bulk-delete", "sha256:sheldylew-bulk-delete-one"),
+        ("sheldylew/bulk-delete", "sha256:sheldylew-bulk-delete-two"),
+    ]
+    assert [event.metadata_json["tag"] for event in events[-2:]] == ["one", "two"]
+    assert all(tag.deleted_at is not None for tag in tags)
+    assert storage_usage_stale is not None
+    assert storage_usage_stale.value == "true"
+
+
+def test_bulk_delete_tags_requires_delete_permission(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/bulk-blocked", "latest"): {
+                "name": "sheldylew/bulk-blocked",
+                "tag": "latest",
+                "digest": "sha256:sheldylew-bulk-blocked-latest",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:config",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-04T10:20:30Z",
+                "history_count": 1,
+            }
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "sheldylew/bulk-blocked", tags=("latest",))
+            _grant_reader(session, username="bulk-blocked", password="bulk-blocked-pass")
+
+        login = _login(client, "bulk-blocked", "bulk-blocked-pass")
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/repos/sheldylew/bulk-blocked/tags/delete",
+            json={"tags": ["latest"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 403
+    assert fake_registry.deleted_manifests == []
+
+
 def test_delete_empty_repository_prunes_storage(settings, temp_workspace) -> None:
     repo_root = temp_workspace / "registry-data"
     repo_path = repo_root / "sheldylew" / "empty"

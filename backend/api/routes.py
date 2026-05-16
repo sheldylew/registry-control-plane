@@ -827,6 +827,25 @@ class DeleteTagPayload(BaseModel):
         return _normalize_required_text(value, field_name="Confirmation")
 
 
+class DeleteTagsPayload(BaseModel):
+    tags: list[str] = Field(min_length=1, max_length=100)
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str]) -> list[str]:
+        normalized_tags: list[str] = []
+        seen_tags: set[str] = set()
+        for tag in value:
+            normalized = _normalize_required_text(tag, field_name="Tag")
+            if normalized in seen_tags:
+                continue
+            seen_tags.add(normalized)
+            normalized_tags.append(normalized)
+        if not normalized_tags:
+            raise ValueError("At least one tag is required.")
+        return normalized_tags
+
+
 class DeleteRepositoryPayload(BaseModel):
     confirmation: str = Field(min_length=1)
 
@@ -2463,6 +2482,80 @@ def get_repository_tag_history(
         "variants": [_serialize_history_variant(variant) for variant in variants],
         "truncation": truncation,
     }
+
+
+@router.post("/repos/{repo_name:path}/tags/delete")
+def delete_repository_tags(
+    repo_name: str,
+    payload: DeleteTagsPayload,
+    request: Request,
+    user: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    registry: RegistryClient = Depends(get_registry_client),
+):
+    repository = db.scalar(
+        select(Repository).where(
+            Repository.name == repo_name,
+            Repository.deleted_at.is_(None),
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+
+    active_tags = db.scalars(
+        select(RepositoryTag.name).where(
+            RepositoryTag.repository_id == repository.id,
+            RepositoryTag.name.in_(payload.tags),
+            RepositoryTag.deleted_at.is_(None),
+        )
+    ).all()
+    active_tag_set = set(active_tags)
+    missing_tags = [tag for tag in payload.tags if tag not in active_tag_set]
+    if missing_tags:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository tag not found.")
+
+    if not can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delete access required.")
+
+    manifests_by_tag: dict[str, ManifestDetails] = {}
+    try:
+        for tag in payload.tags:
+            manifest = registry.get_manifest_details(repo_name, tag)
+            if not manifest.digest:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Manifest digest unavailable.")
+            manifests_by_tag[tag] = manifest
+
+        deleted_digests: set[str] = set()
+        for manifest in manifests_by_tag.values():
+            if manifest.digest in deleted_digests:
+                continue
+            registry.delete_manifest(repo_name, manifest.digest)
+            deleted_digests.add(manifest.digest)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository tag not found.") from exc
+    finally:
+        registry.close()
+
+    deleted_tags = []
+    for tag, manifest in manifests_by_tag.items():
+        record_audit_event(
+            db,
+            actor=user,
+            action="repository_tag_deleted",
+            target_type="repository_tag",
+            metadata_json={"repo": repo_name, "tag": tag, "digest": manifest.digest},
+        )
+        mark_repository_tag_deleted(
+            db,
+            repository_name=repo_name,
+            tag_name=tag,
+            manifest_digest=manifest.digest,
+        )
+        deleted_tags.append({"tag": tag, "digest": manifest.digest})
+    mark_storage_usage_snapshot_stale(db)
+    db.commit()
+    return {"ok": True, "repo": repo_name, "deleted": deleted_tags, "count": len(deleted_tags)}
 
 
 @router.post("/repos/{repo_name:path}/tags/{tag}/delete")
