@@ -19,6 +19,8 @@ env:
   REGISTRY: registry.sheldylew.com
   IMAGE_NAMESPACE: sheldylew
   IMAGE_NAME: registry-control-plane
+  GHCR_REGISTRY: ghcr.io
+  GHCR_IMAGE_NAMESPACE: sheldylew
 
 jobs:
   docker-build:
@@ -107,6 +109,7 @@ jobs:
           {
             echo "publish=${publish}"
             echo "image_prefix=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}"
+            echo "ghcr_image_prefix=${GHCR_REGISTRY}/${GHCR_IMAGE_NAMESPACE}/${IMAGE_NAME}"
             echo "image_tag=${image_tag}"
             echo "image_tag_alt=${image_tag_alt}"
             echo "version=${ref_name}"
@@ -126,6 +129,7 @@ jobs:
           echo "  Built at: ${{ steps.meta.outputs.build_time }}"
           echo "  Image tag: ${{ steps.meta.outputs.image_tag }}"
           echo "  Image prefix: ${{ steps.meta.outputs.image_prefix }}"
+          echo "  GHCR image prefix: ${{ steps.meta.outputs.ghcr_image_prefix }}"
           echo "  Publish: ${{ steps.meta.outputs.publish }}"
           if [[ -n "${image_tag_alt}" ]]; then
             echo "  Additional image tag: ${image_tag_alt}"
@@ -152,7 +156,7 @@ jobs:
               ;;
           esac
 
-      - name: Log in to registry
+      - name: Log in to primary registry
         if: steps.meta.outputs.publish == 'true'
         shell: bash
         env:
@@ -168,6 +172,23 @@ jobs:
           fi
 
           printf '%s' "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" --username "${REGISTRY_USERNAME}" --password-stdin
+
+      - name: Log in to GitHub Container Registry
+        if: steps.meta.outputs.publish == 'true'
+        shell: bash
+        env:
+          # GHCR publishing uses a GitHub personal access token with write:packages.
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GHCR_USERNAME}" || -z "${GHCR_TOKEN}" ]]; then
+            echo "GHCR_USERNAME and GHCR_TOKEN secrets are required for GHCR publishing." >&2
+            exit 1
+          fi
+
+          printf '%s' "${GHCR_TOKEN}" | docker login "${GHCR_REGISTRY}" --username "${GHCR_USERNAME}" --password-stdin
 
       - name: Validate native-arch build
         if: steps.meta.outputs.publish != 'true'
@@ -204,17 +225,24 @@ jobs:
         run: |
           set -euo pipefail
 
+          publish_targets() {
+            local image_prefix="$1"
+
+            export IMAGE_PREFIX="${image_prefix}"
+            for target in api-publish auth-init-publish web-publish nginx-publish; do
+              docker buildx bake --allow=fs=/tmp "${target}"
+            done
+          }
+
           # Publish uses the same metadata plus version/revision labels for the pushed images.
           export REVISION="${GITHUB_SHA}"
           export VERSION="${{ steps.meta.outputs.version }}"
           export BUILD_TIME="${{ steps.meta.outputs.build_time }}"
-          export IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}"
           export IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
           export IMAGE_TAG_ALT="${{ steps.meta.outputs.image_tag_alt }}"
 
-          for target in api-publish auth-init-publish web-publish nginx-publish; do
-            docker buildx bake --allow=fs=/tmp "${target}"
-          done
+          publish_targets "${{ steps.meta.outputs.image_prefix }}"
+          publish_targets "${{ steps.meta.outputs.ghcr_image_prefix }}"
 
       - name: Prune expired BuildKit cache
         if: always()

@@ -15,6 +15,10 @@ This project layers a web control plane in front of a Docker Registry deployment
 - SQLite-backed application state persists in a Docker volume
 - RS256-signed bearer tokens back Docker client authentication
 
+## Project expectations
+
+This is a personal project that I use for my own registry operations and share publicly so others can inspect, learn from, and adapt it. It is provided as-is, with no support commitment or guarantee that it will fit another environment.
+
 ## Feature highlights
 
 - First-boot setup mode with a one-time setup token or full `.env` bootstrap
@@ -29,6 +33,16 @@ This project layers a web control plane in front of a Docker Registry deployment
 - Non-root container runtime hardening with generated signing material kept out of git
 - Operator wrapper for stack checks, backups, logs, upgrades, and offline bundle operations
 - Docker-backed smoke and end-to-end verification scripts
+
+## Screenshots
+
+| Admin dashboard | Repository detail |
+| --- | --- |
+| ![Admin dashboard showing control-plane identity, token, and registry counts](docs/screenshots/admin-dashboard.jpg) | ![Repository detail showing tags, digests, architecture, and public-read controls](docs/screenshots/repository-detail.jpg) |
+
+| Maintenance status | Runtime settings |
+| --- | --- |
+| ![Maintenance page showing registry health, storage usage, manifest cache, and job status](docs/screenshots/maintenance-status.jpg) | ![Settings page showing public origin, restart guidance, timezone, pagination, and retention defaults](docs/screenshots/runtime-settings.jpg) |
 
 ## Deployment model
 
@@ -60,7 +74,17 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 
 Then open `http://localhost:8080/`.
 
-For a persistent deployment, copy `.env.example` to `.env` and follow the deployment guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+For a persistent deployment from the public GHCR images:
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.bind-local.yml pull
+docker compose -f docker-compose.bind-local.yml up -d
+```
+
+The published app images use the `ghcr.io/sheldylew/registry-control-plane-*` prefix. Set `RCP_IMAGE_TAG` to pin a specific release tag, or leave it unset to use the moving `release` tag.
+
+For source-based deployment or detailed production configuration, follow the deployment guide in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 Routine Compose operations can also go through the wrapper:
 
@@ -117,6 +141,10 @@ There are also backend, frontend, and integration test commands in [docs/DEVELOP
 - [Admin UI patterns](docs/ADMIN_UI.md)
 - [CI workflow](docs/CI.md)
 - [Release workflow](docs/RELEASE_WORKFLOW.md)
+
+## License
+
+Registry Control Plane is licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE) for the full license text.
 
 ## Status
 

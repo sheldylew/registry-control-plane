@@ -1,9 +1,9 @@
-# Local-bind override for running the release-style stack from locally built images
-# while keeping the frontend exposed on 127.0.0.1 instead of a public interface.
+# Local-bind compose file for running the release-style stack from published
+# images while keeping the frontend exposed on 127.0.0.1 by default.
 services:
   auth-init:
     container_name: rcp-bind-auth-init
-    image: ${RCP_IMAGE_PREFIX:-registry.sheldylew.com/sheldylew/registry-control-plane}-auth-init:${RCP_IMAGE_TAG:-release}
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-auth-init:${RCP_IMAGE_TAG:-release}
     build:
       context: .
       target: auth-init
@@ -49,7 +49,7 @@ services:
 
   nginx:
     container_name: rcp-bind-nginx
-    image: ${RCP_IMAGE_PREFIX:-registry.sheldylew.com/sheldylew/registry-control-plane}-nginx:${RCP_IMAGE_TAG:-release}
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-nginx:${RCP_IMAGE_TAG:-release}
     restart: unless-stopped
     user: "101:101"
     ports:
@@ -79,7 +79,7 @@ services:
 
   api:
     container_name: rcp-bind-api
-    image: ${RCP_IMAGE_PREFIX:-registry.sheldylew.com/sheldylew/registry-control-plane}-api:${RCP_IMAGE_TAG:-release}
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-api:${RCP_IMAGE_TAG:-release}
     build:
       context: .
       target: api
@@ -160,7 +160,7 @@ services:
 
   web:
     container_name: rcp-bind-web
-    image: ${RCP_IMAGE_PREFIX:-registry.sheldylew.com/sheldylew/registry-control-plane}-web:${RCP_IMAGE_TAG:-release}
+    image: ${RCP_IMAGE_PREFIX:-ghcr.io/sheldylew/registry-control-plane}-web:${RCP_IMAGE_TAG:-release}
     build:
       context: .
       target: web
