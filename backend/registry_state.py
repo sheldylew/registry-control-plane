@@ -443,16 +443,19 @@ def reconcile_registry_event_inbox_after_rebuild(
     rows = db.scalars(
         select(RegistryEventInbox)
         .where(
-            RegistryEventInbox.status.in_(("pending", "processing")),
+            RegistryEventInbox.status.in_(("pending", "processing", "failed")),
             RegistryEventInbox.received_at <= received_before,
         )
         .order_by(RegistryEventInbox.received_at.asc())
     ).all()
     processed_at = utcnow()
     for row in rows:
+        original_status = row.status
         row.status = "reconciled"
-        row.processed_at = processed_at
-        row.error = None
+        if row.processed_at is None:
+            row.processed_at = processed_at
+        if original_status != "failed":
+            row.error = None
     return len(rows)
 
 

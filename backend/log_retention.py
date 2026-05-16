@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, or_
 from sqlalchemy.orm import Session
 
-from backend.models import AuditEvent, GcJob, PersonalAccessToken, RobotToken, WebSession
+from backend.models import AuditEvent, GcJob, PersonalAccessToken, RegistryEventInbox, RobotToken, WebSession
 
 
 def utcnow() -> datetime:
@@ -35,10 +35,21 @@ def prune_expired_logs(
         ,
         execution_options={"synchronize_session": False},
     ).rowcount or 0
+    registry_event_inbox_deleted = session.execute(
+        delete(RegistryEventInbox).where(
+            RegistryEventInbox.status.in_(("processed", "failed", "reconciled")),
+            or_(
+                RegistryEventInbox.processed_at < cutoff,
+                RegistryEventInbox.received_at < cutoff,
+            ),
+        ),
+        execution_options={"synchronize_session": False},
+    ).rowcount or 0
     session.commit()
     return {
         "audit_events_deleted": audit_events_deleted,
         "gc_jobs_deleted": gc_jobs_deleted,
+        "registry_event_inbox_deleted": registry_event_inbox_deleted,
     }
 
 

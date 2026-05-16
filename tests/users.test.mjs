@@ -83,13 +83,34 @@ test("maintenance panel exposes registry state rebuild action", async () => {
   assert.match(page, /badge=\{payload\.storage_usage_stale \? "Stale" : null\}/);
   assert.match(page, /payload\.registry_state\.active_repositories/);
   assert.match(page, /payload\.registry_state\.inbox_failed/);
+  assert.match(page, /\/admin\/maintenance\/inbox\?status=failed/);
+  assert.match(page, /Open inbox/);
   assert.match(page, /payload\.rebuild_jobs/);
   assert.match(statCard, /badge = null/);
   assert.match(statCard, /badgeTones/);
   assert.match(panel, /router\.refresh\(\)/);
   assert.match(panel, /\/api\/admin\/maintenance\/cache\/rebuild/);
   assert.match(panel, /Rebuild registry state/);
+  assert.match(panel, /registry_event_inbox_deleted/);
   assert.match(panel, /X-CSRF-Token/);
+});
+
+test("maintenance inbox page exposes registry event review and retry", async () => {
+  const [page, retryButton] = await Promise.all([
+    readFile(new URL("../app/admin/maintenance/inbox/page.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/inbox-retry-button.jsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /\/api\/admin\/maintenance\/inbox\?/);
+  assert.match(page, /status_filter/);
+  assert.match(page, /raw_payload/);
+  assert.match(page, /payload\.status_counts/);
+  assert.match(page, /<TableShell/);
+  assert.match(page, /<MobileDisclosureCard/);
+  assert.match(page, /<InboxRetryButton entryId=\{entry\.id\}/);
+  assert.match(retryButton, /\/api\/admin\/maintenance\/inbox\/\$\{entryId\}\/retry/);
+  assert.match(retryButton, /X-CSRF-Token/);
+  assert.match(retryButton, /router\.refresh\(\)/);
 });
 
 test("admin shell includes settings navigation", async () => {

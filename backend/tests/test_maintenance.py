@@ -16,7 +16,7 @@ from backend.maintenance import (
     read_storage_usage_snapshot,
 )
 from backend.log_retention import utcnow
-from backend.models import AuditEvent, GcJob, User
+from backend.models import AuditEvent, GcJob, RegistryEventInbox, User
 from backend.setup import AUDIT_LOG_RETENTION_DAYS_KEY, set_app_setting
 
 
@@ -265,6 +265,19 @@ def test_admin_can_prune_retained_logs_manually(settings) -> None:
                     updated_at=stale_time,
                 )
             )
+            session.add(
+                RegistryEventInbox(
+                    action="push",
+                    repository_name="sheldylew/app",
+                    tag="reconciled",
+                    digest="sha256:reconciled",
+                    raw_payload={},
+                    dedupe_key="push|sheldylew/app|reconciled|sha256:reconciled",
+                    status="reconciled",
+                    received_at=stale_time,
+                    processed_at=stale_time,
+                )
+            )
             session.commit()
 
         response = client.post(
@@ -275,20 +288,24 @@ def test_admin_can_prune_retained_logs_manually(settings) -> None:
         with app.state.session_factory() as session:
             events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
             jobs = session.scalars(select(GcJob)).all()
+            inbox_rows = session.scalars(select(RegistryEventInbox)).all()
 
     assert response.status_code == 200
     assert response.json()["retention_days"] == retention_days
     assert response.json()["pruned"] == {
         "audit_events_deleted": 1,
         "gc_jobs_deleted": 1,
+        "registry_event_inbox_deleted": 1,
         "web_sessions_deleted": 0,
         "personal_access_tokens_deleted": 0,
         "robot_tokens_deleted": 0,
     }
     assert jobs == []
+    assert inbox_rows == []
     assert events[-1].action == "logs_pruned"
     assert events[-1].metadata_json["audit_events_deleted"] == 1
     assert events[-1].metadata_json["gc_jobs_deleted"] == 1
+    assert events[-1].metadata_json["registry_event_inbox_deleted"] == 1
     assert events[-1].metadata_json["web_sessions_deleted"] == 0
 
 

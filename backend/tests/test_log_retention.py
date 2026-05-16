@@ -7,7 +7,7 @@ from backend.audit import record_audit_event
 from backend.config import Settings
 from backend.log_retention import utcnow
 from backend.main import create_app
-from backend.models import AuditEvent, GcJob, PersonalAccessToken, RobotAccount, RobotToken, User, WebSession
+from backend.models import AuditEvent, GcJob, PersonalAccessToken, RegistryEventInbox, RobotAccount, RobotToken, User, WebSession
 from backend.setup import AUDIT_LOG_RETENTION_DAYS_KEY, set_app_setting
 
 
@@ -35,6 +35,32 @@ def test_startup_prunes_old_audit_events_and_completed_gc_jobs(settings) -> None
                     updated_at=stale_time,
                 )
             )
+            session.add(
+                RegistryEventInbox(
+                    action="push",
+                    repository_name="sheldylew/app",
+                    tag="reconciled",
+                    digest="sha256:reconciled",
+                    raw_payload={},
+                    dedupe_key="push|sheldylew/app|reconciled|sha256:reconciled",
+                    status="reconciled",
+                    error="old failure preserved for review",
+                    received_at=stale_time,
+                    processed_at=stale_time,
+                )
+            )
+            session.add(
+                RegistryEventInbox(
+                    action="push",
+                    repository_name="sheldylew/app",
+                    tag="pending",
+                    digest="sha256:pending",
+                    raw_payload={},
+                    dedupe_key="push|sheldylew/app|pending|sha256:pending",
+                    status="pending",
+                    received_at=stale_time,
+                )
+            )
             session.commit()
 
         app_with_existing_data = create_app(settings)
@@ -42,6 +68,9 @@ def test_startup_prunes_old_audit_events_and_completed_gc_jobs(settings) -> None
             with app_with_existing_data.state.session_factory() as session:
                 assert session.scalars(select(AuditEvent)).all() == []
                 assert session.scalars(select(GcJob)).all() == []
+                inbox_rows = session.scalars(select(RegistryEventInbox)).all()
+
+    assert [row.status for row in inbox_rows] == ["pending"]
 
 
 def test_startup_prunes_stale_sessions_and_token_records(settings) -> None:
@@ -119,6 +148,20 @@ def test_new_audit_write_prunes_old_logs(settings) -> None:
                     updated_at=stale_time,
                 )
             )
+            session.add(
+                RegistryEventInbox(
+                    action="delete",
+                    repository_name="sheldylew/app",
+                    tag="failed",
+                    digest="sha256:failed",
+                    raw_payload={},
+                    dedupe_key="delete|sheldylew/app|failed|sha256:failed",
+                    status="failed",
+                    error="old failure",
+                    received_at=stale_time,
+                    processed_at=stale_time,
+                )
+            )
             session.commit()
 
             record_audit_event(
@@ -131,9 +174,11 @@ def test_new_audit_write_prunes_old_logs(settings) -> None:
         with app.state.session_factory() as session:
             events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
             jobs = session.scalars(select(GcJob)).all()
+            inbox_rows = session.scalars(select(RegistryEventInbox)).all()
 
     assert [event.action for event in events] == ["fresh_event"]
     assert jobs == []
+    assert inbox_rows == []
 
 
 def test_settings_reject_non_positive_log_retention(settings) -> None:

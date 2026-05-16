@@ -1,8 +1,10 @@
 import { Fragment } from "react";
+import Link from "next/link";
 
 import MaintenancePanel from "@/app/components/maintenance-panel";
 import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
 import Disclosure from "@/app/components/ui/disclosure";
 import EmptyState from "@/app/components/ui/empty-state";
 import FloatingButtonGroup from "@/app/components/ui/floating-button-group";
@@ -99,6 +101,11 @@ export default async function AdminMaintenancePage({ searchParams }) {
           eyebrow="Maintenance status"
           title="Registry health and state"
           description="Review storage, manifest cache, registry state, and recent maintenance outcomes before running jobs."
+          action={(
+            <Button as={Link} href="/admin/maintenance/inbox?status=failed" prefetch={false} variant="secondary" className="w-full sm:w-auto">
+              Open inbox
+            </Button>
+          )}
         />
         <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-4 md:grid-cols-3 xl:grid-cols-5">
           <StatCard label="Registry status" value={payload.registry_status} />

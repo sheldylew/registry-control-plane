@@ -29,6 +29,7 @@ from backend.models import (
     CachedManifestSummary,
     GcJob,
     PersonalAccessToken,
+    RegistryEventInbox,
     RegistryStateRebuildJob,
     Repository,
     RepositoryPermission,
@@ -562,6 +563,24 @@ def _serialize_registry_state_rebuild_job(job: RegistryStateRebuildJob) -> dict:
         "error": job.error,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
+    }
+
+
+def _serialize_registry_event_inbox_entry(row: RegistryEventInbox) -> dict:
+    return {
+        "id": row.id,
+        "action": row.action,
+        "repository_name": row.repository_name,
+        "tag": row.tag,
+        "digest": row.digest,
+        "media_type": row.media_type,
+        "raw_payload": row.raw_payload,
+        "dedupe_key": row.dedupe_key,
+        "status": row.status,
+        "attempts": row.attempts,
+        "error": row.error,
+        "received_at": row.received_at.isoformat(),
+        "processed_at": row.processed_at.isoformat() if row.processed_at else None,
     }
 
 
@@ -2144,6 +2163,92 @@ def create_registry_state_rebuild(
         )
 
     return {"job": _serialize_registry_state_rebuild_job(job)}
+
+
+@router.get("/admin/maintenance/inbox")
+def registry_event_inbox(
+    status_filter: Optional[str] = None,
+    page: int = 1,
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    valid_statuses = {"pending", "processing", "processed", "failed", "reconciled"}
+    if status_filter and status_filter not in valid_statuses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported inbox status filter.")
+
+    page_size = effective_default_page_size(db)
+    safe_page = max(page, 1)
+    query = select(RegistryEventInbox)
+    if status_filter:
+        query = query.where(RegistryEventInbox.status == status_filter)
+    query = query.order_by(RegistryEventInbox.received_at.desc(), RegistryEventInbox.id.desc())
+    total_rows = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.scalars(query.offset((safe_page - 1) * page_size).limit(page_size)).all()
+
+    status_counts = dict(
+        db.execute(
+            select(RegistryEventInbox.status, func.count(RegistryEventInbox.id))
+            .group_by(RegistryEventInbox.status)
+        ).all()
+    )
+    return {
+        "entries": [_serialize_registry_event_inbox_entry(row) for row in rows],
+        "status_counts": {entry_status: int(status_counts.get(entry_status, 0)) for entry_status in sorted(valid_statuses)},
+        "status_filter": status_filter,
+        "pagination": {
+            "page": safe_page,
+            "page_size": page_size,
+            "total": total_rows,
+            "has_previous": safe_page > 1,
+            "has_next": safe_page * page_size < total_rows,
+        },
+    }
+
+
+@router.post("/admin/maintenance/inbox/{event_id}/retry")
+def retry_registry_event_inbox_entry(
+    event_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_csrf),
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    row = db.get(RegistryEventInbox, event_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registry inbox entry not found.")
+    if row.status != "failed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only failed inbox entries can be retried.")
+
+    row.status = "pending"
+    row.error = None
+    row.processed_at = None
+    db.commit()
+    record_audit_event(
+        db,
+        actor=user,
+        action="registry_event_inbox_retry_requested",
+        target_type="registry_event_inbox",
+        target_id=row.id,
+        metadata_json={
+            "repo": row.repository_name,
+            "action": row.action,
+            "tag": row.tag,
+            "digest": row.digest,
+        },
+        retention_days=effective_audit_log_retention_days(
+            db,
+            fallback_days=request.app.state.settings.log_retention_days,
+        ),
+    )
+    background_tasks.add_task(
+        process_registry_event_inbox_entry,
+        request.app.state.session_factory,
+        request.app.state.registry_client_factory,
+        request.app.state.settings,
+        row.id,
+    )
+    return {"entry": _serialize_registry_event_inbox_entry(row)}
 
 
 @router.get("/admin/audit")

@@ -3367,6 +3367,127 @@ def test_admin_maintenance_returns_cache_stats(settings) -> None:
     assert body["rebuild_jobs"][0]["repositories_scanned"] == 2
 
 
+def test_admin_registry_event_inbox_lists_filtered_rows(settings) -> None:
+    app = create_app(settings)
+    now = datetime.now(timezone.utc)
+    older = now - timedelta(minutes=5)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add_all(
+                [
+                    RegistryEventInbox(
+                        action="push",
+                        repository_name="sheldylew/app",
+                        tag="failed",
+                        digest="sha256:failed",
+                        raw_payload={"event": "failed"},
+                        dedupe_key="push|sheldylew/app|failed|sha256:failed",
+                        status="failed",
+                        attempts=2,
+                        error="manifest missing",
+                        received_at=older,
+                        processed_at=now,
+                    ),
+                    RegistryEventInbox(
+                        action="delete",
+                        repository_name="sheldylew/app",
+                        tag="queued",
+                        digest="sha256:queued",
+                        raw_payload={"event": "queued"},
+                        dedupe_key="delete|sheldylew/app|queued|sha256:queued",
+                        status="pending",
+                        received_at=now,
+                    ),
+                ]
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        response = client.get("/api/admin/maintenance/inbox?status_filter=failed")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["pagination"]["total"] == 1
+    assert body["status_counts"]["failed"] == 1
+    assert body["status_counts"]["pending"] == 1
+    assert body["entries"][0]["status"] == "failed"
+    assert body["entries"][0]["error"] == "manifest missing"
+    assert body["entries"][0]["raw_payload"] == {"event": "failed"}
+
+
+def test_admin_can_retry_failed_registry_event_inbox_entry(settings) -> None:
+    app = create_app(settings)
+    now = datetime.now(timezone.utc)
+    fake_registry = FakeRegistryClient(
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:retried",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cfg",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 42,
+                "architectures": ["linux/amd64"],
+                "created_at": None,
+                "history_count": 1,
+                "children_truncated": False,
+                "history_truncated": False,
+            },
+        }
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            row = RegistryEventInbox(
+                action="push",
+                repository_name="sheldylew/app",
+                tag="latest",
+                digest="sha256:stale",
+                raw_payload={"event": "failed"},
+                dedupe_key="push|sheldylew/app|latest|sha256:stale",
+                status="failed",
+                attempts=1,
+                error="temporary registry failure",
+                received_at=now,
+                processed_at=now,
+            )
+            session.add(row)
+            session.commit()
+            event_id = row.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/maintenance/inbox/{event_id}/retry",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            row = session.get(RegistryEventInbox, event_id)
+            tag = session.scalar(
+                select(RepositoryTag)
+                .join(Repository)
+                .where(Repository.name == "sheldylew/app", RepositoryTag.name == "latest")
+            )
+            audit = session.scalar(
+                select(AuditEvent).where(AuditEvent.action == "registry_event_inbox_retry_requested")
+            )
+
+    assert response.status_code == 200
+    assert row.status == "processed"
+    assert row.attempts == 2
+    assert row.error is None
+    assert tag is not None
+    assert tag.manifest_digest == "sha256:retried"
+    assert audit is not None
+
+
 def test_registry_state_rebuild_requires_csrf(settings) -> None:
     app = create_app(settings)
 
@@ -3499,6 +3620,7 @@ def test_registry_state_rebuild_reconciles_stale_inbox_rows(settings) -> None:
     )
     app.state.registry_client_factory = lambda: fake_registry
     now = datetime.now(timezone.utc)
+    failed_processed_at = now - timedelta(hours=3)
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
@@ -3546,7 +3668,7 @@ def test_registry_state_rebuild_reconciles_stale_inbox_rows(settings) -> None:
                         attempts=1,
                         error="boom",
                         received_at=now - timedelta(hours=3),
-                        processed_at=now - timedelta(hours=3),
+                        processed_at=failed_processed_at,
                     ),
                 ]
             )
@@ -3574,17 +3696,20 @@ def test_registry_state_rebuild_reconciles_stale_inbox_rows(settings) -> None:
 
     assert response.status_code == 200
     assert job.status == "succeeded"
-    assert "inbox reconciliation: 2 stale events reconciled" in job.log_output
-    assert succeeded_event.metadata_json["inbox_reconciled"] == 2
+    assert "inbox reconciliation: 3 stale events reconciled" in job.log_output
+    assert succeeded_event.metadata_json["inbox_reconciled"] == 3
     assert rows["old-pending"].status == "reconciled"
     assert rows["old-processing"].status == "reconciled"
+    assert rows["failed"].status == "reconciled"
     assert rows["old-pending"].processed_at is not None
     assert rows["old-processing"].processed_at is not None
+    assert rows["failed"].processed_at.replace(tzinfo=timezone.utc) == failed_processed_at
+    assert rows["failed"].attempts == 1
+    assert rows["failed"].error == "boom"
     assert rows["new-pending"].status == "pending"
-    assert rows["failed"].status == "failed"
     assert maintenance_response.status_code == 200
     assert maintenance_response.json()["registry_state"]["inbox_queued"] == 1
-    assert maintenance_response.json()["registry_state"]["inbox_failed"] == 1
+    assert maintenance_response.json()["registry_state"]["inbox_failed"] == 0
 
 
 def test_registry_state_rebuild_rejects_active_maintenance_job(settings) -> None:

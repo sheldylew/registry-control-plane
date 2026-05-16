@@ -295,6 +295,7 @@ class MaintenanceService:
                 "token_record_retention_days": self._settings.token_record_retention_days,
                 "audit_events_deleted": counts["audit_events_deleted"],
                 "gc_jobs_deleted": counts["gc_jobs_deleted"],
+                "registry_event_inbox_deleted": counts["registry_event_inbox_deleted"],
                 "web_sessions_deleted": counts["web_sessions_deleted"],
                 "personal_access_tokens_deleted": counts["personal_access_tokens_deleted"],
                 "robot_tokens_deleted": counts["robot_tokens_deleted"],
