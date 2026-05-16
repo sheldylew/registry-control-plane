@@ -3473,6 +3473,120 @@ def test_registry_state_rebuild_walks_registry_and_repairs_db_state(settings) ->
     assert [row.manifest_digest for row in summaries] == ["sha256:public-new", "sha256:worker"]
 
 
+def test_registry_state_rebuild_reconciles_stale_inbox_rows(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        repositories=["sheldylew/app"],
+        tags={"sheldylew/app": ["latest"]},
+        descriptors={
+            ("sheldylew/app", "latest"): ("sha256:latest", "application/vnd.oci.image.manifest.v1+json"),
+        },
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:latest",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:latest-cfg",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 101,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-07T10:20:30Z",
+                "history_count": 1,
+            },
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+    now = datetime.now(timezone.utc)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add_all(
+                [
+                    RegistryEventInbox(
+                        action="push",
+                        repository_name="sheldylew/app",
+                        tag="old-pending",
+                        digest="sha256:old-pending",
+                        raw_payload={},
+                        dedupe_key="push|sheldylew/app|old-pending|sha256:old-pending",
+                        status="pending",
+                        received_at=now - timedelta(hours=2),
+                    ),
+                    RegistryEventInbox(
+                        action="delete",
+                        repository_name="sheldylew/app",
+                        tag="old-processing",
+                        digest="sha256:old-processing",
+                        raw_payload={},
+                        dedupe_key="delete|sheldylew/app|old-processing|sha256:old-processing",
+                        status="processing",
+                        attempts=1,
+                        received_at=now - timedelta(hours=1),
+                    ),
+                    RegistryEventInbox(
+                        action="push",
+                        repository_name="sheldylew/app",
+                        tag="new-pending",
+                        digest="sha256:new-pending",
+                        raw_payload={},
+                        dedupe_key="push|sheldylew/app|new-pending|sha256:new-pending",
+                        status="pending",
+                        received_at=now + timedelta(hours=1),
+                    ),
+                    RegistryEventInbox(
+                        action="push",
+                        repository_name="sheldylew/app",
+                        tag="failed",
+                        digest="sha256:failed",
+                        raw_payload={},
+                        dedupe_key="push|sheldylew/app|failed|sha256:failed",
+                        status="failed",
+                        attempts=1,
+                        error="boom",
+                        received_at=now - timedelta(hours=3),
+                        processed_at=now - timedelta(hours=3),
+                    ),
+                ]
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/maintenance/cache/rebuild",
+            headers={"X-CSRF-Token": csrf},
+        )
+        maintenance_response = client.get("/api/admin/maintenance")
+
+        with app.state.session_factory() as session:
+            rows = {
+                row.tag: row
+                for row in session.scalars(
+                    select(RegistryEventInbox).where(RegistryEventInbox.repository_name == "sheldylew/app")
+                )
+            }
+            job = session.scalar(select(RegistryStateRebuildJob).order_by(RegistryStateRebuildJob.id.desc()))
+            succeeded_event = session.scalar(
+                select(AuditEvent).where(AuditEvent.action == "registry_state_rebuild_succeeded")
+            )
+
+    assert response.status_code == 200
+    assert job.status == "succeeded"
+    assert "inbox reconciliation: 2 stale events reconciled" in job.log_output
+    assert succeeded_event.metadata_json["inbox_reconciled"] == 2
+    assert rows["old-pending"].status == "reconciled"
+    assert rows["old-processing"].status == "reconciled"
+    assert rows["old-pending"].processed_at is not None
+    assert rows["old-processing"].processed_at is not None
+    assert rows["new-pending"].status == "pending"
+    assert rows["failed"].status == "failed"
+    assert maintenance_response.status_code == 200
+    assert maintenance_response.json()["registry_state"]["inbox_queued"] == 1
+    assert maintenance_response.json()["registry_state"]["inbox_failed"] == 1
+
+
 def test_registry_state_rebuild_rejects_active_maintenance_job(settings) -> None:
     app = create_app(settings)
 

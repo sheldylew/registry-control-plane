@@ -435,6 +435,27 @@ def registry_state_stats(db: Session) -> dict[str, object]:
     }
 
 
+def reconcile_registry_event_inbox_after_rebuild(
+    db: Session,
+    *,
+    received_before: datetime,
+) -> int:
+    rows = db.scalars(
+        select(RegistryEventInbox)
+        .where(
+            RegistryEventInbox.status.in_(("pending", "processing")),
+            RegistryEventInbox.received_at <= received_before,
+        )
+        .order_by(RegistryEventInbox.received_at.asc())
+    ).all()
+    processed_at = utcnow()
+    for row in rows:
+        row.status = "reconciled"
+        row.processed_at = processed_at
+        row.error = None
+    return len(rows)
+
+
 def has_active_rebuild_job(db: Session) -> bool:
     active = db.scalar(
         select(RegistryStateRebuildJob).where(
@@ -510,8 +531,9 @@ def run_registry_state_rebuild_job(session_factory, registry_factory, settings, 
         if job is None or job.status != "queued":
             return
         actor = db.get(User, job.requested_by)
+        rebuild_started_at = utcnow()
         job.status = "running"
-        job.started_at = utcnow()
+        job.started_at = rebuild_started_at
         job.updated_at = job.started_at
         db.commit()
         record_audit_event(
@@ -535,6 +557,7 @@ def run_registry_state_rebuild_job(session_factory, registry_factory, settings, 
             "tags_updated": 0,
             "tags_deleted": 0,
             "manifest_summaries_updated": 0,
+            "inbox_reconciled": 0,
         }
         try:
             repositories, catalog_meta = registry.list_repositories_bounded(max_pages=None)
@@ -622,8 +645,14 @@ def run_registry_state_rebuild_job(session_factory, registry_factory, settings, 
 
             job = db.get(RegistryStateRebuildJob, job_id)
             if job is not None:
+                counters["inbox_reconciled"] = reconcile_registry_event_inbox_after_rebuild(
+                    db,
+                    received_before=rebuild_started_at,
+                )
+                logs.append(f"inbox reconciliation: {counters['inbox_reconciled']} stale events reconciled")
                 for key, value in counters.items():
-                    setattr(job, key, value)
+                    if hasattr(job, key):
+                        setattr(job, key, value)
                 job.status = "succeeded"
                 job.finished_at = utcnow()
                 job.updated_at = job.finished_at
