@@ -2173,14 +2173,15 @@ def registry_event_inbox(
     db: Session = Depends(get_db),
 ):
     valid_statuses = {"pending", "processing", "processed", "failed", "reconciled"}
-    if status_filter and status_filter not in valid_statuses:
+    normalized_status_filter = None if status_filter in {None, "", "all"} else status_filter
+    if normalized_status_filter and normalized_status_filter not in valid_statuses:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported inbox status filter.")
 
     page_size = effective_default_page_size(db)
     safe_page = max(page, 1)
     query = select(RegistryEventInbox)
-    if status_filter:
-        query = query.where(RegistryEventInbox.status == status_filter)
+    if normalized_status_filter:
+        query = query.where(RegistryEventInbox.status == normalized_status_filter)
     query = query.order_by(RegistryEventInbox.received_at.desc(), RegistryEventInbox.id.desc())
     total_rows = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.scalars(query.offset((safe_page - 1) * page_size).limit(page_size)).all()
@@ -2194,7 +2195,7 @@ def registry_event_inbox(
     return {
         "entries": [_serialize_registry_event_inbox_entry(row) for row in rows],
         "status_counts": {entry_status: int(status_counts.get(entry_status, 0)) for entry_status in sorted(valid_statuses)},
-        "status_filter": status_filter,
+        "status_filter": normalized_status_filter,
         "pagination": {
             "page": safe_page,
             "page_size": page_size,

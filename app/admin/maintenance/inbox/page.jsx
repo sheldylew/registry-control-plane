@@ -18,7 +18,7 @@ const statusFilters = [
   { value: "processing", label: "Processing" },
   { value: "processed", label: "Processed" },
   { value: "reconciled", label: "Reconciled" },
-  { value: "", label: "All" },
+  { value: "all", label: "All" },
 ];
 
 function statusTone(status) {
@@ -36,7 +36,7 @@ function statusTone(status) {
 
 function buildApiPath(status, page) {
   const params = new URLSearchParams();
-  if (status) {
+  if (status && status !== "all") {
     params.set("status_filter", status);
   }
   params.set("page", String(page));
@@ -53,6 +53,10 @@ function buildPageHref(status, page) {
   }
   const query = params.toString();
   return query ? `/admin/maintenance/inbox?${query}` : "/admin/maintenance/inbox";
+}
+
+function countAllStatuses(statusCounts) {
+  return Object.values(statusCounts).reduce((sum, count) => sum + count, 0);
 }
 
 function compactReference(entry) {
@@ -115,9 +119,8 @@ export default async function RegistryEventInboxPage({ searchParams }) {
     throw new Error(payload.detail || "Failed to load registry event inbox.");
   }
 
-  const totalForFilter = validStatus
-    ? payload.status_counts[validStatus] || 0
-    : Object.values(payload.status_counts).reduce((sum, count) => sum + count, 0);
+  const totalEntryCount = countAllStatuses(payload.status_counts);
+  const totalForFilter = validStatus === "all" ? totalEntryCount : payload.status_counts[validStatus] || 0;
 
   return (
     <div className="space-y-6">
@@ -145,7 +148,7 @@ export default async function RegistryEventInboxPage({ searchParams }) {
             >
               {filter.label}
               <Badge tone={statusTone(filter.value)}>
-                {filter.value ? payload.status_counts[filter.value] || 0 : Object.values(payload.status_counts).reduce((sum, count) => sum + count, 0)}
+                {filter.value === "all" ? totalEntryCount : payload.status_counts[filter.value] || 0}
               </Badge>
             </Button>
           ))}

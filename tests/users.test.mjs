@@ -103,6 +103,8 @@ test("maintenance inbox page exposes registry event review and retry", async () 
 
   assert.match(page, /\/api\/admin\/maintenance\/inbox\?/);
   assert.match(page, /status_filter/);
+  assert.match(page, /\{ value: "all", label: "All" \}/);
+  assert.match(page, /status !== "all"/);
   assert.match(page, /raw_payload/);
   assert.match(page, /payload\.status_counts/);
   assert.match(page, /<TableShell/);

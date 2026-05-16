@@ -3409,8 +3409,10 @@ def test_admin_registry_event_inbox_lists_filtered_rows(settings) -> None:
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
         response = client.get("/api/admin/maintenance/inbox?status_filter=failed")
+        all_response = client.get("/api/admin/maintenance/inbox?status_filter=all")
 
     body = response.json()
+    all_body = all_response.json()
     assert response.status_code == 200
     assert body["pagination"]["total"] == 1
     assert body["status_counts"]["failed"] == 1
@@ -3418,6 +3420,10 @@ def test_admin_registry_event_inbox_lists_filtered_rows(settings) -> None:
     assert body["entries"][0]["status"] == "failed"
     assert body["entries"][0]["error"] == "manifest missing"
     assert body["entries"][0]["raw_payload"] == {"event": "failed"}
+    assert all_response.status_code == 200
+    assert all_body["status_filter"] is None
+    assert all_body["pagination"]["total"] == 2
+    assert [entry["status"] for entry in all_body["entries"]] == ["pending", "failed"]
 
 
 def test_admin_can_retry_failed_registry_event_inbox_entry(settings) -> None:
