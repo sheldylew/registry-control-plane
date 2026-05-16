@@ -1,3 +1,4 @@
+from dataclasses import replace
 from fastapi.testclient import TestClient
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from backend.maintenance import (
     CommandResult,
     LocalRegistryMaintenanceRunner,
     MaintenanceService,
+    compute_storage_usage_bytes,
     mark_storage_usage_snapshot_stale,
     prune_empty_directories,
     read_storage_usage_snapshot,
@@ -34,22 +36,44 @@ def _login(client: TestClient, username: str, password: str):
     return client.post("/api/session/login", json={"username": username, "password": password})
 
 
-def test_storage_usage_refresh_clears_stale_flag(settings, db_session) -> None:
-    storage_root = Path(settings.registry_storage_root)
-    blob_path = storage_root / "blobs" / "sha256" / "abc" / "data"
+def test_storage_usage_root_defaults_to_registry_v2_parent(settings) -> None:
+    custom_settings = replace(
+        settings,
+        registry_storage_root="/var/lib/registry/docker/registry/v2/repositories",
+        registry_storage_usage_root=None,
+    )
+
+    assert custom_settings.registry_storage_usage_root == "/var/lib/registry/docker/registry/v2"
+
+
+def test_storage_usage_refresh_counts_whole_registry_storage(settings, db_session, temp_workspace) -> None:
+    usage_root = temp_workspace / "registry-data" / "docker" / "registry" / "v2"
+    repository_root = usage_root / "repositories"
+    metadata_path = repository_root / "sheldylew" / "app" / "_manifests" / "revisions" / "sha256" / "abc" / "link"
+    blob_path = usage_root / "blobs" / "sha256" / "abc" / "data"
+    metadata_path.parent.mkdir(parents=True)
     blob_path.parent.mkdir(parents=True)
+    metadata_path.write_bytes(b"meta")
     blob_path.write_bytes(b"fresh")
+    custom_settings = replace(
+        settings,
+        registry_storage_root=str(repository_root),
+        registry_storage_usage_root=str(usage_root),
+    )
     service = MaintenanceService(
         session_factory=None,
-        settings=settings,
+        settings=custom_settings,
         runner_factory=lambda: FakeMaintenanceRunner(),
     )
+    repository_only_usage = compute_storage_usage_bytes(repository_root)
+    full_usage = compute_storage_usage_bytes(usage_root)
 
     mark_storage_usage_snapshot_stale(db_session)
     service.refresh_storage_usage_snapshot(db_session)
     snapshot = read_storage_usage_snapshot(db_session)
 
-    assert snapshot["bytes"] == 5
+    assert snapshot["bytes"] == full_usage
+    assert snapshot["bytes"] > repository_only_usage
     assert snapshot["stale"] is False
     assert snapshot["measured_at"] is not None
 
@@ -378,6 +402,7 @@ def test_local_registry_runner_strips_app_registry_env(monkeypatch) -> None:
         return Completed()
 
     monkeypatch.setenv("REGISTRY_STORAGE_ROOT", "/var/lib/registry/docker/registry/v2/repositories")
+    monkeypatch.setenv("REGISTRY_STORAGE_USAGE_ROOT", "/var/lib/registry/docker/registry/v2")
     monkeypatch.setenv("REGISTRY_GC_CONFIG_PATH", "/etc/docker/registry/config.yml")
     monkeypatch.setenv("REGISTRY_INTERNAL_URL", "http://registry:5000")
     monkeypatch.setattr("backend.maintenance.subprocess.run", fake_run)
@@ -388,5 +413,6 @@ def test_local_registry_runner_strips_app_registry_env(monkeypatch) -> None:
     assert result.returncode == 0
     assert captured["args"] == ["registry", "garbage-collect", "/etc/docker/registry/config.yml"]
     assert "REGISTRY_STORAGE_ROOT" not in captured["env"]
+    assert "REGISTRY_STORAGE_USAGE_ROOT" not in captured["env"]
     assert "REGISTRY_GC_CONFIG_PATH" not in captured["env"]
     assert "REGISTRY_INTERNAL_URL" not in captured["env"]

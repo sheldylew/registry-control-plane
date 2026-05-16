@@ -261,6 +261,7 @@ services:
       DATABASE_URL: sqlite:////data/app.db
       REGISTRY_INTERNAL_URL: http://registry:5000
       REGISTRY_STORAGE_ROOT: /var/lib/registry/docker/registry/v2/repositories
+      REGISTRY_STORAGE_USAGE_ROOT: /var/lib/registry/docker/registry/v2
       PUBLIC_REGISTRY_ORIGIN: \${PUBLIC_REGISTRY_ORIGIN:-}
       CSRF_TRUSTED_ORIGINS: \${CSRF_TRUSTED_ORIGINS:-}
       TOKEN_ISSUER: \${TOKEN_ISSUER:-sheldylew-registry}

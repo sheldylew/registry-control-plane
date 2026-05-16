@@ -29,6 +29,14 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _file_storage_usage_bytes(path: Path) -> int:
+    file_stat = path.stat()
+    allocated_blocks = getattr(file_stat, "st_blocks", 0)
+    if allocated_blocks:
+        return int(allocated_blocks) * 512
+    return file_stat.st_size
+
+
 def compute_storage_usage_bytes(storage_root: Path) -> int:
     if not storage_root.exists():
         return 0
@@ -36,7 +44,7 @@ def compute_storage_usage_bytes(storage_root: Path) -> int:
     total = 0
     for path in storage_root.rglob("*"):
         if path.is_file():
-            total += path.stat().st_size
+            total += _file_storage_usage_bytes(path)
     return total
 
 
@@ -127,6 +135,7 @@ class LocalRegistryMaintenanceRunner(MaintenanceRunner):
             for key, value in os.environ.items()
             if key not in {
                 "REGISTRY_STORAGE_ROOT",
+                "REGISTRY_STORAGE_USAGE_ROOT",
                 "REGISTRY_GC_CONFIG_PATH",
                 "REGISTRY_INTERNAL_URL",
             }
@@ -205,8 +214,11 @@ class MaintenanceService:
     def storage_root(self) -> Path:
         return Path(self._settings.registry_storage_root)
 
+    def storage_usage_root(self) -> Path:
+        return Path(self._settings.registry_storage_usage_root or self._settings.registry_storage_root)
+
     def current_storage_usage(self) -> int:
-        return compute_storage_usage_bytes(self.storage_root())
+        return compute_storage_usage_bytes(self.storage_usage_root())
 
     def refresh_storage_usage_snapshot(self, session: Session) -> dict[str, Optional[object]]:
         usage_bytes = self.current_storage_usage()

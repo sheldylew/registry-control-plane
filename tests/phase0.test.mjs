@@ -188,6 +188,7 @@ test("maintenance page keeps desktop layout while adding mobile affordances", as
   assert.match(maintenancePage, /href: "#maintenance-rebuilds"/);
   assert.match(maintenancePage, /title="Registry health and state"/);
   assert.match(maintenancePage, /Review storage, manifest cache, registry state, and recent maintenance outcomes before running jobs\./);
+  assert.match(maintenancePage, /Registry disk used/);
   assert.match(maintenancePage, /function summarizeModeTone\(job\)/);
   assert.match(maintenancePage, /detailBadge=\{Boolean\(payload\.last_job\)\}/);
   assert.match(maintenancePage, /detailBadgeTone=\{payload\.last_job \? summarizeModeTone\(payload\.last_job\) : "slate"\}/);

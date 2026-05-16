@@ -44,6 +44,13 @@ def _read_build_info_file(path: str | Path = "/srv/build-info.env") -> dict[str,
     return values
 
 
+def _default_storage_usage_root(registry_storage_root: str) -> str:
+    root = Path(registry_storage_root)
+    if root.name == "repositories" and root.parent.name == "v2":
+        return str(root.parent)
+    return registry_storage_root
+
+
 @dataclass(frozen=True)
 class Settings:
     app_env: str
@@ -91,8 +98,15 @@ class Settings:
     session_cookie_name: str = "rcr_session"
     session_cookie_secure: bool = False
     session_lifetime_seconds: int = 28800
+    registry_storage_usage_root: Optional[str] = None
 
     def __post_init__(self) -> None:
+        if not self.registry_storage_usage_root:
+            object.__setattr__(
+                self,
+                "registry_storage_usage_root",
+                _default_storage_usage_root(self.registry_storage_root),
+            )
         if self.app_env not in {"development", "production"}:
             raise ValueError("APP_ENV must be 'development' or 'production'.")
         if self.app_env == "production" and not self.session_cookie_secure:
@@ -137,6 +151,7 @@ def load_settings() -> Settings:
             "REGISTRY_STORAGE_ROOT",
             "/registry-data/docker/registry/v2/repositories",
         ),
+        registry_storage_usage_root=os.getenv("REGISTRY_STORAGE_USAGE_ROOT"),
         compose_project_dir=os.getenv("COMPOSE_PROJECT_DIR", "."),
         registry_service_name=os.getenv("REGISTRY_SERVICE_NAME", "registry"),
         registry_gc_config_path=os.getenv("REGISTRY_GC_CONFIG_PATH", "/etc/docker/registry/config.yml"),

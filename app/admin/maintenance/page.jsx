@@ -110,7 +110,7 @@ export default async function AdminMaintenancePage({ searchParams }) {
         <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-4 md:grid-cols-3 xl:grid-cols-5">
           <StatCard label="Registry status" value={payload.registry_status} />
           <StatCard
-            label="Storage usage"
+            label="Registry disk used"
             value={formatBytes(payload.storage_usage_bytes)}
             detail={storageUsageDetail}
             badge={payload.storage_usage_stale ? "Stale" : null}

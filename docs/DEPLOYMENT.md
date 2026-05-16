@@ -42,6 +42,8 @@ Deployment shape:
 - `TOKEN_SERVICE`: service name used in registry auth challenges.
 - `TOKEN_TTL_SECONDS`: lifetime of issued Docker bearer tokens. Defaults to `900`.
 - `REGISTRY_CATALOG_MAX_PAGES`: max backend page fetches when walking the catalog.
+- `REGISTRY_STORAGE_ROOT`: repository metadata root used for empty repository pruning. Defaults to the registry `v2/repositories` tree.
+- `REGISTRY_STORAGE_USAGE_ROOT`: registry disk accounting root used by maintenance storage measurements. Defaults to the parent `v2` tree when `REGISTRY_STORAGE_ROOT` points at `v2/repositories`.
 - `DASHBOARD_MAX_REPOSITORIES`: max repositories returned to the dashboard.
 - `MANIFEST_CHILDREN_MAX_ITEMS`: max manifest-child entries returned for a manifest detail view.
 - `HISTORY_ENTRIES_MAX_ITEMS`: max history entries returned for a repository view.
