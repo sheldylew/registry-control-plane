@@ -131,12 +131,26 @@ jobs:
             echo "  Additional image tag: ${image_tag_alt}"
           fi
 
-      - name: Install arm64 emulation
+      - name: Install non-native emulation
         if: steps.meta.outputs.publish == 'true'
-        # Validation stays native-arch. Publish runs still need binfmt on amd64
-        # runners so buildx can produce the arm64 images too.
+        # Validation stays native-arch. Publish still needs binfmt for whichever
+        # publish architecture is not native to the current runner.
+        shell: bash
         run: |
-          docker run --privileged --rm tonistiigi/binfmt --install arm64
+          set -euo pipefail
+
+          case "$(uname -m)" in
+            x86_64|amd64)
+              docker run --privileged --rm tonistiigi/binfmt --install arm64
+              ;;
+            arm64|aarch64)
+              docker run --privileged --rm tonistiigi/binfmt --install amd64
+              ;;
+            *)
+              echo "Unsupported runner architecture for multi-arch publish: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Log in to registry
         if: steps.meta.outputs.publish == 'true'
