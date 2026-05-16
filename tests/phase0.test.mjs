@@ -78,6 +78,8 @@ test("repository tag page shows the paginated total count", async () => {
   assert.match(tagsPanel, /payload\.pagination\.total/);
   assert.match(tagsPanel, /formatRelativeTime/);
   assert.match(tagsPanel, /formatDigest/);
+  assert.match(tagsPanel, /digest\.slice\(0, 15\)/);
+  assert.match(tagsPanel, /digest\.slice\(-8\)/);
   assert.match(tagsPanel, /tag\.architectures/);
   assert.match(tagsPanel, /ClockIcon/);
   assert.doesNotMatch(tagsPanel, /payload\.tags\.length} total/);

@@ -91,10 +91,10 @@ function formatDigest(digest) {
   if (!digest) {
     return "Unavailable";
   }
-  if (digest.length <= 24) {
+  if (digest.length <= 20) {
     return digest;
   }
-  return `${digest.slice(0, 18)}...${digest.slice(-12)}`;
+  return `${digest.slice(0, 15)}...${digest.slice(-8)}`;
 }
 
 function formatPlatformLabel(value) {
