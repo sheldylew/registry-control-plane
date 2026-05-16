@@ -1561,6 +1561,7 @@ class FakeRegistryClient:
         self.resolve_manifest_descriptor_calls = []
         self.list_tag_summaries_for_tags_calls = []
         self.get_manifest_details_calls = []
+        self.get_manifest_details_resolved_descriptors = []
         self.get_tag_history_bounded_calls = []
         self.list_repositories_bounded_calls = 0
         self.list_tag_summaries_bounded_calls = 0
@@ -1669,8 +1670,10 @@ class FakeRegistryClient:
         *,
         max_manifest_children=None,
         max_history_entries=None,
+        resolved_descriptor=None,
     ) -> ManifestDetails:
         self.get_manifest_details_calls.append((repository_name, tag))
+        self.get_manifest_details_resolved_descriptors.append(resolved_descriptor)
         if repository_name in self.missing_repos:
             raise RegistryNotFoundError(repository_name)
         payload = self.manifests.get((repository_name, tag))
@@ -3592,6 +3595,92 @@ def test_registry_state_rebuild_walks_registry_and_repairs_db_state(settings) ->
     assert worker_tag.manifest_digest == "sha256:worker"
     assert public_old.deleted_at is not None
     assert [row.manifest_digest for row in summaries] == ["sha256:public-new", "sha256:worker"]
+    assert fake_registry.get_manifest_details_resolved_descriptors == [
+        ResolvedManifestDescriptor(digest="sha256:public-new", media_type="application/vnd.oci.image.manifest.v1+json"),
+        ResolvedManifestDescriptor(digest="sha256:worker", media_type="application/vnd.oci.image.manifest.v1+json"),
+    ]
+
+
+def test_registry_state_rebuild_reuses_cached_manifest_summaries(settings) -> None:
+    app = create_app(settings)
+    fake_registry = FakeRegistryClient(
+        repositories=["sheldylew/app"],
+        tags={"sheldylew/app": ["latest"]},
+        descriptors={
+            ("sheldylew/app", "latest"): ("sha256:cached", "application/vnd.oci.image.manifest.v1+json"),
+        },
+        manifests={
+            ("sheldylew/app", "latest"): {
+                "name": "sheldylew/app",
+                "tag": "latest",
+                "digest": "sha256:cached",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "config_digest": "sha256:cached-cfg",
+                "config_media_type": "application/vnd.oci.image.config.v1+json",
+                "layers": [],
+                "total_size": 101,
+                "architectures": ["linux/amd64"],
+                "created_at": "2026-05-07T10:20:30Z",
+                "history_count": 1,
+            },
+        },
+    )
+    app.state.registry_client_factory = lambda: fake_registry
+    cached_at = datetime(2026, 5, 7, tzinfo=timezone.utc)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            repository = _seed_repository_state(session, "sheldylew/app", tags=("latest",))
+            tag = session.scalar(select(RepositoryTag).where(RepositoryTag.repository_id == repository.id))
+            tag.manifest_digest = "sha256:cached"
+            session.add(
+                CachedManifestSummary(
+                    repository_name="sheldylew/app",
+                    manifest_digest="sha256:cached",
+                    media_type="application/vnd.oci.image.manifest.v1+json",
+                    config_digest="sha256:cached-cfg",
+                    total_size=101,
+                    created_at=cached_at,
+                    architectures=["linux/amd64"],
+                    history_count=1,
+                    children_truncated=False,
+                    history_truncated=False,
+                    cached_at=cached_at,
+                    last_seen_at=cached_at,
+                )
+            )
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            "/api/admin/maintenance/cache/rebuild",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            job = session.scalar(select(RegistryStateRebuildJob).order_by(RegistryStateRebuildJob.id.desc()))
+            summary = session.scalar(
+                select(CachedManifestSummary).where(
+                    CachedManifestSummary.repository_name == "sheldylew/app",
+                    CachedManifestSummary.manifest_digest == "sha256:cached",
+                )
+            )
+            tag = session.scalar(
+                select(RepositoryTag)
+                .join(Repository)
+                .where(Repository.name == "sheldylew/app", RepositoryTag.name == "latest")
+            )
+
+    assert response.status_code == 200
+    assert job.status == "succeeded"
+    assert job.tags_scanned == 1
+    assert job.manifest_summaries_updated == 0
+    assert tag.manifest_digest == "sha256:cached"
+    assert summary.cached_at.replace(tzinfo=timezone.utc) == cached_at
+    assert summary.last_seen_at.replace(tzinfo=timezone.utc) > cached_at
+    assert fake_registry.resolve_manifest_descriptor_calls == [("sheldylew/app", "latest")]
+    assert fake_registry.get_manifest_details_calls == []
 
 
 def test_registry_state_rebuild_reconciles_stale_inbox_rows(settings) -> None:

@@ -259,10 +259,12 @@ class RegistryClient:
         *,
         max_manifest_children: Optional[int] = None,
         max_history_entries: Optional[int] = None,
+        resolved_descriptor: Optional[ResolvedManifestDescriptor] = None,
     ) -> ManifestDetails:
         headers = {"Accept": MANIFEST_ACCEPT}
         scopes = [{"type": "repository", "name": repository_name, "actions": ["pull"]}]
-        resolved_descriptor = self.resolve_manifest_descriptor(repository_name, reference)
+        if resolved_descriptor is None:
+            resolved_descriptor = self.resolve_manifest_descriptor(repository_name, reference)
         manifest_response = self._request(
             "GET",
             f"/v2/{repository_name}/manifests/{reference}",

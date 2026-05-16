@@ -18,3 +18,9 @@ def test_render_registry_config_uses_configured_public_origin(settings) -> None:
     assert "notifications:" in rendered
     assert "url: http://api:8000/api/internal/registry-events" in rendered
     assert f"- Bearer {notification_token}" in rendered
+    assert "ignoredmediatypes:" in rendered
+    assert "mediatypes:" in rendered
+    assert "- application/octet-stream" in rendered
+    assert "actions:" in rendered
+    assert "- pull" in rendered
+    assert "- mount" in rendered

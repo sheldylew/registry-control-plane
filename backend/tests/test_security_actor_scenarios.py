@@ -88,6 +88,7 @@ class FakeRegistry:
         *,
         max_manifest_children=None,
         max_history_entries=None,
+        resolved_descriptor=None,
     ) -> ManifestDetails:
         return ManifestDetails(
             name=repo_name,

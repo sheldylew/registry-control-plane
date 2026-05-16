@@ -17,7 +17,7 @@ from backend.models import (
     RepositoryTag,
     User,
 )
-from backend.registry_client import ManifestDetails, RegistryNotFoundError
+from backend.registry_client import ManifestDetails, RegistryNotFoundError, ResolvedManifestDescriptor
 
 
 def utcnow() -> datetime:
@@ -226,6 +226,25 @@ def upsert_cached_manifest_summary(
     return row, changed
 
 
+def mark_cached_manifest_summary_seen(
+    db: Session,
+    *,
+    repository_name: str,
+    manifest_digest: str,
+    seen_at: Optional[datetime] = None,
+) -> bool:
+    row = db.scalar(
+        select(CachedManifestSummary).where(
+            CachedManifestSummary.repository_name == repository_name,
+            CachedManifestSummary.manifest_digest == manifest_digest,
+        )
+    )
+    if row is None:
+        return False
+    row.last_seen_at = seen_at or utcnow()
+    return True
+
+
 def remove_manifest_summary_if_unreferenced(db: Session, *, repository_name: str, manifest_digest: str) -> bool:
     active_refs = db.scalar(
         select(func.count(RepositoryTag.id))
@@ -321,10 +340,15 @@ def warm_manifest_summary(
 ) -> tuple[Optional[str], Optional[str], bool]:
     reference = digest
     media_type = None
+    resolved_descriptor = None
     if tag:
         descriptor = registry.resolve_manifest_descriptor(repository_name, tag)
         reference = descriptor.digest or tag
         media_type = descriptor.media_type
+        if descriptor.digest:
+            resolved_descriptor = descriptor
+    elif digest:
+        resolved_descriptor = ResolvedManifestDescriptor(digest=digest, media_type=None)
     if not reference:
         return digest, media_type, False
 
@@ -333,6 +357,7 @@ def warm_manifest_summary(
         reference,
         max_manifest_children=settings.manifest_children_max_items,
         max_history_entries=settings.history_entries_max_items,
+        resolved_descriptor=resolved_descriptor,
     )
     resolved_digest = details.digest or reference or digest
     if not resolved_digest:
@@ -594,23 +619,31 @@ def run_registry_state_rebuild_job(session_factory, registry_factory, settings, 
                     seen_tags.add((repository_name, tag_name))
 
                     summary_changed = False
-                    try:
-                        details = registry.get_manifest_details(
-                            repository_name,
-                            descriptor.digest,
-                            max_manifest_children=settings.manifest_children_max_items,
-                            max_history_entries=settings.history_entries_max_items,
-                        )
-                    except RegistryNotFoundError:
-                        details = None
-                    if details is not None:
-                        _summary, summary_changed = upsert_cached_manifest_summary(
-                            db,
-                            repository_name=repository_name,
-                            manifest_digest=descriptor.digest,
-                            details=details,
-                            seen_at=now,
-                        )
+                    summary_cached = mark_cached_manifest_summary_seen(
+                        db,
+                        repository_name=repository_name,
+                        manifest_digest=descriptor.digest,
+                        seen_at=now,
+                    )
+                    if not summary_cached:
+                        try:
+                            details = registry.get_manifest_details(
+                                repository_name,
+                                descriptor.digest,
+                                max_manifest_children=settings.manifest_children_max_items,
+                                max_history_entries=settings.history_entries_max_items,
+                                resolved_descriptor=descriptor,
+                            )
+                        except RegistryNotFoundError:
+                            details = None
+                        if details is not None:
+                            _summary, summary_changed = upsert_cached_manifest_summary(
+                                db,
+                                repository_name=repository_name,
+                                manifest_digest=descriptor.digest,
+                                details=details,
+                                seen_at=now,
+                            )
                     _tag, tag_changed = upsert_repository_tag(
                         db,
                         repository=repository,

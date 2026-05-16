@@ -29,7 +29,11 @@ notifications:
       timeout: 1s
       threshold: 5
       backoff: 1s
+      ignoredmediatypes:
+        - application/octet-stream
       ignore:
+        mediatypes:
+          - application/octet-stream
         actions:
           - pull
           - mount
