@@ -175,9 +175,10 @@ test("high-density lists expose mobile card layouts without dropping desktop tab
 });
 
 test("maintenance page keeps desktop layout while adding mobile affordances", async () => {
-  const [maintenancePage, maintenancePanel, statCard, floatingButtonGroup] = await Promise.all([
+  const [maintenancePage, maintenancePanel, jobOutputDisclosure, statCard, floatingButtonGroup] = await Promise.all([
     readFile(new URL("../app/admin/maintenance/page.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/maintenance-panel.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/job-output-disclosure.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/ui/stat-card.jsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/ui/floating-button-group.jsx", import.meta.url), "utf8"),
   ]);
@@ -197,7 +198,8 @@ test("maintenance page keeps desktop layout while adding mobile affordances", as
   assert.match(maintenancePage, /openLabel="Open rebuild jobs"/);
   assert.doesNotMatch(maintenancePage, /overflow-x-auto rounded-xl border border-white\/10 bg-slate-950\/85 p-2/);
   assert.match(maintenancePage, /xl:grid-cols-5/);
-  assert.match(maintenancePage, /max-h-72 overflow-auto whitespace-pre-wrap/);
+  assert.match(maintenancePage, /JobOutputDisclosure/);
+  assert.match(jobOutputDisclosure, /max-h-72 overflow-auto whitespace-pre-wrap/);
   assert.match(floatingButtonGroup, /sticky top-3/);
   assert.match(floatingButtonGroup, /lg:hidden/);
   assert.match(floatingButtonGroup, /rounded-full/);
