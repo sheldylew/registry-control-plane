@@ -61,7 +61,7 @@ For production-style runs, the stack starts in locked setup mode until it has bo
 - an admin user
 - a saved public registry origin
 
-That state can be created either through the first-boot setup wizard or by supplying all four bootstrap values in `.env`.
+That state is created through the first-boot setup wizard for the basic GHCR install. Source-based deployments can also supply all four bootstrap values in `.env`.
 
 ## Quick start
 
@@ -119,10 +119,10 @@ The minimum production-facing configuration is:
 
 ```dotenv
 PUBLIC_REGISTRY_ORIGIN=https://registry.example.com
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=replace-with-a-long-random-password
-ADMIN_EMAIL=admin@example.com
+RCP_HTTP_BIND=127.0.0.1:8080
 ```
+
+Set the public registry origin and first admin account in the first-boot wizard. If you need unattended bootstrap from `.env`, use the source-based deployment path in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 The repo also supports optional controls for:
 
@@ -137,7 +137,7 @@ The repo also supports optional controls for:
 
 Production runs default to secure browser cookies. Login can work from `http://localhost:8080` while failing from a plain HTTP LAN hostname because browsers treat `localhost` as a trustworthy development context, but they do not send `Secure` cookies over `http://some-lan-name:8080`.
 
-For LAN browser access, put TLS in front of the stack and access the control plane through `https://...`. If the LAN HTTPS hostname differs from `PUBLIC_REGISTRY_ORIGIN`, add it to `CSRF_TRUSTED_ORIGINS` so cookie-authenticated admin writes pass the same-origin checks.
+For LAN browser access, put TLS in front of the stack and access the control plane through `https://...`. If the LAN HTTPS hostname differs from `PUBLIC_REGISTRY_ORIGIN`, configure `CSRF_TRUSTED_ORIGINS` in an advanced/source deployment so cookie-authenticated admin writes pass the same-origin checks.
 
 Keep `PUBLIC_REGISTRY_ORIGIN` as the Docker registry origin used in bearer-token challenges. Do not change it only to make browser login work from a LAN hostname.
 

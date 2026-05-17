@@ -80,10 +80,21 @@ ARG APP_IMAGE_TAG=
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    APP_ENV=production \
     APP_VERSION=${APP_VERSION} \
     APP_REVISION=${APP_REVISION} \
     APP_BUILD_TIME=${APP_BUILD_TIME} \
-    APP_IMAGE_TAG=${APP_IMAGE_TAG}
+    APP_IMAGE_TAG=${APP_IMAGE_TAG} \
+    DATABASE_URL=sqlite:////data/app.db \
+    REGISTRY_STORAGE_ROOT=/var/lib/registry/docker/registry/v2/repositories \
+    REGISTRY_STORAGE_USAGE_ROOT=/var/lib/registry/docker/registry/v2 \
+    AUTH_PRIVATE_KEY_PATH=/run/auth-private/auth-private.pem \
+    AUTH_PUBLIC_CERT_PATH=/run/auth-public/auth-cert.pem \
+    SETUP_TOKEN_PATH=/data/setup-token.json \
+    SETUP_COMPLETE_MARKER_PATH=/data/setup-complete \
+    REGISTRY_NOTIFICATIONS_TOKEN_PATH=/data/registry-events-token \
+    REGISTRY_RENDERED_CONFIG_PATH=/etc/docker/registry/config.yml \
+    SESSION_COOKIE_SECURE=true
 
 WORKDIR /srv
 
@@ -99,13 +110,24 @@ USER 10001:10001
 
 EXPOSE 8000
 
+HEALTHCHECK --interval=1m --timeout=3s --retries=12 --start-period=5s CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+
 CMD ["./scripts/api-entrypoint.sh"]
 
 FROM gcr.io/distroless/python3-debian12 AS auth-init
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/srv:/usr/local/lib/python3.11/site-packages
+    PYTHONPATH=/srv:/usr/local/lib/python3.11/site-packages \
+    APP_ENV=production \
+    AUTH_PRIVATE_KEY_PATH=/auth-private/auth-private.pem \
+    AUTH_PUBLIC_CERT_PATH=/auth-public/auth-cert.pem \
+    AUTH_BOOTSTRAP_MARKER_PATH=/data/auth-bootstrap-complete \
+    SETUP_TOKEN_PATH=/data/setup-token.json \
+    SETUP_COMPLETE_MARKER_PATH=/data/setup-complete \
+    REGISTRY_NOTIFICATIONS_TOKEN_PATH=/data/registry-events-token \
+    REGISTRY_RENDERED_CONFIG_PATH=/registry-config/config.yml \
+    SESSION_COOKIE_SECURE=true
 
 WORKDIR /srv
 
@@ -151,7 +173,8 @@ ENV NODE_ENV=production \
     APP_VERSION=${APP_VERSION} \
     APP_REVISION=${APP_REVISION} \
     APP_BUILD_TIME=${APP_BUILD_TIME} \
-    APP_IMAGE_TAG=${APP_IMAGE_TAG}
+    APP_IMAGE_TAG=${APP_IMAGE_TAG} \
+    INTERNAL_API_BASE_URL=http://api:8000
 WORKDIR /web
 
 COPY --from=build-metadata --chown=10001:10001 /out/web/build-info.env /web/build-info.env
@@ -161,6 +184,8 @@ COPY --from=web-builder --chown=10001:10001 /web/.next/static ./.next/static
 USER 10001:10001
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=1m --timeout=3s --retries=12 --start-period=10s CMD wget -q -O /dev/null "http://$(hostname):3000/"
 
 CMD ["node", "server.js"]
 
