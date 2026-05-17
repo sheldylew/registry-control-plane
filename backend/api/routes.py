@@ -452,20 +452,34 @@ def _build_tag_summary_from_cache(row: CachedManifestSummary, *, tag: str) -> Ta
     )
 
 
-def _get_active_repository_tag(db: Session, *, repository_name: str, tag_name: str) -> tuple[Repository, RepositoryTag]:
-    row = db.execute(
-        select(Repository, RepositoryTag)
-        .join(RepositoryTag, RepositoryTag.repository_id == Repository.id)
-        .where(
+def _get_active_repository(db: Session, *, repository_name: str) -> Repository:
+    repository = db.scalar(
+        select(Repository).where(
             Repository.name == repository_name,
             Repository.deleted_at.is_(None),
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+    return repository
+
+
+def _get_active_repository_tag(
+    db: Session,
+    *,
+    repository: Repository,
+    tag_name: str,
+) -> RepositoryTag:
+    tag = db.scalar(
+        select(RepositoryTag).where(
+            RepositoryTag.repository_id == repository.id,
             RepositoryTag.name == tag_name,
             RepositoryTag.deleted_at.is_(None),
         )
-    ).one_or_none()
-    if row is None:
+    )
+    if tag is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository tag not found.")
-    return row[0], row[1]
+    return tag
 
 
 def _require_registry_notification_auth(request: Request) -> None:
@@ -526,7 +540,14 @@ def _serialize_history_variant(variant: HistoryVariant) -> dict:
     }
 
 
-def _serialize_gc_job(job: GcJob) -> dict:
+def _log_output_line_count(log_output: Optional[str]) -> int:
+    if not log_output:
+        return 0
+    return len([line for line in log_output.split("\n") if line])
+
+
+def _serialize_gc_job(job: GcJob, *, include_log_output: bool = True) -> dict:
+    log_output = job.log_output or ""
     return {
         "id": job.id,
         "status": job.status,
@@ -538,14 +559,21 @@ def _serialize_gc_job(job: GcJob) -> dict:
         "prune_empty_dirs": job.prune_empty_dirs,
         "bytes_before": job.bytes_before,
         "bytes_after": job.bytes_after,
-        "log_output": job.log_output,
+        "log_output": job.log_output if include_log_output else None,
+        "log_output_available": bool(log_output),
+        "log_output_line_count": _log_output_line_count(log_output),
         "error": job.error,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
     }
 
 
-def _serialize_registry_state_rebuild_job(job: RegistryStateRebuildJob) -> dict:
+def _serialize_registry_state_rebuild_job(
+    job: RegistryStateRebuildJob,
+    *,
+    include_log_output: bool = True,
+) -> dict:
+    log_output = job.log_output or ""
     return {
         "id": job.id,
         "status": job.status,
@@ -559,7 +587,9 @@ def _serialize_registry_state_rebuild_job(job: RegistryStateRebuildJob) -> dict:
         "tags_updated": job.tags_updated,
         "tags_deleted": job.tags_deleted,
         "manifest_summaries_updated": job.manifest_summaries_updated,
-        "log_output": job.log_output,
+        "log_output": job.log_output if include_log_output else None,
+        "log_output_available": bool(log_output),
+        "log_output_line_count": _log_output_line_count(log_output),
         "error": job.error,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
@@ -2086,13 +2116,19 @@ def maintenance_summary(
             "active_tags": state_stats["active_tags"],
             "inbox_queued": state_stats["inbox_queued"],
             "inbox_failed": state_stats["inbox_failed"],
-            "last_rebuild": _serialize_registry_state_rebuild_job(state_stats["last_rebuild"]) if state_stats["last_rebuild"] else None,
+            "last_rebuild": _serialize_registry_state_rebuild_job(
+                state_stats["last_rebuild"],
+                include_log_output=False,
+            ) if state_stats["last_rebuild"] else None,
         },
         "log_retention_days": summary["log_retention_days"],
-        "active_job": _serialize_gc_job(summary["active_job"]) if summary["active_job"] else None,
-        "last_job": _serialize_gc_job(summary["last_job"]) if summary["last_job"] else None,
-        "jobs": [_serialize_gc_job(job) for job in summary["jobs"]],
-        "rebuild_jobs": [_serialize_registry_state_rebuild_job(job) for job in rebuild_jobs],
+        "active_job": _serialize_gc_job(summary["active_job"], include_log_output=False) if summary["active_job"] else None,
+        "last_job": _serialize_gc_job(summary["last_job"], include_log_output=False) if summary["last_job"] else None,
+        "jobs": [_serialize_gc_job(job, include_log_output=False) for job in summary["jobs"]],
+        "rebuild_jobs": [
+            _serialize_registry_state_rebuild_job(job, include_log_output=False)
+            for job in rebuild_jobs
+        ],
         "pagination": summary["pagination"],
     }
 
@@ -2162,6 +2198,18 @@ def create_registry_state_rebuild(
             job.id,
         )
 
+    return {"job": _serialize_registry_state_rebuild_job(job)}
+
+
+@router.get("/admin/maintenance/cache/rebuild/{job_id}/log")
+def registry_state_rebuild_job_log(
+    job_id: int,
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    job = db.get(RegistryStateRebuildJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registry state rebuild job not found.")
     return {"job": _serialize_registry_state_rebuild_job(job)}
 
 
@@ -2342,6 +2390,18 @@ def create_maintenance_job(
     return {"job": _serialize_gc_job(job)}
 
 
+@router.get("/admin/maintenance/jobs/{job_id}/log")
+def maintenance_job_log(
+    job_id: int,
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    job = db.get(GcJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Maintenance job not found.")
+    return {"job": _serialize_gc_job(job)}
+
+
 @router.post("/admin/maintenance/logs/prune")
 def prune_maintenance_logs(
     user: User = Depends(require_csrf),
@@ -2421,15 +2481,7 @@ def list_repository_tags(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported tag sort direction.")
 
     page_size = effective_default_page_size(db)
-    repository = db.scalar(
-        select(Repository).where(
-            Repository.name == repo_name,
-            Repository.deleted_at.is_(None),
-        )
-    )
-    if repository is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
-
+    repository = _get_active_repository(db, repository_name=repo_name)
     if not can_access_repository(db, repository_name=repo_name, action="pull", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pull access required.")
 
@@ -2555,9 +2607,10 @@ def get_repository_tag_details(
     settings: Settings = Depends(get_settings),
     registry: RegistryClient = Depends(get_registry_client),
 ):
-    _repository, _tag_row = _get_active_repository_tag(db, repository_name=repo_name, tag_name=tag)
+    repository = _get_active_repository(db, repository_name=repo_name)
     if not can_access_repository(db, repository_name=repo_name, action="pull", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pull access required.")
+    _get_active_repository_tag(db, repository=repository, tag_name=tag)
 
     can_delete_tag = can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user))
 
@@ -2578,7 +2631,7 @@ def get_repository_tag_details(
             manifest,
             shared_manifest_metadata=_shared_manifest_tag_metadata(
                 db,
-                repository_id=_repository.id,
+                repository_id=repository.id,
                 manifest_digest=manifest.digest,
             ),
         ),
@@ -2596,9 +2649,10 @@ def get_repository_tag_history(
     settings: Settings = Depends(get_settings),
     registry: RegistryClient = Depends(get_registry_client),
 ):
-    _repository, _tag_row = _get_active_repository_tag(db, repository_name=repo_name, tag_name=tag)
+    repository = _get_active_repository(db, repository_name=repo_name)
     if not can_access_repository(db, repository_name=repo_name, action="pull", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Pull access required.")
+    _get_active_repository_tag(db, repository=repository, tag_name=tag)
 
     try:
         variants, truncation = registry.get_tag_history_bounded(
@@ -2630,14 +2684,10 @@ def delete_repository_tags(
     settings: Settings = Depends(get_settings),
     registry: RegistryClient = Depends(get_registry_client),
 ):
-    repository = db.scalar(
-        select(Repository).where(
-            Repository.name == repo_name,
-            Repository.deleted_at.is_(None),
-        )
-    )
-    if repository is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found.")
+    repository = _get_active_repository(db, repository_name=repo_name)
+
+    if not can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delete access required.")
 
     active_tags = db.scalars(
         select(RepositoryTag.name).where(
@@ -2650,9 +2700,6 @@ def delete_repository_tags(
     missing_tags = [tag for tag in payload.tags if tag not in active_tag_set]
     if missing_tags:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repository tag not found.")
-
-    if not can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user)):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delete access required.")
 
     manifests_by_tag: dict[str, ManifestDetails] = {}
     try:
@@ -2708,9 +2755,10 @@ def delete_repository_tag(
     expected = f"{repo_name}:{tag}"
     if payload.confirmation != expected:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation text mismatch.")
-    _repository, _tag_row = _get_active_repository_tag(db, repository_name=repo_name, tag_name=tag)
+    repository = _get_active_repository(db, repository_name=repo_name)
     if not can_access_repository(db, repository_name=repo_name, action="delete", **_subject_for_user(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delete access required.")
+    _get_active_repository_tag(db, repository=repository, tag_name=tag)
 
     try:
         manifest = registry.get_manifest_details(repo_name, tag)

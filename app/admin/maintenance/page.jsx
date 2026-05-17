@@ -5,9 +5,9 @@ import MaintenancePanel from "@/app/components/maintenance-panel";
 import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
-import Disclosure from "@/app/components/ui/disclosure";
 import EmptyState from "@/app/components/ui/empty-state";
 import FloatingButtonGroup from "@/app/components/ui/floating-button-group";
+import JobOutputDisclosure from "@/app/components/job-output-disclosure";
 import { MobileCollapsiblePanel, Panel, PanelHeader } from "@/app/components/ui/panel";
 import Pagination from "@/app/components/ui/pagination";
 import StatCard from "@/app/components/ui/stat-card";
@@ -210,17 +210,12 @@ export default async function AdminMaintenancePage({ searchParams }) {
                 {job.error ? (
                   <Alert tone="rose" className="mt-4">{job.error}</Alert>
                 ) : null}
-                {job.log_output ? (
+                {job.log_output_available ? (
                   <div className="mt-4">
-                    <Disclosure
-                      titleClosed="View output"
-                      titleOpen="Hide output"
-                      meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
-                    >
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200">
-                        {job.log_output}
-                      </pre>
-                    </Disclosure>
+                    <JobOutputDisclosure
+                      endpoint={`/api/admin/maintenance/jobs/${job.id}/log`}
+                      lineCount={job.log_output_line_count}
+                    />
                   </div>
                 ) : null}
               </MobileDisclosureCard>
@@ -243,17 +238,12 @@ export default async function AdminMaintenancePage({ searchParams }) {
                     <Alert tone="rose">{job.error}</Alert>
                   ) : null}
                 </div>
-                {job.log_output ? (
+                {job.log_output_available ? (
                   <div className="mt-4">
-                    <Disclosure
-                      titleClosed="View output"
-                      titleOpen="Hide output"
-                      meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
-                    >
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200 sm:max-h-none sm:overflow-x-auto sm:whitespace-pre sm:break-normal">
-                        {job.log_output}
-                      </pre>
-                    </Disclosure>
+                    <JobOutputDisclosure
+                      endpoint={`/api/admin/maintenance/jobs/${job.id}/log`}
+                      lineCount={job.log_output_line_count}
+                    />
                   </div>
                 ) : null}
               </article>
@@ -316,17 +306,12 @@ export default async function AdminMaintenancePage({ searchParams }) {
                 {job.error ? (
                   <Alert tone="rose" className="mt-4">{job.error}</Alert>
                 ) : null}
-                {job.log_output ? (
+                {job.log_output_available ? (
                   <div className="mt-4">
-                    <Disclosure
-                      titleClosed="View output"
-                      titleOpen="Hide output"
-                      meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
-                    >
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200">
-                        {job.log_output}
-                      </pre>
-                    </Disclosure>
+                    <JobOutputDisclosure
+                      endpoint={`/api/admin/maintenance/cache/rebuild/${job.id}/log`}
+                      lineCount={job.log_output_line_count}
+                    />
                   </div>
                 ) : null}
               </MobileDisclosureCard>
@@ -348,17 +333,12 @@ export default async function AdminMaintenancePage({ searchParams }) {
                     <Alert tone="rose">{job.error}</Alert>
                   ) : null}
                 </div>
-                {job.log_output ? (
+                {job.log_output_available ? (
                   <div className="mt-4">
-                    <Disclosure
-                      titleClosed="View output"
-                      titleOpen="Hide output"
-                      meta={`${job.log_output.split("\n").filter(Boolean).length} lines`}
-                    >
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-white/10 px-4 py-4 text-xs leading-5 text-slate-200 sm:max-h-none sm:overflow-x-auto sm:whitespace-pre sm:break-normal">
-                        {job.log_output}
-                      </pre>
-                    </Disclosure>
+                    <JobOutputDisclosure
+                      endpoint={`/api/admin/maintenance/cache/rebuild/${job.id}/log`}
+                      lineCount={job.log_output_line_count}
+                    />
                   </div>
                 ) : null}
               </article>

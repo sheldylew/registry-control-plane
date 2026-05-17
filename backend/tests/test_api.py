@@ -589,6 +589,36 @@ def test_admin_routes_reject_non_admin_user(settings) -> None:
     assert response.status_code == 403
 
 
+def test_non_admin_cannot_fetch_user_detail_by_changing_user_id(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="plain-detail-user",
+                email="plain-detail-user@example.com",
+                password_hash=hash_password("plain-detail-user-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            victim = User(
+                username="victim-detail-user",
+                email="victim-detail-user@example.com",
+                password_hash=hash_password("victim-detail-user-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add_all([user, victim])
+            session.commit()
+            session.refresh(victim)
+            victim_id = victim.id
+
+        login = _login(client, "plain-detail-user", "plain-detail-user-pass")
+        assert login.status_code == 200
+        response = client.get(f"/api/admin/users/{victim_id}")
+
+    assert response.status_code == 403
+
+
 def test_admin_users_list_supports_pagination(settings) -> None:
     app = create_app(settings)
     with TestClient(app) as client:
@@ -1498,6 +1528,44 @@ def test_admin_create_pat_rejects_whitespace_only_name(settings) -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["msg"] == "Value error, Token name is required."
+
+
+def test_admin_cannot_revoke_pat_owned_by_another_admin(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            other_admin = User(
+                username="other-token-admin",
+                email="other-token-admin@example.com",
+                password_hash=hash_password("other-token-admin-pass"),
+                is_admin=True,
+                is_active=True,
+            )
+            session.add(other_admin)
+            session.commit()
+            session.refresh(other_admin)
+            issued = issue_personal_access_token(session, user_id=other_admin.id, name="other-admin-cli")
+            session.commit()
+            token = session.scalar(
+                select(PersonalAccessToken).where(PersonalAccessToken.token_prefix == issued.token_prefix)
+            )
+            assert token is not None
+            token_id = token.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        csrf = login.cookies.get("rcr_csrf")
+        response = client.post(
+            f"/api/admin/tokens/{token_id}/revoke",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            token = session.get(PersonalAccessToken, token_id)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Token not found."
+    assert token is not None
+    assert token.revoked_at is None
 
 
 def test_admin_can_delete_robot_and_tokens(settings) -> None:

@@ -18,7 +18,7 @@ from backend.maintenance import (
     read_storage_usage_snapshot,
 )
 from backend.log_retention import utcnow
-from backend.models import AuditEvent, GcJob, RegistryEventInbox, User
+from backend.models import AuditEvent, GcJob, RegistryEventInbox, RegistryStateRebuildJob, User
 from backend.setup import AUDIT_LOG_RETENTION_DAYS_KEY, set_app_setting
 
 
@@ -127,6 +127,117 @@ def test_non_admin_cannot_access_maintenance_summary(settings) -> None:
         response = client.get("/api/admin/maintenance")
 
     assert response.status_code == 403
+
+
+def test_admin_maintenance_summary_omits_full_job_logs(settings) -> None:
+    app = create_app(settings)
+    now = utcnow()
+
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+            gc_job = GcJob(
+                status="succeeded",
+                requested_by=admin.id,
+                dry_run=False,
+                delete_untagged=False,
+                prune_empty_dirs=False,
+                started_at=now,
+                finished_at=now,
+                log_output="gc line 1\ngc line 2\n",
+                created_at=now,
+                updated_at=now,
+            )
+            rebuild_job = RegistryStateRebuildJob(
+                status="succeeded",
+                requested_by=admin.id,
+                repositories_scanned=1,
+                tags_scanned=2,
+                log_output="rebuild line 1\nrebuild line 2",
+                created_at=now,
+                updated_at=now,
+                finished_at=now,
+            )
+            session.add_all([gc_job, rebuild_job])
+            session.commit()
+            gc_job_id = gc_job.id
+            rebuild_job_id = rebuild_job.id
+
+        summary_response = client.get("/api/admin/maintenance")
+        gc_log_response = client.get(f"/api/admin/maintenance/jobs/{gc_job_id}/log")
+        rebuild_log_response = client.get(f"/api/admin/maintenance/cache/rebuild/{rebuild_job_id}/log")
+
+    body = summary_response.json()
+    assert summary_response.status_code == 200
+    assert body["last_job"]["log_output"] is None
+    assert body["last_job"]["log_output_available"] is True
+    assert body["last_job"]["log_output_line_count"] == 2
+    assert body["jobs"][0]["log_output"] is None
+    assert body["jobs"][0]["log_output_available"] is True
+    assert body["jobs"][0]["log_output_line_count"] == 2
+    assert body["registry_state"]["last_rebuild"]["log_output"] is None
+    assert body["registry_state"]["last_rebuild"]["log_output_available"] is True
+    assert body["rebuild_jobs"][0]["log_output"] is None
+    assert body["rebuild_jobs"][0]["log_output_line_count"] == 2
+
+    assert gc_log_response.status_code == 200
+    assert gc_log_response.json()["job"]["log_output"] == "gc line 1\ngc line 2\n"
+    assert rebuild_log_response.status_code == 200
+    assert rebuild_log_response.json()["job"]["log_output"] == "rebuild line 1\nrebuild line 2"
+
+
+def test_non_admin_cannot_access_maintenance_job_logs(settings) -> None:
+    app = create_app(settings)
+    now = utcnow()
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="log-reader",
+                email="log-reader@example.com",
+                password_hash=hash_password("log-reader-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.flush()
+            gc_job = GcJob(
+                status="succeeded",
+                requested_by=user.id,
+                dry_run=False,
+                delete_untagged=False,
+                prune_empty_dirs=False,
+                started_at=now,
+                finished_at=now,
+                log_output="private gc output",
+                created_at=now,
+                updated_at=now,
+            )
+            rebuild_job = RegistryStateRebuildJob(
+                status="succeeded",
+                requested_by=user.id,
+                repositories_scanned=1,
+                tags_scanned=1,
+                log_output="private rebuild output",
+                created_at=now,
+                updated_at=now,
+                finished_at=now,
+            )
+            session.add_all([gc_job, rebuild_job])
+            session.commit()
+            gc_job_id = gc_job.id
+            rebuild_job_id = rebuild_job.id
+
+        login = _login(client, "log-reader", "log-reader-pass")
+        assert login.status_code == 200
+        gc_log_response = client.get(f"/api/admin/maintenance/jobs/{gc_job_id}/log")
+        rebuild_log_response = client.get(f"/api/admin/maintenance/cache/rebuild/{rebuild_job_id}/log")
+
+    assert gc_log_response.status_code == 403
+    assert rebuild_log_response.status_code == 403
 
 
 def test_admin_can_create_dry_run_gc_job(settings, temp_workspace) -> None:

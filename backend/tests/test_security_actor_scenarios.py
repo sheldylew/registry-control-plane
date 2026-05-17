@@ -202,6 +202,23 @@ def test_repo_tag_summary_access_matches_actor_permissions(app_with_fake_registr
     assert denied.status_code == 403
 
 
+def test_tag_detail_checks_access_before_tag_existence(app_with_fake_registry) -> None:
+    with TestClient(app_with_fake_registry) as client:
+        _seed_actor_data(app_with_fake_registry)
+        login = _login(client, "low-user", "low-user-pass")
+        assert login.status_code == 200
+
+        denied_existing = client.get("/api/repos/secret/app/tags/latest")
+        denied_missing = client.get("/api/repos/secret/app/tags/missing")
+        denied_missing_history = client.get("/api/repos/secret/app/tags/missing/history")
+        allowed_missing = client.get("/api/repos/team/app/tags/missing")
+
+    assert denied_existing.status_code == 403
+    assert denied_missing.status_code == 403
+    assert denied_missing_history.status_code == 403
+    assert allowed_missing.status_code == 404
+
+
 def test_low_privilege_user_cannot_delete_tag(app_with_fake_registry) -> None:
     with TestClient(app_with_fake_registry) as client:
         _seed_actor_data(app_with_fake_registry)
@@ -213,6 +230,27 @@ def test_low_privilege_user_cannot_delete_tag(app_with_fake_registry) -> None:
         )
 
     assert response.status_code == 403
+
+
+def test_tag_delete_checks_delete_permission_before_tag_existence(app_with_fake_registry) -> None:
+    with TestClient(app_with_fake_registry) as client:
+        _seed_actor_data(app_with_fake_registry)
+        login = _login(client, "low-user", "low-user-pass")
+        headers = _csrf_headers(login)
+
+        single_missing = client.post(
+            "/api/repos/team/app/tags/missing/delete",
+            json={"confirmation": "team/app:missing"},
+            headers=headers,
+        )
+        bulk_missing = client.post(
+            "/api/repos/team/app/tags/delete",
+            json={"tags": ["missing"]},
+            headers=headers,
+        )
+
+    assert single_missing.status_code == 403
+    assert bulk_missing.status_code == 403
 
 
 def test_low_privilege_user_cannot_delete_repository(app_with_fake_registry) -> None:
