@@ -490,6 +490,9 @@ test("settings page opens separate API and web image metadata from header", asyn
   assert.match(buildDialog, /Build information/);
   assert.match(buildDialog, /API image/);
   assert.match(buildDialog, /Web image/);
+  assert.match(buildDialog, /getUTCFullYear\(\)/);
+  assert.match(buildDialog, /\$\{pad\(parsed\.getUTCHours\(\)\)\}:\$\{pad\(parsed\.getUTCMinutes\(\)\)\}:\$\{pad\(parsed\.getUTCSeconds\(\)\)\}Z/);
+  assert.doesNotMatch(buildDialog, /toISOString\(\)/);
   assert.match(buildInfo, /\/web\/build-info\.env/);
   assert.match(buildInfo, /buildInfo\.APP_VERSION \|\| process\.env\.APP_VERSION/);
 });

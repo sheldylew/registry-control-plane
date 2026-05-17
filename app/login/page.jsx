@@ -18,7 +18,7 @@ export default async function LoginPage() {
   }
 
   return (
-    <main className="relative mx-auto flex min-h-screen max-w-7xl items-center overflow-hidden px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
+    <main className="relative flex min-h-screen items-center overflow-hidden px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_28%),radial-gradient(circle_at_80%_18%,_rgba(52,211,153,0.12),_transparent_20%),linear-gradient(180deg,_rgba(2,6,23,0.08),_rgba(2,6,23,0.42))]" />
         <svg
@@ -43,7 +43,7 @@ export default async function LoginPage() {
       </div>
 
       <div className="relative z-10 mx-auto w-full max-w-md">
-          <LoginForm />
+        <LoginForm />
       </div>
     </main>
   );

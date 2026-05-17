@@ -15,7 +15,12 @@ function formatBuildTimestamp(value) {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return parsed.toISOString();
+  const pad = (part) => String(part).padStart(2, "0");
+  return [
+    parsed.getUTCFullYear(),
+    pad(parsed.getUTCMonth() + 1),
+    pad(parsed.getUTCDate()),
+  ].join("-") + ` ${pad(parsed.getUTCHours())}:${pad(parsed.getUTCMinutes())}:${pad(parsed.getUTCSeconds())}Z`;
 }
 
 function buildInfoItems(build) {
