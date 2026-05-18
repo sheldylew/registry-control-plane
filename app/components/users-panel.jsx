@@ -18,6 +18,7 @@ import { MobileCardList, MobileDisclosureCard, MobileField, Table, TableBody, Ta
 import {
   FORM_EMAIL_MAX_LENGTH,
   FORM_NAME_MAX_LENGTH,
+  USER_EMAIL_PATTERN,
   hasNonEmptyValue,
   isValidPassword,
   isValidUserEmail,
@@ -442,10 +443,10 @@ export default function UsersPanel({
               type="email"
               placeholder="name@example.com"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => setEmail(normalizeTextInput(event.target.value))}
               required
               maxLength={FORM_EMAIL_MAX_LENGTH}
-              pattern="^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+              pattern={USER_EMAIL_PATTERN}
               title="Use an address with a full domain, like name@example.com."
             />
           </Field>

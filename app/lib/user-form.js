@@ -1,6 +1,7 @@
 export const FORM_NAME_MAX_LENGTH = 255;
 export const FORM_EMAIL_MAX_LENGTH = 320;
 export const FORM_DESCRIPTION_MAX_LENGTH = 2000;
+export const USER_EMAIL_PATTERN = String.raw`^[^\s@]+@[^\s@]+\.[^\s@]+$`;
 
 export function normalizeTextInput(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -16,7 +17,7 @@ export function isValidUserEmail(value) {
     return false;
   }
 
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return new RegExp(USER_EMAIL_PATTERN).test(email);
 }
 
 export function isValidPassword(value, minimumLength = 8) {

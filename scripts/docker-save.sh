@@ -191,6 +191,25 @@ services:
     image: ${AUTH_INIT_IMAGE}
     user: "0:0"
     restart: "no"
+    command:
+      - ./scripts/auth-init.py
+    environment:
+      APP_ENV: \${APP_ENV:-production}
+      PUBLIC_REGISTRY_ORIGIN: \${PUBLIC_REGISTRY_ORIGIN:-}
+      TOKEN_ISSUER: \${TOKEN_ISSUER:-sheldylew-registry}
+      TOKEN_SERVICE: \${TOKEN_SERVICE:-sheldylew-registry}
+      AUTH_PRIVATE_KEY_PATH: /auth-private/auth-private.pem
+      AUTH_PUBLIC_CERT_PATH: /auth-public/auth-cert.pem
+      AUTH_BOOTSTRAP_MARKER_PATH: /data/auth-bootstrap-complete
+      SETUP_TOKEN_PATH: /data/setup-token.json
+      SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
+      REGISTRY_RENDERED_CONFIG_PATH: /registry-config/config.yml
+      INTERNAL_API_BASE_URL: \${INTERNAL_API_BASE_URL:-http://api:8000}
+      ADMIN_USERNAME: \${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: \${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: \${ADMIN_EMAIL:-}
+      SESSION_COOKIE_SECURE: \${SESSION_COOKIE_SECURE:-true}
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -238,7 +257,40 @@ services:
     image: ${API_IMAGE}
     restart: unless-stopped
     environment:
-      - FORWARDED_ALLOW_IPS=\${FORWARDED_ALLOW_IPS:-*}
+      APP_ENV: \${APP_ENV:-production}
+      DATABASE_URL: sqlite:////data/app.db
+      REGISTRY_INTERNAL_URL: http://registry:5000
+      REGISTRY_STORAGE_ROOT: /var/lib/registry/docker/registry/v2/repositories
+      REGISTRY_STORAGE_USAGE_ROOT: /var/lib/registry/docker/registry/v2
+      PUBLIC_REGISTRY_ORIGIN: \${PUBLIC_REGISTRY_ORIGIN:-}
+      CSRF_TRUSTED_ORIGINS: \${CSRF_TRUSTED_ORIGINS:-}
+      TOKEN_ISSUER: \${TOKEN_ISSUER:-sheldylew-registry}
+      TOKEN_SERVICE: \${TOKEN_SERVICE:-sheldylew-registry}
+      TOKEN_TTL_SECONDS: \${TOKEN_TTL_SECONDS:-900}
+      REGISTRY_CATALOG_MAX_PAGES: \${REGISTRY_CATALOG_MAX_PAGES:-10}
+      DASHBOARD_MAX_REPOSITORIES: \${DASHBOARD_MAX_REPOSITORIES:-50}
+      MANIFEST_CHILDREN_MAX_ITEMS: \${MANIFEST_CHILDREN_MAX_ITEMS:-25}
+      HISTORY_ENTRIES_MAX_ITEMS: \${HISTORY_ENTRIES_MAX_ITEMS:-50}
+      LOGIN_RATE_LIMIT_ATTEMPTS: \${LOGIN_RATE_LIMIT_ATTEMPTS:-5}
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: \${LOGIN_RATE_LIMIT_WINDOW_SECONDS:-60}
+      AUTH_TOKEN_RATE_LIMIT_ATTEMPTS: \${AUTH_TOKEN_RATE_LIMIT_ATTEMPTS:-10}
+      AUTH_TOKEN_RATE_LIMIT_WINDOW_SECONDS: \${AUTH_TOKEN_RATE_LIMIT_WINDOW_SECONDS:-60}
+      WEB_SESSION_RETENTION_DAYS: \${WEB_SESSION_RETENTION_DAYS:-30}
+      TOKEN_RECORD_RETENTION_DAYS: \${TOKEN_RECORD_RETENTION_DAYS:-90}
+      AUTH_PRIVATE_KEY_PATH: /run/auth-private/auth-private.pem
+      AUTH_PUBLIC_CERT_PATH: /run/auth-public/auth-cert.pem
+      SETUP_TOKEN_PATH: /data/setup-token.json
+      SETUP_COMPLETE_MARKER_PATH: /data/setup-complete
+      REGISTRY_NOTIFICATIONS_TOKEN_PATH: /data/registry-events-token
+      REGISTRY_GC_CONFIG_PATH: /etc/docker/registry/config.yml
+      REGISTRY_RENDERED_CONFIG_PATH: /etc/docker/registry/config.yml
+      REGISTRY_CONFIG_TEMPLATE_PATH: /srv/docker/registry-config.yml.tmpl
+      INTERNAL_API_BASE_URL: \${INTERNAL_API_BASE_URL:-http://api:8000}
+      FORWARDED_ALLOW_IPS: \${FORWARDED_ALLOW_IPS:-*}
+      ADMIN_USERNAME: \${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: \${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: \${ADMIN_EMAIL:-}
+      SESSION_COOKIE_SECURE: \${SESSION_COOKIE_SECURE:-true}
     user: "10001:10001"
     cap_drop:
       - ALL
@@ -253,6 +305,18 @@ services:
       - auth-private-data:/run/auth-private:ro
       - auth-public-data:/run/auth-public:ro
       - registry-config-data:/etc/docker/registry
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import urllib.request
+          urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=2)
+      interval: 1m
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     depends_on:
       auth-init:
         condition: service_completed_successfully
@@ -264,6 +328,11 @@ services:
   web:
     image: ${WEB_IMAGE}
     restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_PATH: /api
+      NEXT_PUBLIC_AUTH_TOKEN_PATH: /auth/token
+      NEXT_PUBLIC_REGISTRY_BASE_PATH: /v2/
+      INTERNAL_API_BASE_URL: http://api:8000
     user: "10001:10001"
     cap_drop:
       - ALL
@@ -272,6 +341,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null "http://\$(hostname):3000/"
+      interval: 1m
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     networks:
       rcp:
         aliases:

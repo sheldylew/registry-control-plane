@@ -13,6 +13,7 @@ import {
   isValidUserEmail,
   normalizeTextInput,
   readApiErrorDetail,
+  USER_EMAIL_PATTERN,
 } from "@/app/lib/user-form";
 
 export default function SetupForm({ initialPublicOrigin = "" }) {
@@ -97,11 +98,13 @@ export default function SetupForm({ initialPublicOrigin = "" }) {
           <Field label="Admin email" className="mt-5">
             <Input
               value={adminEmail}
-              onChange={(event) => setAdminEmail(event.target.value)}
+              onChange={(event) => setAdminEmail(normalizeTextInput(event.target.value))}
               required
               maxLength={320}
               type="email"
               autoComplete="email"
+              pattern={USER_EMAIL_PATTERN}
+              title="Use an address with a full domain, like name@example.com."
             />
           </Field>
 

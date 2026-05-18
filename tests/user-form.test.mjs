@@ -8,6 +8,7 @@ import {
   isValidUserEmail,
   normalizeTextInput,
   readApiErrorDetail,
+  USER_EMAIL_PATTERN,
 } from "../app/lib/user-form.js";
 
 test("normalizeTextInput trims surrounding whitespace", () => {
@@ -25,6 +26,13 @@ test("isValidUserEmail rejects addresses without a dotted domain", () => {
   assert.equal(isValidUserEmail("john@localhost"), false);
   assert.equal(isValidUserEmail("john@example.com"), true);
   assert.equal(isValidUserEmail("john@sub.example"), true);
+});
+
+test("USER_EMAIL_PATTERN accepts dotted domains with s characters", () => {
+  const emailPattern = new RegExp(USER_EMAIL_PATTERN);
+  assert.equal(emailPattern.test("majimusprime@gmail.com"), true);
+  assert.equal(emailPattern.test("john@man"), false);
+  assert.equal(emailPattern.test("name@example.com "), false);
 });
 
 test("isValidPassword rejects whitespace-only passwords", () => {
