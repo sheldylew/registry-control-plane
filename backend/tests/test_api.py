@@ -1,3 +1,4 @@
+import base64
 import stat
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -1792,6 +1793,11 @@ def _login(client: TestClient, username: str, password: str):
     return client.post("/api/session/login", json={"username": username, "password": password})
 
 
+def _basic_auth(username: str, secret: str) -> dict[str, str]:
+    encoded = base64.b64encode(f"{username}:{secret}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {encoded}"}
+
+
 def _registry_event_headers(app) -> dict[str, str]:
     return {"Authorization": f"Bearer {ensure_registry_notifications_token(app.state.settings)}"}
 
@@ -3277,6 +3283,7 @@ def test_repo_tag_history_returns_truncation_metadata(settings) -> None:
 
 def test_admin_dashboard_returns_stats_and_activity(settings) -> None:
     app = create_app(settings)
+    now = datetime.now(timezone.utc)
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
@@ -3298,6 +3305,44 @@ def test_admin_dashboard_returns_stats_and_activity(settings) -> None:
             session.commit()
             session.refresh(robot)
             session.add(RobotToken(robot_id=robot.id, name="bot-cli", token_hash="hash2", token_prefix="rbt001"))
+            session.add_all(
+                [
+                    RegistryEventInbox(
+                        action="push",
+                        repository_name="sheldylew/app",
+                        tag="latest",
+                        digest="sha256:push",
+                        raw_payload={},
+                        dedupe_key="push|sheldylew/app|latest|sha256:push",
+                        status="processed",
+                        received_at=now,
+                        processed_at=now,
+                    ),
+                    RegistryEventInbox(
+                        action="delete",
+                        repository_name="sheldylew/app",
+                        tag="old",
+                        digest="sha256:delete",
+                        raw_payload={},
+                        dedupe_key="delete|sheldylew/app|old|sha256:delete",
+                        status="processed",
+                        received_at=now,
+                        processed_at=now,
+                    ),
+                    AuditEvent(
+                        actor_type="user",
+                        actor_id=user.id,
+                        action="registry_token_issued",
+                        target_type="registry_token",
+                        metadata_json={
+                            "granted_scope": [
+                                {"type": "repository", "name": "sheldylew/app", "actions": ["pull"]},
+                            ],
+                        },
+                        created_at=now,
+                    ),
+                ]
+            )
             session.commit()
 
         login = _login(client, settings.admin_username, settings.admin_password)
@@ -3311,6 +3356,11 @@ def test_admin_dashboard_returns_stats_and_activity(settings) -> None:
     assert body["stats"]["registry_tags"] == 3
     assert body["repo_distribution"][0]["name"] == "sheldylew/app"
     assert len(body["provisioning_trend"]["users"]) == 7
+    assert len(body["registry_activity_trend"]["pushes"]) == 7
+    assert body["stats"]["pull_tokens_issued"] == 1
+    assert sum(bucket["count"] for bucket in body["registry_activity_trend"]["pushes"]) == 1
+    assert sum(bucket["count"] for bucket in body["registry_activity_trend"]["pull_tokens"]) == 1
+    assert sum(bucket["count"] for bucket in body["registry_activity_trend"]["deletions"]) == 1
     assert body["recent_activity"][0]["title"]
     activity_details = " ".join(event["detail"] for event in body["recent_activity"])
     assert "dashboard-user@example.com" in activity_details
@@ -3922,7 +3972,7 @@ def test_admin_dashboard_skips_soft_deleted_registry_state(settings) -> None:
     assert response.status_code == 200
     assert body["stats"]["registry_repositories"] == 1
     assert body["stats"]["registry_tags"] == 2
-    assert body["stats"]["public_pull_tokens_issued"] == 0
+    assert body["stats"]["pull_tokens_issued"] == 0
     assert body["repo_distribution"] == [{"name": "sheldylew/app", "tag_count": 2}]
 
 
@@ -3966,12 +4016,13 @@ def test_admin_dashboard_caps_repository_fanout(settings) -> None:
     assert body["repo_distribution_truncation"]["returned"] == 1
 
 
-def test_admin_dashboard_includes_public_pull_counter(settings) -> None:
+def test_admin_dashboard_includes_private_and_public_pull_counter(settings) -> None:
     app = create_app(settings)
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
             _seed_repository_state(session, "public/app", visibility="public")
+            _seed_repository_state(session, "private/app", visibility="private")
             session.commit()
 
         public_pull = client.get(
@@ -3979,6 +4030,12 @@ def test_admin_dashboard_includes_public_pull_counter(settings) -> None:
             params={"service": settings.token_service, "scope": "repository:public/app:pull"},
         )
         assert public_pull.status_code == 200
+        private_pull = client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:private/app:pull"},
+            headers=_basic_auth(settings.admin_username, settings.admin_password),
+        )
+        assert private_pull.status_code == 200
 
         login = _login(client, settings.admin_username, settings.admin_password)
         assert login.status_code == 200
@@ -3986,7 +4043,8 @@ def test_admin_dashboard_includes_public_pull_counter(settings) -> None:
 
     body = response.json()
     assert response.status_code == 200
-    assert body["stats"]["public_pull_tokens_issued"] == 1
+    assert body["stats"]["pull_tokens_issued"] == 2
+    assert sum(bucket["count"] for bucket in body["registry_activity_trend"]["pull_tokens"]) == 2
 
 
 def test_admin_audit_endpoint_filters_by_actor_and_repo(settings) -> None:

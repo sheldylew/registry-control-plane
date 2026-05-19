@@ -15,9 +15,17 @@ function maxBucketValue(groups) {
   return Math.max(1, ...groups.flatMap((group) => group.map((bucket) => bucket.count)));
 }
 
+function bucketTotal(buckets) {
+  return buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+}
+
+function trendTotal(groups) {
+  return groups.reduce((sum, group) => sum + bucketTotal(group), 0);
+}
+
 function TrendBars({ label, buckets, tone }) {
   const maxValue = Math.max(1, ...buckets.map((bucket) => bucket.count));
-  const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  const total = bucketTotal(buckets);
   const midpoint = buckets[Math.floor(buckets.length / 2)];
   return (
     <div className='rounded-lg border border-white/10 bg-slate-950/60 p-4 sm:p-5'>
@@ -102,12 +110,24 @@ export default async function AdminHomePage() {
       tone: 'from-fuchsia-400/20 to-fuchsia-500/5',
     },
     {
-      label: 'Public pulls',
-      value: payload.stats.public_pull_tokens_issued,
-      subvalue: 'Anonymous public pull tokens granted',
+      label: 'Pull tokens',
+      value: payload.stats.pull_tokens_issued,
+      subvalue: 'Registry pull token grants',
       tone: 'from-sky-300/20 to-sky-500/5',
     },
   ];
+  const provisioningTrendCards = [
+    { label: 'Users', buckets: payload.provisioning_trend.users, tone: 'bg-cyan-400/80' },
+    { label: 'Tokens', buckets: payload.provisioning_trend.tokens, tone: 'bg-emerald-400/80' },
+    { label: 'Robots', buckets: payload.provisioning_trend.robots, tone: 'bg-amber-300/80' },
+  ];
+  const registryActivityCards = [
+    { label: 'Pushes', buckets: payload.registry_activity_trend.pushes, tone: 'bg-cyan-400/80' },
+    { label: 'Pull tokens', buckets: payload.registry_activity_trend.pull_tokens, tone: 'bg-emerald-400/80' },
+    { label: 'Deletions', buckets: payload.registry_activity_trend.deletions, tone: 'bg-amber-300/80' },
+  ];
+  const hasProvisioningActivity = trendTotal(provisioningTrendCards.map((card) => card.buckets)) > 0;
+  const activeTrendCards = hasProvisioningActivity ? provisioningTrendCards : registryActivityCards;
 
   return (
     <div className='space-y-6'>
@@ -124,7 +144,7 @@ export default async function AdminHomePage() {
               label={stat.label}
               value={stat.value}
               detail={stat.subvalue}
-              tone={stat.label === 'Active users' ? 'cyan' : stat.label === 'Active PATs' ? 'emerald' : stat.label === 'Active robots' ? 'amber' : 'slate'}
+              tone={stat.label === 'Active users' ? 'cyan' : stat.label === 'Active PATs' ? 'emerald' : stat.label === 'Active robots' ? 'amber' : stat.label === 'Pull tokens' ? 'sky' : 'slate'}
             />
           ))}
         </div>
@@ -133,14 +153,14 @@ export default async function AdminHomePage() {
       <section className='grid gap-6 xl:grid-cols-[1.45fr_0.95fr]'>
         <Panel as="article" className='p-4 sm:p-6'>
           <PanelHeader
-            eyebrow="Provisioning trend"
-            title="Identity and token velocity"
-            action={<Badge>Peak bucket: {maxBucketValue([payload.provisioning_trend.users, payload.provisioning_trend.tokens, payload.provisioning_trend.robots])}</Badge>}
+            eyebrow={hasProvisioningActivity ? 'Provisioning trend' : 'Registry activity'}
+            title={hasProvisioningActivity ? 'Identity and token velocity' : 'Pushes, pulls, and deletions'}
+            action={<Badge>Peak bucket: {maxBucketValue(activeTrendCards.map((card) => card.buckets))}</Badge>}
           />
           <div className='mt-5 grid gap-3 sm:mt-6 sm:gap-4 xl:grid-cols-3'>
-            <TrendBars label='Users' buckets={payload.provisioning_trend.users} tone='bg-cyan-400/80' />
-            <TrendBars label='Tokens' buckets={payload.provisioning_trend.tokens} tone='bg-emerald-400/80' />
-            <TrendBars label='Robots' buckets={payload.provisioning_trend.robots} tone='bg-amber-300/80' />
+            {activeTrendCards.map((card) => (
+              <TrendBars key={card.label} label={card.label} buckets={card.buckets} tone={card.tone} />
+            ))}
           </div>
         </Panel>
 

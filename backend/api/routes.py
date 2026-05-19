@@ -23,7 +23,6 @@ from backend.auth.sessions import create_session, revoke_session, revoke_user_se
 from backend.config import Settings
 from backend.maintenance import MaintenanceService, mark_storage_usage_snapshot_stale
 from backend.metrics import increment as increment_metric
-from backend.metrics import snapshot as metrics_snapshot
 from backend.models import (
     AuditEvent,
     CachedManifestSummary,
@@ -640,6 +639,51 @@ def _bucket_counts(items: list[datetime], days: int = 7) -> list[dict]:
         count = sum(1 for item in items if item.date() == day)
         buckets.append({"label": day.strftime("%a"), "count": count})
     return buckets
+
+
+def _is_pull_token_event(event: AuditEvent) -> bool:
+    metadata = event.metadata_json or {}
+    granted_scope = metadata.get("granted_scope") or []
+    for scope in granted_scope:
+        if scope.get("type") != "repository":
+            continue
+        if "pull" in (scope.get("actions") or []):
+            return True
+    return False
+
+
+def _pull_token_events(db: Session, *, since: Optional[datetime] = None) -> list[AuditEvent]:
+    filters = [
+        AuditEvent.action == "registry_token_issued",
+        AuditEvent.target_type == "registry_token",
+    ]
+    if since is not None:
+        filters.append(AuditEvent.created_at >= since)
+    events = db.scalars(
+        select(AuditEvent)
+        .where(*filters)
+        .order_by(AuditEvent.created_at.desc())
+    ).all()
+    return [event for event in events if _is_pull_token_event(event)]
+
+
+def _registry_activity_trend(db: Session, *, days: int = 7) -> dict[str, list[dict]]:
+    start_date = datetime.utcnow().date() - timedelta(days=days - 1)
+    start_at = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+    registry_events = db.scalars(
+        select(RegistryEventInbox)
+        .where(
+            RegistryEventInbox.received_at >= start_at,
+            RegistryEventInbox.action.in_(("push", "delete")),
+        )
+        .order_by(RegistryEventInbox.received_at.desc())
+    ).all()
+    pull_token_events = _pull_token_events(db, since=start_at)
+    return {
+        "pushes": _bucket_counts([event.received_at for event in registry_events if event.action == "push"], days=days),
+        "pull_tokens": _bucket_counts([event.created_at for event in pull_token_events], days=days),
+        "deletions": _bucket_counts([event.received_at for event in registry_events if event.action == "delete"], days=days),
+    }
 
 
 def _dashboard_user_detail(user: User) -> str:
@@ -1929,7 +1973,6 @@ def admin_dashboard(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    metrics = metrics_snapshot()
     users = db.scalars(select(User).order_by(User.created_at.desc())).all()
     pats = db.scalars(select(PersonalAccessToken).order_by(PersonalAccessToken.created_at.desc())).all()
     robots = db.scalars(select(RobotAccount).order_by(RobotAccount.created_at.desc())).all()
@@ -1979,7 +2022,7 @@ def admin_dashboard(
             "robots_active": sum(1 for robot in robots if robot.is_active),
             "registry_repositories": int(total_repositories),
             "registry_tags": int(total_tags),
-            "public_pull_tokens_issued": metrics["registry_public_pull_tokens_issued_total"],
+            "pull_tokens_issued": len(_pull_token_events(db)),
         },
         "repo_distribution": repo_rows[:6],
         "repo_distribution_truncation": repo_truncation,
@@ -1988,6 +2031,7 @@ def admin_dashboard(
             "tokens": _bucket_counts([token.created_at for token in pats + robot_tokens]),
             "robots": _bucket_counts([robot.created_at for robot in robots]),
         },
+        "registry_activity_trend": _registry_activity_trend(db),
         "recent_activity": _dashboard_activity(users, pats, robots, robot_tokens),
     }
 
