@@ -28,6 +28,14 @@ function formatTrendCount(count) {
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}k`;
 }
 
+function formatTrendBucketCount(count) {
+  if (count < 1000) {
+    return String(count);
+  }
+
+  return `${Math.round(count / 1000)}k`;
+}
+
 function trendTotal(groups) {
   return groups.reduce((sum, group) => sum + bucketTotal(group), 0);
 }
@@ -56,7 +64,7 @@ function TrendBars({ label, buckets, tone }) {
                 title={`${bucket.label}: ${bucket.count}`}
               />
             </div>
-            <span className='text-[10px] font-medium text-slate-500'>{formatTrendCount(bucket.count)}</span>
+            <span className='text-[10px] font-medium text-slate-500'>{formatTrendBucketCount(bucket.count)}</span>
           </div>
         ))}
       </div>
@@ -136,7 +144,7 @@ export default async function AdminHomePage() {
   ];
   const registryActivityCards = [
     { label: 'Pushes', buckets: payload.registry_activity_trend.pushes, tone: 'bg-cyan-400/80' },
-    { label: 'Pull tokens', buckets: payload.registry_activity_trend.pull_tokens, tone: 'bg-emerald-400/80' },
+    { label: 'Pulls', buckets: payload.registry_activity_trend.pull_tokens, tone: 'bg-emerald-400/80' },
     { label: 'Deletions', buckets: payload.registry_activity_trend.deletions, tone: 'bg-amber-300/80' },
   ];
   const hasProvisioningActivity = trendTotal(provisioningTrendCards.map((card) => card.buckets)) > 0;
