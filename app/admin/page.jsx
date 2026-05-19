@@ -36,6 +36,19 @@ function formatTrendBucketCount(count) {
   return `${Math.round(count / 1000)}k`;
 }
 
+function visibleBucketCountIndexes(buckets, maxValue) {
+  const nonZeroIndexes = buckets
+    .map((bucket, index) => (bucket.count > 0 ? index : null))
+    .filter((index) => index !== null);
+  const peakIndex = buckets.findIndex((bucket) => bucket.count === maxValue);
+
+  return new Set([
+    nonZeroIndexes[0],
+    peakIndex >= 0 ? peakIndex : null,
+    nonZeroIndexes[nonZeroIndexes.length - 1],
+  ].filter((index) => index !== null));
+}
+
 function trendTotal(groups) {
   return groups.reduce((sum, group) => sum + bucketTotal(group), 0);
 }
@@ -44,27 +57,33 @@ function TrendBars({ label, buckets, tone }) {
   const maxValue = Math.max(1, ...buckets.map((bucket) => bucket.count));
   const total = bucketTotal(buckets);
   const midpoint = buckets[Math.floor(buckets.length / 2)];
+  const visibleCountIndexes = visibleBucketCountIndexes(buckets, maxValue);
   return (
-    <div className='rounded-lg border border-white/10 bg-slate-950/60 p-4 sm:p-5 xl:relative'>
-      <div className='flex items-center justify-between xl:block xl:min-h-10 xl:pr-[4.75rem]'>
-        <p className='text-sm font-medium text-white'>{label}</p>
-        <p className='text-xs text-slate-400 xl:absolute xl:right-5 xl:top-5 xl:w-16 xl:text-right xl:text-[11px] xl:leading-none'>
-          <span className='mr-1 tabular-nums xl:mr-0 xl:block'>{formatTrendCount(total)}</span>
+    <div className='rounded-lg border border-white/10 bg-slate-950/60 p-4 sm:p-5'>
+      <div className='grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-start gap-3'>
+        <p className='min-w-0 text-sm font-medium leading-5 text-white'>{label}</p>
+        <p className='shrink-0 text-right text-[11px] leading-none text-slate-400'>
+          <span className='tabular-nums'>{formatTrendCount(total)}</span>
           {' '}
-          <span className='uppercase tracking-[0.18em] xl:mt-1 xl:block'>total</span>
+          <span className='mt-1 block uppercase tracking-[0.18em]'>total</span>
         </p>
       </div>
-      <div className='mt-4 flex h-24 items-end gap-1.5 sm:mt-5 sm:h-28 sm:gap-2'>
+      <div className='mt-4 grid h-24 grid-cols-7 items-end gap-1.5 sm:mt-5 sm:h-28 sm:gap-2'>
         {buckets.map((bucket) => (
-          <div key={bucket.label} className='flex flex-1 flex-col items-center gap-2'>
-            <div className='flex h-20 w-full items-end sm:h-24'>
-              <div
-                className={`w-full rounded-t-md transition-opacity ${tone} ${bucket.count === 0 ? 'opacity-30' : 'opacity-100'}`}
-                style={{ height: bucket.count === 0 ? '4px' : `${Math.max(16, (bucket.count / maxValue) * 100)}%` }}
-                title={`${bucket.label}: ${bucket.count}`}
-              />
-            </div>
-            <span className='text-[10px] font-medium text-slate-500'>{formatTrendBucketCount(bucket.count)}</span>
+          <div
+            key={bucket.label}
+            className={`w-full rounded-t-md transition-opacity ${tone} ${bucket.count === 0 ? 'opacity-30' : 'opacity-100'}`}
+            style={{ height: bucket.count === 0 ? '4px' : `${Math.max(16, (bucket.count / maxValue) * 100)}%` }}
+            title={`${bucket.label}: ${bucket.count}`}
+          />
+        ))}
+      </div>
+      <div className='mt-2 grid grid-cols-7 gap-1.5 sm:gap-2'>
+        {buckets.map((bucket, index) => (
+          <div key={`${bucket.label}-count`} className='min-h-3 text-center'>
+            <span className='block whitespace-nowrap text-[9px] font-medium leading-none tabular-nums text-slate-500 sm:text-[10px]'>
+              {visibleCountIndexes.has(index) ? formatTrendBucketCount(bucket.count) : ''}
+            </span>
           </div>
         ))}
       </div>
