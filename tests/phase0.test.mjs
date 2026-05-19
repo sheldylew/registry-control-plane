@@ -225,6 +225,16 @@ test("overview dashboard stats are grouped in a titled container", async () => {
   assert.match(adminPage, /xl:grid-cols-5/);
 });
 
+test("dashboard trend labels avoid adjacent bucket collisions", async () => {
+  const adminPage = await readFile(new URL("../app/admin/page.jsx", import.meta.url), "utf8");
+
+  assert.match(adminPage, /label: 'Pulls'/);
+  assert.doesNotMatch(adminPage, /label: 'Pull tokens', buckets: payload\.registry_activity_trend\.pull_tokens/);
+  assert.match(adminPage, /visibleIndexes\.has\(index - 1\)/);
+  assert.match(adminPage, /visibleIndexes\.has\(index \+ 1\)/);
+  assert.match(adminPage, /formatTrendBucketCount\(bucket\.count\)/);
+});
+
 test("remaining app sections keep desktop layout while tightening mobile shells", async () => {
   const [
     panel,

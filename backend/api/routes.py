@@ -2,7 +2,8 @@ import hmac
 from pathlib import Path
 import secrets
 import shutil
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -84,6 +85,9 @@ from backend.setup import (
 
 
 router = APIRouter(prefix="/api")
+
+DASHBOARD_CACHE_TTL_SECONDS = 300
+_dashboard_cache: dict[tuple[str, int], tuple[float, dict]] = {}
 
 MAX_SHORT_TEXT_LENGTH = 255
 MAX_EMAIL_LENGTH = 320
@@ -652,10 +656,6 @@ def _serialize_audit_event(event: AuditEvent, actor_label: Optional[str]) -> dic
     }
 
 
-def _count_active_tokens(tokens: list[object]) -> int:
-    return sum(1 for token in tokens if getattr(token, "revoked_at", None) is None)
-
-
 def _bucket_counts(items: list[datetime], days: int = 7) -> list[dict]:
     today = datetime.utcnow().date()
     buckets: list[dict] = []
@@ -664,6 +664,48 @@ def _bucket_counts(items: list[datetime], days: int = 7) -> list[dict]:
         count = sum(1 for item in items if item.date() == day)
         buckets.append({"label": day.strftime("%a"), "count": count})
     return buckets
+
+
+def _dashboard_bucket_template(days: int = 7) -> tuple[datetime, dict]:
+    today = datetime.utcnow().date()
+    start_date = today - timedelta(days=days - 1)
+    buckets = {
+        today.fromordinal(today.toordinal() - offset): {
+            "label": today.fromordinal(today.toordinal() - offset).strftime("%a"),
+            "count": 0,
+        }
+        for offset in range(days - 1, -1, -1)
+    }
+    start_at = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+    return start_at, buckets
+
+
+def _date_bucket_key(value) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if hasattr(value, "date"):
+        return value.date()
+    if isinstance(value, str):
+        return datetime.fromisoformat(value).date()
+    return None
+
+
+def _aggregate_bucket_counts(db: Session, timestamp_column, *filters, days: int = 7) -> list[dict]:
+    start_at, buckets = _dashboard_bucket_template(days=days)
+    rows = db.execute(
+        select(func.date(timestamp_column), func.count())
+        .where(timestamp_column >= start_at, *filters)
+        .group_by(func.date(timestamp_column))
+    ).all()
+    for bucket_day, count in rows:
+        key = _date_bucket_key(bucket_day)
+        if key in buckets:
+            buckets[key]["count"] = int(count)
+    return list(buckets.values())
 
 
 def _is_pull_token_event(event: AuditEvent) -> bool:
@@ -692,22 +734,34 @@ def _pull_token_events(db: Session, *, since: Optional[datetime] = None) -> list
     return [event for event in events if _is_pull_token_event(event)]
 
 
-def _registry_activity_trend(db: Session, *, days: int = 7) -> dict[str, list[dict]]:
-    start_date = datetime.utcnow().date() - timedelta(days=days - 1)
-    start_at = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
-    registry_events = db.scalars(
-        select(RegistryEventInbox)
-        .where(
-            RegistryEventInbox.received_at >= start_at,
-            RegistryEventInbox.action.in_(("push", "delete")),
-        )
-        .order_by(RegistryEventInbox.received_at.desc())
-    ).all()
-    pull_token_events = _pull_token_events(db, since=start_at)
+def _registry_activity_trend(
+    db: Session,
+    *,
+    days: int = 7,
+    pull_token_events: Optional[list[AuditEvent]] = None,
+) -> dict[str, list[dict]]:
+    start_at, _buckets = _dashboard_bucket_template(days=days)
+    if pull_token_events is None:
+        pull_token_events = _pull_token_events(db, since=start_at)
+    recent_pull_token_events = [
+        event
+        for event in pull_token_events
+        if event.created_at.date() >= start_at.date()
+    ]
     return {
-        "pushes": _bucket_counts([event.received_at for event in registry_events if event.action == "push"], days=days),
-        "pull_tokens": _bucket_counts([event.created_at for event in pull_token_events], days=days),
-        "deletions": _bucket_counts([event.received_at for event in registry_events if event.action == "delete"], days=days),
+        "pushes": _aggregate_bucket_counts(
+            db,
+            RegistryEventInbox.received_at,
+            RegistryEventInbox.action == "push",
+            days=days,
+        ),
+        "pull_tokens": _bucket_counts([event.created_at for event in recent_pull_token_events], days=days),
+        "deletions": _aggregate_bucket_counts(
+            db,
+            RegistryEventInbox.received_at,
+            RegistryEventInbox.action == "delete",
+            days=days,
+        ),
     }
 
 
@@ -771,6 +825,10 @@ def _dashboard_activity(
 
     events.sort(key=lambda item: item["timestamp"], reverse=True)
     return events[:8]
+
+
+def _dashboard_cache_key(settings: Settings) -> tuple[str, int]:
+    return (settings.database_url, settings.dashboard_max_repositories)
 
 
 def require_authenticated_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -2075,17 +2133,20 @@ def delete_robot(
     return {"ok": True, "robot_id": robot_id}
 
 
-@router.get("/admin/dashboard")
-def admin_dashboard(
-    _admin: User = Depends(require_admin_user),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-):
-    users = db.scalars(select(User).where(User.deleted_at.is_(None)).order_by(User.created_at.desc())).all()
-    pats = db.scalars(select(PersonalAccessToken).order_by(PersonalAccessToken.created_at.desc())).all()
-    robots = db.scalars(select(RobotAccount).order_by(RobotAccount.created_at.desc())).all()
-    robot_tokens = db.scalars(select(RobotToken).order_by(RobotToken.created_at.desc())).all()
-
+def _build_admin_dashboard_payload(db: Session, settings: Settings) -> dict:
+    users_total = db.scalar(select(func.count(User.id)).where(User.deleted_at.is_(None))) or 0
+    users_active = db.scalar(
+        select(func.count(User.id)).where(
+            User.deleted_at.is_(None),
+            User.is_active.is_(True),
+        )
+    ) or 0
+    pats_active = db.scalar(
+        select(func.count(PersonalAccessToken.id)).where(PersonalAccessToken.revoked_at.is_(None))
+    ) or 0
+    robots_active = db.scalar(
+        select(func.count(RobotAccount.id)).where(RobotAccount.is_active.is_(True))
+    ) or 0
     total_repositories = db.scalar(
         select(func.count(func.distinct(Repository.id)))
         .join(RepositoryTag)
@@ -2121,27 +2182,77 @@ def admin_dashboard(
         "pages_fetched": 0,
         "returned": len(repo_rows),
     }
+    pull_token_events = _pull_token_events(db)
+    recent_users = db.scalars(
+        select(User)
+        .where(User.deleted_at.is_(None))
+        .order_by(User.created_at.desc())
+        .limit(8)
+    ).all()
+    recent_pats = db.scalars(
+        select(PersonalAccessToken)
+        .order_by(PersonalAccessToken.created_at.desc())
+        .limit(8)
+    ).all()
+    recent_robots = db.scalars(
+        select(RobotAccount)
+        .order_by(RobotAccount.created_at.desc())
+        .limit(8)
+    ).all()
+    recent_robot_tokens = db.scalars(
+        select(RobotToken)
+        .order_by(RobotToken.created_at.desc())
+        .limit(8)
+    ).all()
 
     return {
         "stats": {
-            "users_total": len(users),
-            "users_active": sum(1 for user in users if user.is_active),
-            "pats_active": _count_active_tokens(pats),
-            "robots_active": sum(1 for robot in robots if robot.is_active),
+            "users_total": int(users_total),
+            "users_active": int(users_active),
+            "pats_active": int(pats_active),
+            "robots_active": int(robots_active),
             "registry_repositories": int(total_repositories),
             "registry_tags": int(total_tags),
-            "pull_tokens_issued": len(_pull_token_events(db)),
+            "pull_tokens_issued": len(pull_token_events),
         },
         "repo_distribution": repo_rows[:6],
         "repo_distribution_truncation": repo_truncation,
         "provisioning_trend": {
-            "users": _bucket_counts([user.created_at for user in users]),
-            "tokens": _bucket_counts([token.created_at for token in pats + robot_tokens]),
-            "robots": _bucket_counts([robot.created_at for robot in robots]),
+            "users": _aggregate_bucket_counts(db, User.created_at, User.deleted_at.is_(None)),
+            "tokens": [
+                {
+                    "label": pat_bucket["label"],
+                    "count": pat_bucket["count"] + robot_bucket["count"],
+                }
+                for pat_bucket, robot_bucket in zip(
+                    _aggregate_bucket_counts(db, PersonalAccessToken.created_at),
+                    _aggregate_bucket_counts(db, RobotToken.created_at),
+                )
+            ],
+            "robots": _aggregate_bucket_counts(db, RobotAccount.created_at),
         },
-        "registry_activity_trend": _registry_activity_trend(db),
-        "recent_activity": _dashboard_activity(users, pats, robots, robot_tokens),
+        "registry_activity_trend": _registry_activity_trend(db, pull_token_events=pull_token_events),
+        "recent_activity": _dashboard_activity(recent_users, recent_pats, recent_robots, recent_robot_tokens),
     }
+
+
+@router.get("/admin/dashboard")
+def admin_dashboard(
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    cache_key = _dashboard_cache_key(settings)
+    now = time.monotonic()
+    cached = _dashboard_cache.get(cache_key)
+    if cached is not None:
+        cached_at, payload = cached
+        if now - cached_at < DASHBOARD_CACHE_TTL_SECONDS:
+            return payload
+
+    payload = _build_admin_dashboard_payload(db, settings)
+    _dashboard_cache[cache_key] = (now, payload)
+    return payload
 
 
 @router.get("/admin/settings")

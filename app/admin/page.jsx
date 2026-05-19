@@ -41,12 +41,21 @@ function visibleBucketCountIndexes(buckets, maxValue) {
     .map((bucket, index) => (bucket.count > 0 ? index : null))
     .filter((index) => index !== null);
   const peakIndex = buckets.findIndex((bucket) => bucket.count === maxValue);
+  const visibleIndexes = new Set();
 
-  return new Set([
-    nonZeroIndexes[0],
+  [
     peakIndex >= 0 ? peakIndex : null,
     nonZeroIndexes[nonZeroIndexes.length - 1],
-  ].filter((index) => index !== null));
+    nonZeroIndexes[0],
+  ].forEach((index) => {
+    if (index == null || visibleIndexes.has(index - 1) || visibleIndexes.has(index + 1)) {
+      return;
+    }
+
+    visibleIndexes.add(index);
+  });
+
+  return visibleIndexes;
 }
 
 function trendTotal(groups) {
