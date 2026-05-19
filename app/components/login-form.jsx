@@ -8,6 +8,7 @@ import Alert from "@/app/components/ui/alert";
 import Button from "@/app/components/ui/button";
 import { Field, Input, LightInput } from "@/app/components/ui/form";
 import { Panel } from "@/app/components/ui/panel";
+import { authenticatedLandingPath } from "@/app/lib/session-routing";
 import { hasNonEmptyValue, isValidPassword, normalizeTextInput } from "@/app/lib/user-form";
 
 export default function LoginForm() {
@@ -47,7 +48,8 @@ export default function LoginForm() {
       return;
     }
 
-    router.push("/admin");
+    const payload = await response.json().catch(() => ({}));
+    router.push(authenticatedLandingPath(payload.user));
     router.refresh();
   }
 

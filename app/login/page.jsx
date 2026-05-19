@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import LoginForm from "@/app/components/login-form";
 import { apiFetch, requireCurrentUser } from "@/app/lib/server-api";
+import { authenticatedLandingPath } from "@/app/lib/session-routing";
 
 export default async function LoginPage() {
   const setupResponse = await apiFetch("/api/setup/status");
@@ -13,8 +14,8 @@ export default async function LoginPage() {
   }
 
   const user = await requireCurrentUser();
-  if (user?.is_admin) {
-    redirect("/admin");
+  if (user) {
+    redirect(authenticatedLandingPath(user));
   }
 
   return (

@@ -1,8 +1,6 @@
 name: Docker Build
 
 on:
-  # PRs only validate that the Docker build still works.
-  pull_request:
   # Branch pushes and version tags are the publish paths.
   push:
     branches:
@@ -21,6 +19,8 @@ env:
   IMAGE_NAME: registry-control-plane
   GHCR_REGISTRY: ghcr.io
   GHCR_IMAGE_NAMESPACE: sheldylew
+  # This helper runs privileged to install binfmt handlers, so keep it digest-pinned.
+  BINFMT_IMAGE: tonistiigi/binfmt@sha256:d3b963f787999e6c0219a48dba02978769286ff61a5f4d26245cb6a6e5567ea3
 
 jobs:
   docker-build:
@@ -71,9 +71,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # PRs validate only. Everything else may publish if a registry is configured.
+          # Branch and tag pushes publish. Manual runs validate only unless this
+          # logic is intentionally changed alongside registry credential review.
           publish="false"
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" && -n "${REGISTRY}" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && -n "${REGISTRY}" ]]; then
             publish="true"
           fi
 
@@ -145,10 +146,10 @@ jobs:
 
           case "$(uname -m)" in
             x86_64|amd64)
-              docker run --privileged --rm tonistiigi/binfmt --install arm64
+              docker run --privileged --rm "${BINFMT_IMAGE}" --install arm64
               ;;
             arm64|aarch64)
-              docker run --privileged --rm tonistiigi/binfmt --install amd64
+              docker run --privileged --rm "${BINFMT_IMAGE}" --install amd64
               ;;
             *)
               echo "Unsupported runner architecture for multi-arch publish: $(uname -m)" >&2
