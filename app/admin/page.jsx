@@ -19,6 +19,15 @@ function bucketTotal(buckets) {
   return buckets.reduce((sum, bucket) => sum + bucket.count, 0);
 }
 
+function formatTrendCount(count) {
+  if (count < 1000) {
+    return String(count);
+  }
+
+  const rounded = Math.round(count / 100) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}k`;
+}
+
 function trendTotal(groups) {
   return groups.reduce((sum, group) => sum + bucketTotal(group), 0);
 }
@@ -28,10 +37,14 @@ function TrendBars({ label, buckets, tone }) {
   const total = bucketTotal(buckets);
   const midpoint = buckets[Math.floor(buckets.length / 2)];
   return (
-    <div className='rounded-lg border border-white/10 bg-slate-950/60 p-4 sm:p-5'>
-      <div className='flex items-center justify-between'>
+    <div className='rounded-lg border border-white/10 bg-slate-950/60 p-4 sm:p-5 xl:relative'>
+      <div className='flex items-center justify-between xl:block xl:min-h-10 xl:pr-[4.75rem]'>
         <p className='text-sm font-medium text-white'>{label}</p>
-        <p className='text-xs uppercase tracking-[0.18em] text-slate-400'>{total} total</p>
+        <p className='text-xs text-slate-400 xl:absolute xl:right-5 xl:top-5 xl:w-16 xl:text-right xl:text-[11px] xl:leading-none'>
+          <span className='mr-1 tabular-nums xl:mr-0 xl:block'>{formatTrendCount(total)}</span>
+          {' '}
+          <span className='uppercase tracking-[0.18em] xl:mt-1 xl:block'>total</span>
+        </p>
       </div>
       <div className='mt-4 flex h-24 items-end gap-1.5 sm:mt-5 sm:h-28 sm:gap-2'>
         {buckets.map((bucket) => (
@@ -43,7 +56,7 @@ function TrendBars({ label, buckets, tone }) {
                 title={`${bucket.label}: ${bucket.count}`}
               />
             </div>
-            <span className='text-[10px] font-medium text-slate-500'>{bucket.count}</span>
+            <span className='text-[10px] font-medium text-slate-500'>{formatTrendCount(bucket.count)}</span>
           </div>
         ))}
       </div>
@@ -155,7 +168,7 @@ export default async function AdminHomePage() {
           <PanelHeader
             eyebrow={hasProvisioningActivity ? 'Provisioning trend' : 'Registry activity'}
             title={hasProvisioningActivity ? 'Identity and token velocity' : 'Pushes, pulls, and deletions'}
-            action={<Badge>Peak bucket: {maxBucketValue(activeTrendCards.map((card) => card.buckets))}</Badge>}
+            action={<Badge>Peak bucket: {formatTrendCount(maxBucketValue(activeTrendCards.map((card) => card.buckets)))}</Badge>}
           />
           <div className='mt-5 grid gap-3 sm:mt-6 sm:gap-4 xl:grid-cols-3'>
             {activeTrendCards.map((card) => (
