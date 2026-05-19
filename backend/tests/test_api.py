@@ -835,6 +835,193 @@ def test_admin_can_enable_disabled_user(settings) -> None:
     assert events[-1].action == "user_enabled"
 
 
+def test_admin_delete_user_requires_disabled_account(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="delete-active",
+                email="delete-active@example.com",
+                password_hash=hash_password("delete-active-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        response = client.delete(
+            f"/api/admin/users/{user_id}",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        with app.state.session_factory() as session:
+            user = session.get(User, user_id)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Disable the user before deleting it."
+    assert user is not None
+    assert user.deleted_at is None
+    assert user.username == "delete-active"
+
+
+def test_admin_cannot_delete_own_account(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        csrf = login.cookies.get("rcr_csrf")
+
+        with app.state.session_factory() as session:
+            admin = session.scalar(select(User).where(User.username == settings.admin_username))
+            assert admin is not None
+            admin_id = admin.id
+
+        response = client.delete(
+            f"/api/admin/users/{admin_id}",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "You cannot delete your own account."
+
+
+def test_admin_can_delete_disabled_user_and_recreate_identity(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app) as admin_client, TestClient(app) as user_client:
+        with app.state.session_factory() as session:
+            user = User(
+                username="delete-allowed-user",
+                email="delete-allowed-user@example.com",
+                password_hash=hash_password("delete-allowed-pass"),
+                is_admin=False,
+                is_active=True,
+            )
+            session.add(user)
+            session.flush()
+            permission = RepositoryPermission(
+                subject_type="user",
+                subject_id=user.id,
+                repository_pattern="deleted-user/*",
+                can_pull=True,
+                can_push=True,
+                can_delete=False,
+            )
+            session.add(permission)
+            issued = issue_personal_access_token(session, user_id=user.id, name="delete-token")
+            session.commit()
+            session.refresh(user)
+            user_id = user.id
+            raw_pat = issued.raw_token
+
+        user_login = _login(user_client, "delete-allowed-user", "delete-allowed-pass")
+        assert user_login.status_code == 200
+        admin_login = _login(admin_client, settings.admin_username, settings.admin_password)
+        assert admin_login.status_code == 200
+        csrf = admin_login.cookies.get("rcr_csrf")
+
+        disable = admin_client.post(
+            f"/api/admin/users/{user_id}/disable",
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert disable.status_code == 200
+
+        response = admin_client.delete(
+            f"/api/admin/users/{user_id}",
+            headers={"X-CSRF-Token": csrf},
+        )
+        revoked_session_response = user_client.get("/api/session/me")
+        password_login = _login(user_client, "delete-allowed-user", "delete-allowed-pass")
+        pat_token_response = user_client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:deleted-user/app:pull"},
+            headers=_basic_auth("delete-allowed-user", raw_pat),
+        )
+        detail_response = admin_client.get(f"/api/admin/users/{user_id}")
+        list_response = admin_client.get("/api/admin/users")
+
+        recreate = admin_client.post(
+            "/api/admin/users",
+            json={
+                "username": "delete-allowed-user",
+                "email": "delete-allowed-user@example.com",
+                "password": "new-delete-pass",
+                "is_admin": False,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        recreated_pat_token_response = user_client.get(
+            "/auth/token",
+            params={"service": settings.token_service, "scope": "repository:deleted-user/app:pull"},
+            headers=_basic_auth("delete-allowed-user", raw_pat),
+        )
+
+        with app.state.session_factory() as session:
+            deleted_user = session.get(User, user_id)
+            recreated_user = session.scalar(select(User).where(User.username == "delete-allowed-user"))
+            active_sessions = session.scalars(
+                select(WebSession).where(WebSession.user_id == user_id, WebSession.revoked_at.is_(None))
+            ).all()
+            revoked_tokens = session.scalars(
+                select(PersonalAccessToken).where(
+                    PersonalAccessToken.user_id == user_id,
+                    PersonalAccessToken.revoked_at.is_not(None),
+                )
+            ).all()
+            permissions = session.scalars(
+                select(RepositoryPermission).where(
+                    RepositoryPermission.subject_type == "user",
+                    RepositoryPermission.subject_id == user_id,
+                )
+            ).all()
+            audit_event = session.scalar(
+                select(AuditEvent).where(
+                    AuditEvent.action == "user_deleted",
+                    AuditEvent.target_type == "user",
+                    AuditEvent.target_id == user_id,
+                )
+            )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert response.json()["revoked_sessions"] == 1
+    assert response.json()["revoked_tokens"] == 1
+    assert response.json()["deleted_permissions"] == 1
+    assert revoked_session_response.status_code == 401
+    assert password_login.status_code == 401
+    assert pat_token_response.status_code == 401
+    assert detail_response.status_code == 404
+    assert all(entry["id"] != user_id for entry in list_response.json()["users"])
+    assert recreate.status_code == 200
+    assert recreated_pat_token_response.status_code == 401
+    assert recreate.json()["user"]["id"] != user_id
+    assert deleted_user is not None
+    assert deleted_user.deleted_at is not None
+    assert deleted_user.deleted_by is not None
+    assert deleted_user.deleted_username == "delete-allowed-user"
+    assert deleted_user.username.startswith(f"deleted-user-{user_id}")
+    assert deleted_user.email.startswith(f"deleted-user-{user_id}")
+    assert deleted_user.is_active is False
+    assert recreated_user is not None
+    assert recreated_user.id != user_id
+    assert not active_sessions
+    assert len(revoked_tokens) == 1
+    assert permissions == []
+    assert audit_event is not None
+    assert audit_event.metadata_json == {
+        "username": "delete-allowed-user",
+        "email": "delete-allowed-user@example.com",
+        "revoked_sessions": 1,
+        "revoked_tokens": 1,
+        "deleted_permissions": 1,
+    }
+
+
 def test_admin_write_requires_same_origin_csrf_request(settings) -> None:
     app = create_app(settings)
     with TestClient(app) as client:

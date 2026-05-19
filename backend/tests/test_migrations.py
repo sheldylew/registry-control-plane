@@ -123,6 +123,8 @@ def test_upgrade_from_previous_release_preserves_state_and_adds_registry_read_mo
     )
     repository_columns = {column["name"] for column in inspector.get_columns("repositories")}
     assert {"updated_at", "last_seen_at", "deleted_at"}.issubset(repository_columns)
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    assert {"deleted_at", "deleted_by", "deleted_username"}.issubset(user_columns)
 
     with Session(upgraded_engine) as db:
         public_repo = db.scalar(select(Repository).where(Repository.name == "public/app"))

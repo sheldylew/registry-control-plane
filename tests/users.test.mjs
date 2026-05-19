@@ -51,6 +51,28 @@ test("users panel exposes enable action for disabled users", async () => {
   assert.match(panel, /user\.is_active \? "Enabled" : "Disabled"/);
 });
 
+test("users panel exposes confirmed delete only for disabled non-current users", async () => {
+  const panel = await readFile(new URL("../app/components/users-panel.jsx", import.meta.url), "utf8");
+
+  assert.match(panel, /ConfirmDialog/);
+  assert.match(panel, /async function deleteSelectedUser\(\)/);
+  assert.match(panel, /method: "DELETE"/);
+  assert.match(panel, /!user\.is_active && user\.id !== currentUserId/);
+  assert.match(panel, /confirmationValue=\{deleteUser\?\.username \?\? ""\}/);
+  assert.match(panel, /Delete user/);
+});
+
+test("user profile exposes confirmed delete for disabled non-current users", async () => {
+  const panel = await readFile(new URL("../app/components/user-profile-panel.jsx", import.meta.url), "utf8");
+
+  assert.match(panel, /ConfirmDialog/);
+  assert.match(panel, /async function deleteUser\(\)/);
+  assert.match(panel, /method: "DELETE"/);
+  assert.match(panel, /!user\.is_active && user\.id !== currentUserId/);
+  assert.match(panel, /confirmationValue=\{user\.username\}/);
+  assert.match(panel, /router\.push\("\/admin\/users"\)/);
+});
+
 test("admin users page builds pagination links", async () => {
   const page = await readFile(new URL("../app/admin/users/page.jsx", import.meta.url), "utf8");
 

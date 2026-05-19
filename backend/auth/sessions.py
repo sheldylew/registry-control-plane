@@ -61,7 +61,7 @@ def authenticate_session(session: Session, raw_token: str) -> Optional[Tuple[Web
     if _as_utc(candidate.expires_at) <= utcnow():
         return None
     user = session.get(User, candidate.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.deleted_at is not None:
         return None
     candidate.last_seen_at = utcnow()
     session.commit()

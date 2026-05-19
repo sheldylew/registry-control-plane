@@ -536,6 +536,7 @@ def queue_automatic_rebuild_job(db: Session, *, retention_days: int = 30) -> Opt
         .where(
             User.is_admin.is_(True),
             User.is_active.is_(True),
+            User.deleted_at.is_(None),
         )
         .order_by(User.id.asc())
         .limit(1)

@@ -112,7 +112,7 @@ def authenticate_basic_principal(
     secret: str,
 ) -> AuthenticatedSubject:
     user = session.scalar(select(User).where(User.username == username))
-    if user is not None and user.is_active:
+    if user is not None and user.is_active and user.deleted_at is None:
         if verify_password(secret, user.password_hash):
             return AuthenticatedSubject(
                 subject_type="user",

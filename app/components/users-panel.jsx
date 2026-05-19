@@ -8,6 +8,7 @@ import ActionMenu from "@/app/components/ui/action-menu";
 import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
+import ConfirmDialog from "@/app/components/ui/confirm-dialog";
 import EmptyState from "@/app/components/ui/empty-state";
 import FormDialog from "@/app/components/ui/form-dialog";
 import { Field, Input } from "@/app/components/ui/form";
@@ -49,6 +50,7 @@ export default function UsersPanel({
   const [statusError, setStatusError] = useState("");
   const [pendingStatusUserId, setPendingStatusUserId] = useState(null);
   const [passwordResetUser, setPasswordResetUser] = useState(null);
+  const [deleteUser, setDeleteUser] = useState(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -101,6 +103,14 @@ export default function UsersPanel({
     setNewPassword("");
     setConfirmPassword("");
     setResetError("");
+  }
+
+  function openDeleteUser(user) {
+    setDeleteUser(user);
+  }
+
+  function closeDeleteUser() {
+    setDeleteUser(null);
   }
 
   async function createUser(event) {
@@ -165,6 +175,22 @@ export default function UsersPanel({
       return;
     }
     setPendingStatusUserId(null);
+    router.refresh();
+  }
+
+  async function deleteSelectedUser() {
+    if (!deleteUser) {
+      return;
+    }
+    const response = await fetch(`/api/admin/users/${deleteUser.id}`, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(readApiErrorDetail(payload, "Could not delete user."));
+    }
+    setDeleteUser(null);
     router.refresh();
   }
 
@@ -313,7 +339,11 @@ export default function UsersPanel({
                             label: "Reset password",
                             onSelect: () => openPasswordReset(user),
                           },
-                        ]}
+                          !user.is_active && user.id !== currentUserId ? {
+                            label: "Delete user",
+                            onSelect: () => openDeleteUser(user),
+                          } : null,
+                        ].filter(Boolean)}
                         label={`Actions for ${user.username}`}
                       />
                     </div>
@@ -379,7 +409,11 @@ export default function UsersPanel({
                             label: "Reset password",
                             onSelect: () => openPasswordReset(user),
                           },
-                        ]}
+                          !user.is_active && user.id !== currentUserId ? {
+                            label: "Delete user",
+                            onSelect: () => openDeleteUser(user),
+                          } : null,
+                        ].filter(Boolean)}
                         label={`Actions for ${user.username}`}
                       />
                     </div>
@@ -524,6 +558,19 @@ export default function UsersPanel({
           </Alert>
         ) : null}
       </FormDialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteUser)}
+        onClose={closeDeleteUser}
+        eyebrow="User management"
+        title={`Delete ${deleteUser?.username ?? "user"}`}
+        description="This revokes active sessions and personal access tokens, removes repository permissions, and releases the username and email for a new account."
+        confirmationLabel="Type the username to delete"
+        confirmationValue={deleteUser?.username ?? ""}
+        onConfirm={deleteSelectedUser}
+        confirmLabel="Delete user"
+        pendingLabel="Deleting..."
+      />
     </>
   );
 }

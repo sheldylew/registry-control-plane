@@ -1,5 +1,6 @@
 import hmac
 from pathlib import Path
+import secrets
 import shutil
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -133,7 +134,31 @@ def _serialize_user(user: User) -> dict:
         "email": user.email,
         "is_admin": user.is_admin,
         "is_active": user.is_active,
+        "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
     }
+
+
+def _user_audit_label(user: User) -> str:
+    return user.deleted_username or user.username
+
+
+def _deleted_user_identity(db: Session, user: User) -> tuple[str, str]:
+    base = f"deleted-user-{user.id}"
+    for attempt in range(8):
+        suffix = "" if attempt == 0 else f"-{secrets.token_hex(4)}"
+        username = f"{base}{suffix}"
+        email = f"{base}{suffix}@deleted.invalid"
+        conflict = db.scalar(
+            select(User.id)
+            .where(
+                User.id != user.id,
+                or_(User.username == username, User.email == email),
+            )
+            .limit(1)
+        )
+        if conflict is None:
+            return username, email
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not prepare deleted user identity.")
 
 
 def _serialize_web_session(web_session: WebSession, *, user: User, current_session_id: Optional[int]) -> dict:
@@ -1143,7 +1168,7 @@ def login(
         )
 
     user = db.scalar(select(User).where(User.username == payload.username))
-    if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
+    if user is None or not user.is_active or user.deleted_at is not None or not verify_password(payload.password, user.password_hash):
         rate_limiter.add_failure(rate_limit_key)
         increment_metric("registry_ui_login_failures_total")
         record_audit_event(
@@ -1214,7 +1239,7 @@ def list_users(
 ):
     safe_page = max(page, 1)
     page_size = effective_default_page_size(db)
-    base_query = select(User).order_by(User.username.asc())
+    base_query = select(User).where(User.deleted_at.is_(None)).order_by(User.username.asc())
     total_users = db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
     users = db.scalars(base_query.offset((safe_page - 1) * page_size).limit(page_size)).all()
     return {
@@ -1237,7 +1262,7 @@ def get_user_detail(
     db: Session = Depends(get_db),
 ):
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     tokens = db.scalars(
@@ -1268,7 +1293,7 @@ def get_user_detail(
     actor_names: dict[int, str] = {}
     if actor_ids:
         actors = db.scalars(select(User).where(User.id.in_(actor_ids))).all()
-        actor_names = {actor.id: actor.username for actor in actors}
+        actor_names = {actor.id: _user_audit_label(actor) for actor in actors}
 
     return {
         "user": _serialize_user(user),
@@ -1320,7 +1345,7 @@ def disable_user(
     db: Session = Depends(get_db),
 ):
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     if user.id == csrf_user.id:
         raise HTTPException(
@@ -1332,6 +1357,89 @@ def disable_user(
     return {"user": _serialize_user(user)}
 
 
+@router.delete("/admin/users/{user_id}")
+def delete_user(
+    user_id: int,
+    csrf_user: User = Depends(require_csrf),
+    _admin: User = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None or user.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    if user.id == csrf_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account.",
+        )
+    if user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Disable the user before deleting it.",
+        )
+
+    deleted_at = datetime.now(timezone.utc)
+    original_username = user.username
+    original_email = user.email
+    tombstone_username, tombstone_email = _deleted_user_identity(db, user)
+
+    sessions = db.scalars(
+        select(WebSession).where(
+            WebSession.user_id == user.id,
+            WebSession.revoked_at.is_(None),
+        )
+    ).all()
+    for web_session in sessions:
+        web_session.revoked_at = deleted_at
+
+    tokens = db.scalars(
+        select(PersonalAccessToken).where(
+            PersonalAccessToken.user_id == user.id,
+            PersonalAccessToken.revoked_at.is_(None),
+        )
+    ).all()
+    for token in tokens:
+        token.revoked_at = deleted_at
+
+    permissions = db.scalars(
+        select(RepositoryPermission).where(
+            RepositoryPermission.subject_type == "user",
+            RepositoryPermission.subject_id == user.id,
+        )
+    ).all()
+    for permission in permissions:
+        db.delete(permission)
+
+    user.is_active = False
+    user.deleted_at = deleted_at
+    user.deleted_by = csrf_user.id
+    user.deleted_username = original_username
+    user.username = tombstone_username
+    user.email = tombstone_email
+
+    record_audit_event(
+        db,
+        actor=csrf_user,
+        action="user_deleted",
+        target_type="user",
+        target_id=user.id,
+        metadata_json={
+            "username": original_username,
+            "email": original_email,
+            "revoked_sessions": len(sessions),
+            "revoked_tokens": len(tokens),
+            "deleted_permissions": len(permissions),
+        },
+    )
+    return {
+        "deleted": True,
+        "user_id": user_id,
+        "revoked_sessions": len(sessions),
+        "revoked_tokens": len(tokens),
+        "deleted_permissions": len(permissions),
+    }
+
+
 @router.post("/admin/users/{user_id}/enable")
 def enable_user(
     user_id: int,
@@ -1340,7 +1448,7 @@ def enable_user(
     db: Session = Depends(get_db),
 ):
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     user.is_active = True
     db.commit()
@@ -1364,7 +1472,7 @@ def reset_user_password(
     db: Session = Depends(get_db),
 ):
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     if user.id == csrf_user.id:
         if payload.current_password is None or not verify_password(payload.current_password, user.password_hash):
@@ -1481,7 +1589,7 @@ def revoke_user_web_sessions(
     db: Session = Depends(get_db),
 ):
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     revoked_sessions = revoke_user_sessions(db, user_id=user.id)
     record_audit_event(
@@ -1622,7 +1730,7 @@ def get_robot_detail(
     actor_names: dict[int, str] = {}
     if actor_ids:
         actors = db.scalars(select(User).where(User.id.in_(actor_ids))).all()
-        actor_names = {actor.id: actor.username for actor in actors}
+        actor_names = {actor.id: _user_audit_label(actor) for actor in actors}
 
     return {
         "robot": _serialize_robot(robot),
@@ -1637,7 +1745,7 @@ def list_permissions(
     _admin: User = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ):
-    users = db.scalars(select(User).order_by(User.username.asc())).all()
+    users = db.scalars(select(User).where(User.deleted_at.is_(None)).order_by(User.username.asc())).all()
     robots = db.scalars(select(RobotAccount).order_by(RobotAccount.name.asc())).all()
     safe_page = max(page, 1)
     page_size = effective_default_page_size(db)
@@ -1650,7 +1758,7 @@ def list_permissions(
     permissions = db.scalars(
         query.offset((safe_page - 1) * page_size).limit(page_size)
     ).all()
-    user_names = {user.id: user.username for user in users}
+    user_names = {user.id: _user_audit_label(user) for user in users}
     robot_names = {robot.id: robot.name for robot in robots}
     return {
         "users": [_serialize_user(user) for user in users],
@@ -1973,7 +2081,7 @@ def admin_dashboard(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+    users = db.scalars(select(User).where(User.deleted_at.is_(None)).order_by(User.created_at.desc())).all()
     pats = db.scalars(select(PersonalAccessToken).order_by(PersonalAccessToken.created_at.desc())).all()
     robots = db.scalars(select(RobotAccount).order_by(RobotAccount.created_at.desc())).all()
     robot_tokens = db.scalars(select(RobotToken).order_by(RobotToken.created_at.desc())).all()
@@ -2357,8 +2465,10 @@ def audit_log(
     query = select(AuditEvent).order_by(AuditEvent.created_at.desc())
 
     if actor:
-        actor_user = db.scalar(select(User).where(User.username == actor))
-        if actor_user is None:
+        actor_user_ids = db.scalars(
+            select(User.id).where(or_(User.username == actor, User.deleted_username == actor))
+        ).all()
+        if not actor_user_ids:
             return {
                 "events": [],
                 "pagination": {
@@ -2371,7 +2481,7 @@ def audit_log(
             }
         query = query.where(
             AuditEvent.actor_type == "user",
-            AuditEvent.actor_id == actor_user.id,
+            AuditEvent.actor_id.in_(actor_user_ids),
         )
     if repo:
         repo_pattern = f'%"{repo}"%'
@@ -2387,7 +2497,7 @@ def audit_log(
     actor_ids = sorted({event.actor_id for event in events if event.actor_type == "user" and event.actor_id is not None})
     if actor_ids:
         users = db.scalars(select(User).where(User.id.in_(actor_ids))).all()
-        actor_names = {user.id: user.username for user in users}
+        actor_names = {user.id: _user_audit_label(user) for user in users}
 
     return {
         "events": [

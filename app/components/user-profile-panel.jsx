@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import Alert from "@/app/components/ui/alert";
 import Badge from "@/app/components/ui/badge";
 import Button from "@/app/components/ui/button";
+import ConfirmDialog from "@/app/components/ui/confirm-dialog";
 import DetailList from "@/app/components/ui/detail-list";
 import EmptyState from "@/app/components/ui/empty-state";
 import FormDialog from "@/app/components/ui/form-dialog";
@@ -34,6 +35,7 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
   const [resetPending, setResetPending] = useState(false);
   const [resetError, setResetError] = useState("");
   const [resetOpen, setResetOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [statusPending, setStatusPending] = useState(false);
   const [statusError, setStatusError] = useState("");
   const resettingOwnPassword = passwordResetUser?.id === currentUserId;
@@ -65,6 +67,10 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
     setResetError("");
   }
 
+  function closeDeleteUser() {
+    setDeleteOpen(false);
+  }
+
   async function setUserActive(nextActive) {
     if (user.id === currentUserId && !nextActive) {
       return;
@@ -83,6 +89,20 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
       return;
     }
     setStatusPending(false);
+    router.refresh();
+  }
+
+  async function deleteUser() {
+    const response = await fetch(`/api/admin/users/${user.id}`, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": readCookie("rcr_csrf") },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(readApiErrorDetail(payload, "Could not delete user."));
+    }
+    setDeleteOpen(false);
+    router.push("/admin/users");
     router.refresh();
   }
 
@@ -146,6 +166,11 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
                 <Button type="button" onClick={openPasswordReset} size="sm" className="w-full sm:w-auto">
                   Reset password
                 </Button>
+                {!user.is_active && user.id !== currentUserId ? (
+                  <Button type="button" onClick={() => setDeleteOpen(true)} variant="danger" size="sm" className="w-full sm:w-auto">
+                    Delete user
+                  </Button>
+                ) : null}
               </div>
             )}
           />
@@ -355,6 +380,19 @@ export default function UserProfilePanel({ user, tokens, permissions, recentActi
           </Alert>
         ) : null}
       </FormDialog>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onClose={closeDeleteUser}
+        eyebrow="User management"
+        title={`Delete ${user.username}`}
+        description="This revokes active sessions and personal access tokens, removes repository permissions, and releases the username and email for a new account."
+        confirmationLabel="Type the username to delete"
+        confirmationValue={user.username}
+        onConfirm={deleteUser}
+        confirmLabel="Delete user"
+        pendingLabel="Deleting..."
+      />
     </>
   );
 }

@@ -158,7 +158,7 @@ def authenticate_user_pat(
         return None
 
     user = session.get(User, token.user_id)
-    if user is None or not user.is_active or user.username != username:
+    if user is None or not user.is_active or user.deleted_at is not None or user.username != username:
         return None
     return user, token
 
