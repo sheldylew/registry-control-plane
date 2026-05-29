@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
 
 import Alert from "@/app/components/ui/alert";
+import BrandMark from "@/app/components/brand-mark";
 import Button from "@/app/components/ui/button";
 import { Field, Input, LightInput } from "@/app/components/ui/form";
 import { Panel } from "@/app/components/ui/panel";
@@ -56,9 +57,7 @@ export default function LoginForm() {
   return (
     <div>
       <div className="mb-5 flex flex-col items-center text-center sm:mb-6">
-        <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-cyan-300/30 bg-slate-950/70 text-base font-semibold tracking-[0.24em] text-white shadow-lg shadow-slate-950/30">
-          RCP
-        </div>
+        <BrandMark className="h-16 w-16" />
         <p className="mt-3 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">
           Registry operations
         </p>

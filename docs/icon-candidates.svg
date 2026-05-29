@@ -1,0 +1,138 @@
+<svg width="1800" height="1200" viewBox="0 0 1800 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="1800" y2="1200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#020617"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="cardFill" x1="0" y1="0" x2="0" y2="340" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111C31"/>
+      <stop offset="1" stop-color="#07111F"/>
+    </linearGradient>
+    <linearGradient id="cyanEmerald" x1="0" y1="0" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="limeGreen" x1="0" y1="0" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C8FF73"/>
+      <stop offset="1" stop-color="#22C55E"/>
+    </linearGradient>
+    <linearGradient id="blueCyan" x1="0" y1="0" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#14B8A6"/>
+    </linearGradient>
+    <linearGradient id="amberCyan" x1="0" y1="0" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000814" flood-opacity="0.42"/>
+    </filter>
+    <style>
+      .card { fill: url(#cardFill); stroke: rgba(255,255,255,0.1); stroke-width: 2; }
+      .label { fill: #E2E8F0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 30px; font-weight: 760; letter-spacing: 0; }
+      .sub { fill: #94A3B8; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 18px; font-weight: 520; letter-spacing: 0; }
+      .tiny { fill: #CBD5E1; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 18px; font-weight: 800; letter-spacing: 0; }
+      .rcp { fill: #F8FAFC; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 54px; font-weight: 850; letter-spacing: 0; }
+      .mutedStroke { stroke: #94A3B8; stroke-opacity: 0.3; }
+      .whiteStroke { stroke: #E2E8F0; stroke-opacity: 0.92; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1200" fill="url(#pageBg)"/>
+  <path d="M150 174H1690M150 996H1690" stroke="#94A3B8" stroke-opacity="0.08" stroke-width="2"/>
+  <text x="150" y="105" fill="#F8FAFC" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="52" font-weight="820" letter-spacing="0">Registry Control Plane icon directions</text>
+  <text x="150" y="144" fill="#94A3B8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22" font-weight="520" letter-spacing="0">Six vector-friendly candidates for app icon, favicon, docs, and wordmark variants</text>
+
+  <g id="candidate-1" transform="translate(120 210)" filter="url(#softShadow)">
+    <rect class="card" width="500" height="380" rx="28"/>
+    <g transform="translate(150 54)">
+      <rect x="0" y="0" width="200" height="200" rx="46" fill="#06101D" stroke="#C8FF73" stroke-width="6"/>
+      <path d="M100 27L164 64V138L100 175L36 138V64L100 27Z" fill="url(#limeGreen)"/>
+      <path d="M100 27L164 64L100 101L36 64L100 27Z" fill="#D9FF94" fill-opacity="0.9"/>
+      <path d="M36 64L100 101V175L36 138V64Z" fill="#22A33B"/>
+      <path d="M164 64L100 101V175L164 138V64Z" fill="#15803D"/>
+      <path d="M100 27L164 64V138L100 175L36 138V64L100 27Z" stroke="#F7FFE7" stroke-opacity="0.62" stroke-width="4" stroke-linejoin="round"/>
+      <path d="M114 90C114 82.27 107.73 76 100 76C92.27 76 86 82.27 86 90C86 94.5 88.12 98.51 91.42 101.07V106.3L84.68 126.26C83.89 128.6 85.64 131 88.11 131H111.89C114.36 131 116.11 128.6 115.32 126.26L108.58 106.3V101.07C111.88 98.51 114 94.5 114 90Z" fill="#06101D"/>
+    </g>
+    <text class="label" x="40" y="306">1. Vault Cube</text>
+    <text class="sub" x="40" y="337">Closest to the current icon: secured registry storage.</text>
+  </g>
+
+  <g id="candidate-2" transform="translate(650 210)" filter="url(#softShadow)">
+    <rect class="card" width="500" height="380" rx="28"/>
+    <g transform="translate(150 54)">
+      <rect x="0" y="0" width="200" height="200" rx="46" fill="#06101D" stroke="#22D3EE" stroke-width="6"/>
+      <path d="M100 30L160 65V135L100 170L40 135V65L100 30Z" stroke="url(#cyanEmerald)" stroke-width="12" stroke-linejoin="round"/>
+      <circle cx="100" cy="100" r="34" fill="url(#cyanEmerald)"/>
+      <circle cx="100" cy="100" r="15" fill="#06101D"/>
+      <path d="M100 66V41M100 159V134M66 100H40M160 100H134" stroke="#E2E8F0" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="100" cy="41" r="10" fill="#34D399"/>
+      <circle cx="100" cy="159" r="10" fill="#22D3EE"/>
+      <circle cx="40" cy="100" r="10" fill="#22D3EE"/>
+      <circle cx="160" cy="100" r="10" fill="#34D399"/>
+    </g>
+    <text class="label" x="40" y="306">2. Control Hex</text>
+    <text class="sub" x="40" y="337">Best pure mark for control-plane routing and policy.</text>
+  </g>
+
+  <g id="candidate-3" transform="translate(1180 210)" filter="url(#softShadow)">
+    <rect class="card" width="500" height="380" rx="28"/>
+    <g transform="translate(150 54)">
+      <rect x="0" y="0" width="200" height="200" rx="46" fill="#06101D" stroke="#38BDF8" stroke-width="6"/>
+      <g transform="translate(38 52)">
+        <rect x="0" y="0" width="124" height="32" rx="8" fill="#38BDF8"/>
+        <rect x="0" y="42" width="124" height="32" rx="8" fill="#2DD4BF"/>
+        <rect x="0" y="84" width="124" height="32" rx="8" fill="#34D399"/>
+        <path d="M24 16H98M24 58H98M24 100H98" stroke="#06101D" stroke-width="7" stroke-linecap="round"/>
+      </g>
+      <path d="M136 117L158 139L198 89" stroke="#F8FAFC" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M17 100C17 54.16 54.16 17 100 17C134.24 17 163.63 37.73 176.35 67.31" stroke="#CBD5E1" stroke-opacity="0.34" stroke-width="8" stroke-linecap="round"/>
+    </g>
+    <text class="label" x="40" y="306">3. Registry Stack</text>
+    <text class="sub" x="40" y="337">Readable at small sizes, directly says repository inventory.</text>
+  </g>
+
+  <g id="candidate-4" transform="translate(120 640)" filter="url(#softShadow)">
+    <rect class="card" width="500" height="380" rx="28"/>
+    <g transform="translate(150 54)">
+      <rect x="0" y="0" width="200" height="200" rx="46" fill="#06101D" stroke="#34D399" stroke-width="6"/>
+      <path d="M100 28L162 64V136L100 172L38 136V64L100 28Z" fill="#0B1F2E" stroke="url(#cyanEmerald)" stroke-width="9" stroke-linejoin="round"/>
+      <path d="M62 79H138M62 121H138M100 43V157" stroke="#E2E8F0" stroke-opacity="0.28" stroke-width="6" stroke-linecap="round"/>
+      <text class="rcp" x="100" y="119" text-anchor="middle">RCP</text>
+      <path d="M100 28L162 64L100 100L38 64L100 28Z" fill="#22D3EE" fill-opacity="0.13"/>
+    </g>
+    <text class="label" x="40" y="306">4. RCP Monogram</text>
+    <text class="sub" x="40" y="337">Strong for docs, GitHub avatar, and wordmark pairing.</text>
+  </g>
+
+  <g id="candidate-5" transform="translate(650 640)" filter="url(#softShadow)">
+    <rect class="card" width="500" height="380" rx="28"/>
+    <g transform="translate(150 54)">
+      <rect x="0" y="0" width="200" height="200" rx="46" fill="#06101D" stroke="#FBBF24" stroke-width="6"/>
+      <circle cx="100" cy="100" r="62" fill="#0B1F2E" stroke="url(#amberCyan)" stroke-width="12"/>
+      <path d="M100 38C134.24 38 162 65.76 162 100C162 134.24 134.24 162 100 162" stroke="#E2E8F0" stroke-opacity="0.35" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="82" cy="97" r="20" fill="#FBBF24"/>
+      <path d="M102 97H154M134 97V118M119 97V111" stroke="#F8FAFC" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M47 122C57.29 146.11 80.65 162 107 162" stroke="#34D399" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="47" cy="122" r="8" fill="#34D399"/>
+    </g>
+    <text class="label" x="40" y="306">5. Token Loop</text>
+    <text class="sub" x="40" y="337">Bearer tokens, auth challenge flow, and registry access.</text>
+  </g>
+
+  <g id="candidate-6" transform="translate(1180 640)" filter="url(#softShadow)">
+    <rect class="card" width="500" height="380" rx="28"/>
+    <g transform="translate(150 54)">
+      <rect x="0" y="0" width="200" height="200" rx="46" fill="#06101D" stroke="#22D3EE" stroke-width="6"/>
+      <path d="M44 136C44 105.07 69.07 80 100 80C130.93 80 156 105.07 156 136" stroke="url(#cyanEmerald)" stroke-width="16" stroke-linecap="round"/>
+      <path d="M56 136H144" stroke="#E2E8F0" stroke-opacity="0.2" stroke-width="8" stroke-linecap="round"/>
+      <path d="M100 136L131 98" stroke="#F8FAFC" stroke-width="9" stroke-linecap="round"/>
+      <circle cx="100" cy="136" r="12" fill="#F8FAFC"/>
+      <path d="M68 54H132C140.84 54 148 61.16 148 70V91C135.37 80.39 118.86 74 100.84 74C82.22 74 65.2 80.82 52 92.1V70C52 61.16 59.16 54 68 54Z" fill="#0B1F2E" stroke="#34D399" stroke-width="8"/>
+      <path d="M75 70H125" stroke="#22D3EE" stroke-width="7" stroke-linecap="round"/>
+      <path d="M54 155H146" stroke="#CBD5E1" stroke-opacity="0.35" stroke-width="8" stroke-linecap="round"/>
+    </g>
+    <text class="label" x="40" y="306">6. Ops Gauge</text>
+    <text class="sub" x="40" y="337">Maintenance, health, storage pressure, and admin status.</text>
+  </g>
+</svg>

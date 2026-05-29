@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import Alert from "@/app/components/ui/alert";
+import BrandMark from "@/app/components/brand-mark";
 import Button from "@/app/components/ui/button";
 import { Field, Input, LightInput } from "@/app/components/ui/form";
 import { Panel } from "@/app/components/ui/panel";
@@ -69,10 +70,15 @@ export default function SetupForm({ initialPublicOrigin = "" }) {
 
   return (
     <Panel as="form" onSubmit={onSubmit} className="p-5 shadow-2xl shadow-slate-950/30 sm:p-8">
-      <h1 className="text-2xl font-semibold text-white sm:text-3xl">First boot setup</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-300">
-        Enter the one-time setup token from container logs, then create the first admin account and public registry origin.
-      </p>
+      <div className="flex items-start gap-4">
+        <BrandMark className="h-14 w-14 shrink-0" />
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold text-white sm:text-3xl">First boot setup</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            Enter the one-time setup token from container logs, then create the first admin account and public registry origin.
+          </p>
+        </div>
+      </div>
 
       {!result ? (
         <>

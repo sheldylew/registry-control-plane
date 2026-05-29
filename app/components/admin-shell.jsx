@@ -18,6 +18,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 
+import BrandMark from "@/app/components/brand-mark";
 import Button from "@/app/components/ui/button";
 import LogoutButton from "@/app/components/logout-button";
 
@@ -139,25 +140,29 @@ export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
         <div className="pointer-events-none absolute inset-x-8 top-0 h-20 rounded-full bg-cyan-400/10 blur-3xl" />
         <div className="relative max-h-[calc(100vh-1.5rem)] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/95 shadow-[0_24px_80px_rgba(2,6,23,0.65)] backdrop-blur-xl">
           <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.98),rgba(2,6,23,0.96))] p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">
-                  Command menu
-                </p>
-                <h2 className="mt-2 text-xl font-semibold text-white">Where to?</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  Signed in as <span className="font-semibold text-white">{user.username}</span>
-                </p>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <BrandMark className="mt-0.5 h-10 w-10 shrink-0 min-[420px]:h-12 min-[420px]:w-12" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300 min-[420px]:tracking-[0.35em]">
+                    Command menu
+                  </p>
+                  <h2 className="mt-2 text-xl font-semibold text-white">Where to?</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    Signed in as <span className="font-semibold text-white">{user.username}</span>
+                  </p>
+                </div>
               </div>
-            <Button
-              type="button"
-              onClick={closeMobileNav}
-              aria-label="Close navigation"
-              variant="secondary"
-              size="iconMd"
-            >
-              <XMarkIcon className="h-5 w-5" />
-            </Button>
+              <Button
+                type="button"
+                onClick={closeMobileNav}
+                aria-label="Close navigation"
+                variant="secondary"
+                size="iconMd"
+                className="mt-0.5 shrink-0"
+              >
+                <XMarkIcon className="h-5 w-5" />
+              </Button>
             </div>
           </div>
           <div className="max-h-[calc(100vh-11rem)] overflow-y-auto p-3">
@@ -174,30 +179,34 @@ export default function AdminShell({ user, children, sectionLabel = "Admin" }) {
       </div>
 
       <header className="flex flex-col gap-5 border-b border-white/10 pb-6 sm:gap-6 sm:pb-8 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.35em] text-cyan-300">
-            {sectionLabel}
-          </p>
-          <div className="mt-4 flex items-start justify-between gap-4">
-            <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+        <div className="flex w-full min-w-0 items-start justify-between gap-4 lg:w-auto">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-cyan-300">
+              {sectionLabel}
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
               Registry control plane
             </h1>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Signed in as <span className="font-semibold text-white">{user.username}</span>
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 lg:hidden">
+            <BrandMark className="h-10 w-10 shrink-0" />
             <Button
               type="button"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Open navigation"
               variant="secondary"
               size="iconMd"
-              className="shrink-0 lg:hidden"
+              className="shrink-0"
             >
               <Bars3Icon className="h-5 w-5" />
             </Button>
           </div>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            Signed in as <span className="font-semibold text-white">{user.username}</span>
-          </p>
         </div>
-        <div className="hidden lg:block">
+        <div className="hidden items-center gap-3 lg:flex">
+          <BrandMark className="h-12 w-12 shrink-0" />
           <LogoutButton />
         </div>
       </header>

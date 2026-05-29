@@ -1,4 +1,5 @@
 import Badge from "@/app/components/ui/badge";
+import BrandMark from "@/app/components/brand-mark";
 import Button from "@/app/components/ui/button";
 import { Panel } from "@/app/components/ui/panel";
 
@@ -54,22 +55,27 @@ export default function HomePage() {
       </div>
 
       <header className="relative z-10 border-b border-white/10 pb-6 sm:pb-8">
-        <div className="mt-4 flex flex-col gap-5 sm:mt-6 sm:gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300 sm:text-sm sm:tracking-[0.35em]">
-              Self-hosted registry operations
-            </p>
-            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-6xl">
-              Registry Control Plane
-            </h1>
-            <p className="mt-4 text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
+        <div className="mt-4 flex flex-col gap-5 sm:mt-6 sm:gap-6">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-4 sm:gap-x-8">
+            <div className="min-w-0 max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300 sm:text-sm sm:tracking-[0.35em]">
+                Self-hosted registry operations
+              </p>
+              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-6xl">
+                Registry Control Plane
+              </h1>
+            </div>
+            <BrandMark className="h-16 w-16 shrink-0 justify-self-end min-[480px]:h-20 min-[480px]:w-20 sm:h-24 sm:w-24 lg:h-28 lg:w-28" />
+            <p className="col-span-2 max-w-3xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
               A production-minded control plane for sole developers and homelab
               operators who want clean registry access, scoped credentials, and
               an interface that respects the underlying Docker Distribution
               model.
             </p>
+            <div className="col-span-2 -mt-1">
+              <Badge tone="cyan">Built to run as a small, self-hosted service</Badge>
+            </div>
           </div>
-          <Badge tone="cyan">Built to run as a small, self-hosted service</Badge>
         </div>
       </header>
 

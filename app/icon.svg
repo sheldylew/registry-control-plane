@@ -1,28 +1,16 @@
 <svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="256" height="256" rx="64" fill="#08111F"/>
-  <path d="M128 36L206 81V173L128 218L50 173V81L128 36Z" fill="url(#top-face)"/>
-  <path d="M128 36L206 81L128 126L50 81L128 36Z" fill="url(#top-glow)"/>
-  <path d="M50 81L128 126V218L50 173V81Z" fill="url(#left-face)"/>
-  <path d="M206 81L128 126V218L206 173V81Z" fill="url(#right-face)"/>
-  <path d="M128 36L206 81V173L128 218L50 173V81L128 36Z" stroke="#C8FF73" stroke-width="5" stroke-linejoin="round"/>
-  <path d="M146 111C146 101.059 137.941 93 128 93C118.059 93 110 101.059 110 111C110 116.91 112.85 122.154 117.25 125.436V128.001L108.252 153.229C107.414 155.579 109.156 158 111.651 158H144.349C146.844 158 148.586 155.579 147.748 153.229L138.75 128.001V125.436C143.15 122.154 146 116.91 146 111Z" fill="#08111F"/>
-  <path d="M128 93C118.059 93 110 101.059 110 111C110 116.91 112.85 122.154 117.25 125.436V128.001L108.252 153.229C107.414 155.579 109.156 158 111.651 158H144.349C146.844 158 148.586 155.579 147.748 153.229L138.75 128.001V125.436C143.15 122.154 146 116.91 146 111C146 101.059 137.941 93 128 93Z" stroke="#0C1626" stroke-width="4" stroke-linejoin="round"/>
+  <rect width="256" height="256" rx="58" fill="#06101D"/>
+  <rect x="28" y="28" width="200" height="200" rx="46" fill="#06101D" stroke="#C8FF73" stroke-width="7"/>
+  <path d="M128 55L192 92V166L128 203L64 166V92L128 55Z" fill="url(#body)"/>
+  <path d="M128 55L192 92L128 129L64 92L128 55Z" fill="#D9FF94" fill-opacity="0.9"/>
+  <path d="M64 92L128 129V203L64 166V92Z" fill="#22A33B"/>
+  <path d="M192 92L128 129V203L192 166V92Z" fill="#15803D"/>
+  <path d="M128 55L192 92V166L128 203L64 166V92L128 55Z" stroke="#F7FFE7" stroke-opacity="0.62" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M142 118C142 110.268 135.732 104 128 104C120.268 104 114 110.268 114 118C114 122.496 116.12 126.513 119.417 129.073V134.302L112.681 154.255C111.889 156.602 113.635 159 116.111 159H139.889C142.365 159 144.111 156.602 143.319 154.255L136.583 134.302V129.073C139.88 126.513 142 122.496 142 118Z" fill="#06101D"/>
   <defs>
-    <linearGradient id="top-face" x1="128" y1="36" x2="128" y2="218" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#A9FF52"/>
-      <stop offset="1" stop-color="#46C638"/>
-    </linearGradient>
-    <linearGradient id="top-glow" x1="84" y1="48" x2="181" y2="130" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#CFFF86"/>
-      <stop offset="1" stop-color="#7BEA48"/>
-    </linearGradient>
-    <linearGradient id="left-face" x1="50" y1="111" x2="128" y2="179" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#3BAC33"/>
-      <stop offset="1" stop-color="#238A21"/>
-    </linearGradient>
-    <linearGradient id="right-face" x1="128" y1="111" x2="206" y2="179" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2A9A28"/>
-      <stop offset="1" stop-color="#176A17"/>
+    <linearGradient id="body" x1="82" y1="70" x2="169" y2="187" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C8FF73"/>
+      <stop offset="1" stop-color="#22C55E"/>
     </linearGradient>
   </defs>
 </svg>
