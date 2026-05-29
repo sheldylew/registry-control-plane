@@ -27,7 +27,7 @@ RUN set -eux; \
       --target=/install/lib/python3.12/site-packages \
       -r requirements-runtime.txt
 
-FROM --platform=$BUILDPLATFORM python:3.11.13-slim-bookworm AS auth-init-builder
+FROM --platform=$BUILDPLATFORM python:3.12.9-slim-bookworm AS auth-init-builder
 
 ARG TARGETARCH
 
@@ -47,11 +47,11 @@ RUN set -eux; \
       --no-cache-dir \
       ${pip_platforms} \
       --implementation=cp \
-      --python-version=3.11 \
-      --abi=cp311 \
+      --python-version=3.12 \
+      --abi=cp312 \
       --abi=abi3 \
       --only-binary=:all: \
-      --target=/install/lib/python3.11/site-packages \
+      --target=/install/lib/python3.12/site-packages \
       -r requirements-auth-init.txt
 
 FROM --platform=$BUILDPLATFORM alpine:3.20 AS build-metadata
@@ -114,11 +114,11 @@ HEALTHCHECK --interval=1m --timeout=3s --retries=12 --start-period=5s CMD ["pyth
 
 CMD ["./scripts/api-entrypoint.sh"]
 
-FROM gcr.io/distroless/python3-debian12 AS auth-init
+FROM python:3.12.9-slim-bookworm AS auth-init
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/srv:/usr/local/lib/python3.11/site-packages \
+    PYTHONPATH=/srv:/usr/local/lib/python3.12/site-packages \
     APP_ENV=production \
     AUTH_PRIVATE_KEY_PATH=/auth-private/auth-private.pem \
     AUTH_PUBLIC_CERT_PATH=/auth-public/auth-cert.pem \
@@ -136,6 +136,7 @@ COPY backend ./backend
 COPY docker/registry-config.yml.tmpl ./docker/registry-config.yml.tmpl
 COPY scripts/auth-init.py ./scripts/auth-init.py
 
+ENTRYPOINT ["python"]
 CMD ["./scripts/auth-init.py"]
 
 FROM --platform=$BUILDPLATFORM node:20.18.3-alpine3.20 AS web-builder
