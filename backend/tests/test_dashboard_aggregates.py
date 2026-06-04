@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from backend.api import routes as api_routes
 from backend.auth.passwords import hash_password
 from backend.main import create_app
-from backend.models import AuditEvent, PersonalAccessToken, RobotAccount, RobotToken, User
+from backend.models import AuditEvent, PersonalAccessToken, RegistryEventInbox, RobotAccount, RobotToken, User
 
 
 @pytest.fixture(autouse=True)
@@ -163,6 +163,49 @@ def test_dashboard_pull_token_counting_requires_repository_pull_scope(settings) 
 
     assert body["stats"]["pull_tokens_issued"] == 2
     assert sum(bucket["count"] for bucket in body["registry_activity_trend"]["pull_tokens"]) == 2
+
+
+def test_dashboard_deletion_buckets_include_audited_deletes_without_double_counting_notifications(settings) -> None:
+    now = datetime.now(timezone.utc)
+
+    for app, client in _dashboard(settings):
+        with app.state.session_factory() as session:
+            session.add_all(
+                [
+                    AuditEvent(
+                        actor_type="user",
+                        actor_id=None,
+                        action="repository_tag_deleted",
+                        target_type="repository_tag",
+                        metadata_json={"repo": "team/app", "tag": "latest", "digest": "sha256:deleted"},
+                        created_at=now,
+                    ),
+                    RegistryEventInbox(
+                        action="delete",
+                        repository_name="team/app",
+                        tag="latest",
+                        digest="sha256:deleted",
+                        raw_payload={},
+                        dedupe_key="delete|team/app|latest|sha256:deleted",
+                        status="processed",
+                        received_at=now,
+                        processed_at=now,
+                    ),
+                    AuditEvent(
+                        actor_type="user",
+                        actor_id=None,
+                        action="repository_storage_pruned",
+                        target_type="repository",
+                        metadata_json={"repo": "team/empty", "removed": True},
+                        created_at=now,
+                    ),
+                ]
+            )
+            session.commit()
+
+        body = _get_dashboard(client, settings)
+
+    assert sum(bucket["count"] for bucket in body["registry_activity_trend"]["deletions"]) == 2
 
 
 def test_dashboard_recent_activity_is_capped_and_redacts_token_prefixes(settings) -> None:

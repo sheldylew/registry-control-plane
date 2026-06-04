@@ -89,6 +89,10 @@ router = APIRouter(prefix="/api")
 DASHBOARD_CACHE_TTL_SECONDS = 300
 _dashboard_cache: dict[tuple[str, int], tuple[float, dict]] = {}
 
+
+def _clear_dashboard_cache() -> None:
+    _dashboard_cache.clear()
+
 MAX_SHORT_TEXT_LENGTH = 255
 MAX_EMAIL_LENGTH = 320
 MAX_PASSWORD_LENGTH = 512
@@ -708,6 +712,59 @@ def _aggregate_bucket_counts(db: Session, timestamp_column, *filters, days: int 
     return list(buckets.values())
 
 
+def _registry_deletion_bucket_counts(db: Session, *, days: int = 7) -> list[dict]:
+    start_at, buckets = _dashboard_bucket_template(days=days)
+    seen: set[tuple[date, str, str, str, str]] = set()
+
+    inbox_rows = db.execute(
+        select(
+            RegistryEventInbox.received_at,
+            RegistryEventInbox.repository_name,
+            RegistryEventInbox.tag,
+            RegistryEventInbox.digest,
+        )
+        .where(
+            RegistryEventInbox.received_at >= start_at,
+            RegistryEventInbox.action == "delete",
+        )
+    ).all()
+    for received_at, repository_name, tag, digest in inbox_rows:
+        bucket_day = _date_bucket_key(received_at)
+        if bucket_day is None:
+            continue
+        seen.add((bucket_day, repository_name or "", tag or "", digest or "", "manifest"))
+
+    audit_rows = db.execute(
+        select(AuditEvent.created_at, AuditEvent.action, AuditEvent.metadata_json)
+        .where(
+            AuditEvent.created_at >= start_at,
+            AuditEvent.action.in_(("repository_tag_deleted", "repository_storage_pruned")),
+        )
+    ).all()
+    for created_at, action, metadata in audit_rows:
+        bucket_day = _date_bucket_key(created_at)
+        if bucket_day is None:
+            continue
+        metadata = metadata or {}
+        if action == "repository_tag_deleted":
+            seen.add(
+                (
+                    bucket_day,
+                    metadata.get("repo") or "",
+                    metadata.get("tag") or "",
+                    metadata.get("digest") or "",
+                    "manifest",
+                )
+            )
+        else:
+            seen.add((bucket_day, metadata.get("repo") or "", "", "", "repository"))
+
+    for bucket_day, *_rest in seen:
+        if bucket_day in buckets:
+            buckets[bucket_day]["count"] += 1
+    return list(buckets.values())
+
+
 def _is_pull_token_event(event: AuditEvent) -> bool:
     metadata = event.metadata_json or {}
     granted_scope = metadata.get("granted_scope") or []
@@ -756,12 +813,7 @@ def _registry_activity_trend(
             days=days,
         ),
         "pull_tokens": _bucket_counts([event.created_at for event in recent_pull_token_events], days=days),
-        "deletions": _aggregate_bucket_counts(
-            db,
-            RegistryEventInbox.received_at,
-            RegistryEventInbox.action == "delete",
-            days=days,
-        ),
+        "deletions": _registry_deletion_bucket_counts(db, days=days),
     }
 
 
@@ -2418,6 +2470,7 @@ def ingest_registry_events(
     if events:
         rows = create_registry_event_rows(db, events)
         mark_storage_usage_snapshot_stale(db)
+        _clear_dashboard_cache()
         db.commit()
         for row in rows:
             background_tasks.add_task(
@@ -3002,6 +3055,7 @@ def delete_repository_tags(
         )
         deleted_tags.append({"tag": tag, "digest": manifest.digest})
     mark_storage_usage_snapshot_stale(db)
+    _clear_dashboard_cache()
     db.commit()
     return {"ok": True, "repo": repo_name, "deleted": deleted_tags, "count": len(deleted_tags)}
 
@@ -3049,6 +3103,7 @@ def delete_repository_tag(
         manifest_digest=manifest.digest,
     )
     mark_storage_usage_snapshot_stale(db)
+    _clear_dashboard_cache()
     db.commit()
     return {"ok": True, "repo": repo_name, "tag": tag, "digest": manifest.digest}
 
@@ -3097,5 +3152,6 @@ def delete_empty_repository(
     )
     mark_repository_deleted(db, repository_name=repo_name)
     mark_storage_usage_snapshot_stale(db)
+    _clear_dashboard_cache()
     db.commit()
     return {"ok": True, "repo": repo_name, "removed": removed}
