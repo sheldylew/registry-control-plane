@@ -1571,7 +1571,14 @@ def test_public_repository_is_visible_without_explicit_permission(settings) -> N
         response = client.get("/api/repos")
 
     assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "public/app", "visibility": "public"}]
+    assert response.json()["repos"] == [
+        {
+            "name": "public/app",
+            "visibility": "public",
+            "updated_at": response.json()["repos"][0]["updated_at"],
+        }
+    ]
+    assert response.json()["sorting"] == {"sort": "updated", "direction": "desc"}
 
 
 def test_admin_can_disable_robot(settings) -> None:
@@ -1996,8 +2003,9 @@ def _seed_repository_state(
     tags: tuple[str, ...] = ("latest",),
     visibility: str = "private",
     deleted: bool = False,
+    seen_at: datetime | None = None,
 ) -> Repository:
-    now = datetime.now(timezone.utc)
+    now = seen_at or datetime.now(timezone.utc)
     repository = Repository(
         name=repository_name,
         visibility=visibility,
@@ -2460,9 +2468,10 @@ def test_repo_list_only_shows_visible_repositories(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            _seed_repository_state(session, "otherns/private")
-            _seed_repository_state(session, "sheldylew/app")
-            _seed_repository_state(session, "sheldylew/worker")
+            base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+            _seed_repository_state(session, "otherns/private", seen_at=base)
+            _seed_repository_state(session, "sheldylew/app", seen_at=base + timedelta(minutes=1))
+            _seed_repository_state(session, "sheldylew/worker", seen_at=base + timedelta(minutes=2))
             user = User(
                 username="repo-reader",
                 email="repo-reader@example.com",
@@ -2491,9 +2500,18 @@ def test_repo_list_only_shows_visible_repositories(settings) -> None:
 
     assert response.status_code == 200
     assert response.json()["repos"] == [
-        {"name": "sheldylew/app", "visibility": "private"},
-        {"name": "sheldylew/worker", "visibility": "private"},
+        {
+            "name": "sheldylew/worker",
+            "visibility": "private",
+            "updated_at": (base + timedelta(minutes=2)).isoformat(),
+        },
+        {
+            "name": "sheldylew/app",
+            "visibility": "private",
+            "updated_at": (base + timedelta(minutes=1)).isoformat(),
+        },
     ]
+    assert response.json()["sorting"] == {"sort": "updated", "direction": "desc"}
 
 
 def test_admin_sees_all_repositories(settings) -> None:
@@ -2501,8 +2519,9 @@ def test_admin_sees_all_repositories(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
-            _seed_repository_state(session, "otherns/private")
-            _seed_repository_state(session, "sheldylew/app")
+            base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+            _seed_repository_state(session, "otherns/private", seen_at=base)
+            _seed_repository_state(session, "sheldylew/app", seen_at=base + timedelta(minutes=1))
             session.commit()
 
         login = _login(client, settings.admin_username, settings.admin_password)
@@ -2511,8 +2530,16 @@ def test_admin_sees_all_repositories(settings) -> None:
 
     assert response.status_code == 200
     assert response.json()["repos"] == [
-        {"name": "otherns/private", "visibility": "private"},
-        {"name": "sheldylew/app", "visibility": "private"},
+        {
+            "name": "sheldylew/app",
+            "visibility": "private",
+            "updated_at": (base + timedelta(minutes=1)).isoformat(),
+        },
+        {
+            "name": "otherns/private",
+            "visibility": "private",
+            "updated_at": base.isoformat(),
+        },
     ]
 
 
@@ -2521,8 +2548,9 @@ def test_repo_list_supports_pagination(settings) -> None:
 
     with TestClient(app) as client:
         with app.state.session_factory() as session:
+            base = datetime(2026, 6, 1, tzinfo=timezone.utc)
             for n in range(1, 13):
-                _seed_repository_state(session, f"repo/{n:02d}")
+                _seed_repository_state(session, f"repo/{n:02d}", seen_at=base + timedelta(minutes=n))
             session.commit()
 
         login = _login(client, settings.admin_username, settings.admin_password)
@@ -2533,10 +2561,20 @@ def test_repo_list_supports_pagination(settings) -> None:
     assert page_one.status_code == 200
     assert page_two.status_code == 200
     assert page_one.json()["repos"] == [
-        {"name": f"repo/{n:02d}", "visibility": "private"} for n in range(1, 11)
+        {
+            "name": f"repo/{n:02d}",
+            "visibility": "private",
+            "updated_at": (base + timedelta(minutes=n)).isoformat(),
+        }
+        for n in range(12, 2, -1)
     ]
     assert page_two.json()["repos"] == [
-        {"name": f"repo/{n:02d}", "visibility": "private"} for n in range(11, 13)
+        {
+            "name": f"repo/{n:02d}",
+            "visibility": "private",
+            "updated_at": (base + timedelta(minutes=n)).isoformat(),
+        }
+        for n in range(2, 0, -1)
     ]
     assert page_one.json()["pagination"]["page"] == 1
     assert page_one.json()["pagination"]["page_size"] == 10
@@ -2547,6 +2585,53 @@ def test_repo_list_supports_pagination(settings) -> None:
     assert page_two.json()["pagination"]["has_prev"] is True
     assert page_two.json()["pagination"]["has_next"] is False
     assert page_two.json()["pagination"]["total"] == 12
+
+
+def test_repo_list_supports_updated_and_name_sorting(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+            _seed_repository_state(session, "repo/bravo", seen_at=base + timedelta(minutes=2))
+            _seed_repository_state(session, "repo/alpha", seen_at=base + timedelta(minutes=1))
+            _seed_repository_state(session, "repo/charlie", seen_at=base + timedelta(minutes=3))
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        updated_asc = client.get("/api/repos?sort=updated&direction=asc")
+        name_asc = client.get("/api/repos?sort=name&direction=asc")
+        name_desc = client.get("/api/repos?sort=name&direction=desc")
+
+    assert updated_asc.status_code == 200
+    assert [repo["name"] for repo in updated_asc.json()["repos"]] == ["repo/alpha", "repo/bravo", "repo/charlie"]
+    assert updated_asc.json()["sorting"] == {"sort": "updated", "direction": "asc"}
+    assert name_asc.status_code == 200
+    assert [repo["name"] for repo in name_asc.json()["repos"]] == ["repo/alpha", "repo/bravo", "repo/charlie"]
+    assert name_asc.json()["sorting"] == {"sort": "name", "direction": "asc"}
+    assert name_desc.status_code == 200
+    assert [repo["name"] for repo in name_desc.json()["repos"]] == ["repo/charlie", "repo/bravo", "repo/alpha"]
+    assert name_desc.json()["sorting"] == {"sort": "name", "direction": "desc"}
+
+
+def test_repo_list_rejects_unsupported_sorting(settings) -> None:
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            _seed_repository_state(session, "repo/alpha")
+            session.commit()
+
+        login = _login(client, settings.admin_username, settings.admin_password)
+        assert login.status_code == 200
+        bad_sort = client.get("/api/repos?sort=size")
+        bad_direction = client.get("/api/repos?direction=sideways")
+
+    assert bad_sort.status_code == 400
+    assert bad_sort.json()["detail"] == "Unsupported repository sort."
+    assert bad_direction.status_code == 400
+    assert bad_direction.json()["detail"] == "Unsupported repository sort direction."
 
 
 def test_repo_list_uses_db_state_without_registry_catalog_scan(settings) -> None:
@@ -2583,7 +2668,8 @@ def test_repo_list_excludes_soft_deleted_repositories(settings) -> None:
         response = client.get("/api/repos?page=1")
 
     assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
+    assert [repo["name"] for repo in response.json()["repos"]] == ["sheldylew/app"]
+    assert [repo["visibility"] for repo in response.json()["repos"]] == ["private"]
 
 
 def test_repo_list_excludes_repositories_without_active_tags(settings) -> None:
@@ -2600,7 +2686,8 @@ def test_repo_list_excludes_repositories_without_active_tags(settings) -> None:
         response = client.get("/api/repos?page=1")
 
     assert response.status_code == 200
-    assert response.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
+    assert [repo["name"] for repo in response.json()["repos"]] == ["sheldylew/app"]
+    assert [repo["visibility"] for repo in response.json()["repos"]] == ["private"]
 
 
 def test_repository_visibility_update_is_reflected_in_db_backed_repo_list(settings) -> None:
@@ -2625,8 +2712,10 @@ def test_repository_visibility_update_is_reflected_in_db_backed_repo_list(settin
     assert first.status_code == 200
     assert update.status_code == 200
     assert second.status_code == 200
-    assert first.json()["repos"] == [{"name": "public/app", "visibility": "private"}]
-    assert second.json()["repos"] == [{"name": "public/app", "visibility": "public"}]
+    assert [repo["name"] for repo in first.json()["repos"]] == ["public/app"]
+    assert [repo["visibility"] for repo in first.json()["repos"]] == ["private"]
+    assert [repo["name"] for repo in second.json()["repos"]] == ["public/app"]
+    assert [repo["visibility"] for repo in second.json()["repos"]] == ["public"]
 
 
 def test_registry_delete_event_removes_tag_from_db_backed_repo_list(settings) -> None:
@@ -2664,11 +2753,10 @@ def test_registry_delete_event_removes_tag_from_db_backed_repo_list(settings) ->
     assert first.status_code == 200
     assert event.status_code == 202
     assert second.status_code == 200
-    assert first.json()["repos"] == [
-        {"name": "sheldylew/app", "visibility": "private"},
-        {"name": "sheldylew/gc-me", "visibility": "private"},
-    ]
-    assert second.json()["repos"] == [{"name": "sheldylew/app", "visibility": "private"}]
+    assert [repo["name"] for repo in first.json()["repos"]] == ["sheldylew/gc-me", "sheldylew/app"]
+    assert [repo["visibility"] for repo in first.json()["repos"]] == ["private", "private"]
+    assert [repo["name"] for repo in second.json()["repos"]] == ["sheldylew/app"]
+    assert [repo["visibility"] for repo in second.json()["repos"]] == ["private"]
 
 
 def test_repo_tags_require_pull_permission(settings) -> None:

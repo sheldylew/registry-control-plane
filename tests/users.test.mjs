@@ -86,10 +86,17 @@ test("repositories page shows visibility badges", async () => {
     readFile(new URL("../app/components/repositories-panel.jsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /<RepositoriesPanel initialPayload=\{payload\} \/>/);
+  assert.match(page, /getUiTimezone/);
+  assert.match(page, /<RepositoriesPanel initialPayload=\{payload\} timeZone=\{timeZone\} \/>/);
   assert.match(panel, /repo\.visibility === "public"/);
   assert.match(panel, /Public/);
   assert.match(panel, /Private/);
+  assert.match(panel, /function SortHeader/);
+  assert.match(panel, /function buildSortHref/);
+  assert.match(panel, /function buildPageHref\(page, sorting\)/);
+  assert.match(panel, /formatRelativeTime\(value, \{ timeZone \}\)/);
+  assert.match(panel, /formatDateTime\(value, \{ timeZone \}\)/);
+  assert.match(panel, /cacheRef = useRef\(new Map\(\)\)/);
 });
 
 test("maintenance panel exposes registry state rebuild action", async () => {

@@ -2739,8 +2739,16 @@ def list_repositories(
     user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
     page: int = 1,
+    sort: str = "updated",
+    direction: str = "desc",
 ):
     safe_page = max(page, 1)
+    safe_sort = sort.lower()
+    safe_direction = direction.lower()
+    if safe_sort not in {"updated", "name"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported repository sort.")
+    if safe_direction not in {"asc", "desc"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported repository sort direction.")
     page_size = effective_default_page_size(db)
     visible_condition = _visible_repository_condition(user)
     visible_repositories_query = (
@@ -2759,12 +2767,29 @@ def list_repositories(
     ) or 0
     page_start = (safe_page - 1) * page_size
     page_end = page_start + page_size
+    if safe_sort == "name":
+        sort_order = (
+            Repository.name.asc() if safe_direction == "asc" else Repository.name.desc(),
+            Repository.updated_at.desc(),
+        )
+    else:
+        sort_order = (
+            Repository.updated_at.asc() if safe_direction == "asc" else Repository.updated_at.desc(),
+            Repository.name.asc(),
+        )
     repository_rows = db.scalars(
-        visible_repositories_query.order_by(Repository.name.asc()).offset(page_start).limit(page_size)
+        visible_repositories_query
+        .order_by(*sort_order)
+        .offset(page_start)
+        .limit(page_size)
     ).all()
     payload = {
         "repos": [
-            {"name": repository.name, "visibility": repository.visibility}
+            {
+                "name": repository.name,
+                "visibility": repository.visibility,
+                "updated_at": _serialize_optional_datetime(repository.updated_at),
+            }
             for repository in repository_rows
         ],
         "truncation": {"truncated": False, "pages_fetched": 0, "returned": len(repository_rows)},
@@ -2774,6 +2799,10 @@ def list_repositories(
             "total": total_visible,
             "has_prev": safe_page > 1,
             "has_next": page_end < total_visible,
+        },
+        "sorting": {
+            "sort": safe_sort,
+            "direction": safe_direction,
         },
         "user": _serialize_user(user),
     }
