@@ -35,9 +35,10 @@ const maintenanceModes = [
   {
     value: "aggressive",
     label: "Aggressive cleanup",
-    badge: "Destructive",
+    badge: "Paused",
     badgeTone: "amber",
-    detail: "Enables the registry maintenance gate, runs garbage collection with untagged cleanup, prunes empty directories, then reopens /v2/ traffic.",
+    disabled: true,
+    detail: "Temporarily disabled while a safer replacement is being built. The current untagged cleanup path is unsafe for OCI index images.",
   },
 ];
 
@@ -55,15 +56,17 @@ export default function MaintenancePanel({ logRetentionDays }) {
 
   async function onSubmit(event) {
     event.preventDefault();
+    if (mode === "aggressive") {
+      setError("Aggressive cleanup is temporarily disabled while a safer replacement is being built.");
+      return;
+    }
     setPending(true);
     setError("");
 
     const payload =
-      mode === "aggressive"
-        ? { dry_run: false, delete_untagged: true, prune_empty_dirs: true }
-        : mode === "standard"
-          ? { dry_run: false, delete_untagged: false, prune_empty_dirs: false }
-          : { dry_run: true, delete_untagged: false, prune_empty_dirs: false };
+      mode === "standard"
+        ? { dry_run: false, delete_untagged: false, prune_empty_dirs: false }
+        : { dry_run: true, delete_untagged: false, prune_empty_dirs: false };
 
     const response = await fetch("/api/admin/maintenance/jobs", {
       method: "POST",
@@ -189,7 +192,14 @@ export default function MaintenancePanel({ logRetentionDays }) {
           {maintenanceModes.map((option) => (
             <label
               key={option.value}
-              className={`rounded-lg border px-3 py-3 transition sm:px-4 sm:py-4 ${mode === option.value ? "border-cyan-400/40 bg-cyan-400/10" : "border-white/10 bg-slate-950/60"}`}
+              className={`rounded-lg border px-3 py-3 transition sm:px-4 sm:py-4 ${
+                option.disabled
+                  ? "cursor-not-allowed border-white/10 bg-slate-950/40 opacity-65"
+                  : mode === option.value
+                    ? "border-cyan-400/40 bg-cyan-400/10"
+                    : "border-white/10 bg-slate-950/60"
+              }`}
+              aria-disabled={option.disabled ? "true" : undefined}
             >
               <div className="flex items-start gap-3">
                 <input
@@ -197,6 +207,7 @@ export default function MaintenancePanel({ logRetentionDays }) {
                   name="gc-mode"
                   value={option.value}
                   checked={mode === option.value}
+                  disabled={option.disabled}
                   onChange={(event) => setMode(event.target.value)}
                   className="mt-1"
                 />

@@ -120,6 +120,9 @@ test("maintenance panel exposes registry state rebuild action", async () => {
   assert.match(panel, /router\.refresh\(\)/);
   assert.match(panel, /\/api\/admin\/maintenance\/cache\/rebuild/);
   assert.match(panel, /Rebuild registry state/);
+  assert.match(panel, /label: "Aggressive cleanup"/);
+  assert.match(panel, /disabled: true/);
+  assert.match(panel, /Temporarily disabled while a safer replacement is being built/);
   assert.match(panel, /registry_event_inbox_deleted/);
   assert.match(panel, /X-CSRF-Token/);
 });

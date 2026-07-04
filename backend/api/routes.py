@@ -2691,6 +2691,12 @@ def create_maintenance_job(
     db: Session = Depends(get_db),
     maintenance: MaintenanceService = Depends(get_maintenance_service),
 ):
+    if payload.delete_untagged:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aggressive cleanup is temporarily disabled while a safer replacement is being built.",
+        )
+
     try:
         job = maintenance.create_job(
             db,

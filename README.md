@@ -27,7 +27,7 @@ This is a personal project that I use for my own registry operations and share p
 - Anonymous pull-only access for repositories marked `public`
 - Bounded catalog, tag, manifest, and history queries for larger registries
 - Database-backed repository and tag state from registry push/delete notifications
-- Maintenance controls for analysis-only runs, registry-state rebuilds, garbage collection, aggressive cleanup, and notification retries
+- Maintenance controls for analysis-only runs, registry-state rebuilds, standard garbage collection, and notification retries. Aggressive untagged cleanup is currently disabled while a safer replacement is being developed for OCI-indexed images.
 - Runtime admin settings for the public origin, UI timezone, default page size, audit retention, startup rebuilds, and storage-usage refreshes
 - Audit history plus retained maintenance job logs with configurable pruning
 - Non-root container runtime hardening with generated signing material kept out of git

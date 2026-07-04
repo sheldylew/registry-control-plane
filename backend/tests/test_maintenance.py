@@ -298,9 +298,9 @@ def test_only_one_gc_job_can_be_queued(settings) -> None:
     assert second.status_code == 409
 
 
-def test_delete_untagged_passes_gc_flag_and_job_failure_is_recorded(settings) -> None:
+def test_delete_untagged_cleanup_is_temporarily_disabled(settings) -> None:
     app = create_app(settings)
-    runner = FakeMaintenanceRunner(gc=CommandResult(returncode=1, stderr="gc failed"))
+    runner = FakeMaintenanceRunner()
     app.state.maintenance_service_factory = lambda: MaintenanceService(
         session_factory=app.state.session_factory,
         settings=settings,
@@ -318,12 +318,11 @@ def test_delete_untagged_passes_gc_flag_and_job_failure_is_recorded(settings) ->
 
         with app.state.session_factory() as session:
             job = session.scalar(select(GcJob).order_by(GcJob.id.desc()))
-            events = session.scalars(select(AuditEvent).order_by(AuditEvent.id.asc())).all()
 
-    assert response.status_code == 200
-    assert runner.calls == [("gc", True)]
-    assert job.status == "failed"
-    assert any(event.action == "gc_job_failed" for event in events)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Aggressive cleanup is temporarily disabled while a safer replacement is being built."
+    assert runner.calls == []
+    assert job is None
 
 
 def test_registry_maintenance_gate_blocks_v2_when_destructive_job_is_queued(settings) -> None:

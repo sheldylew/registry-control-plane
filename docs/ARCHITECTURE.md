@@ -35,6 +35,7 @@ API routes mirror those surfaces:
 - The default list page size, UI timezone, audit pruning retention, storage usage refresh interval, and public registry origin are runtime settings stored in SQLite.
 - Login and registry-token issuance have configurable fixed-window rate limits.
 - Registry garbage collection uses a maintenance gate on `/v2/` rather than stopping the registry container.
+- Aggressive untagged cleanup is intentionally disabled. The current `registry:2.8.3 garbage-collect --delete-untagged=true` path can remove config and layer blobs that remain reachable through tagged OCI indexes, so a safer replacement is being developed before that control is re-enabled.
 - The maintenance UI and `/v2/` gate are exercised by `./scripts/e2e-test.sh`, including live delete and garbage-collection flows.
 - `docker compose build` alone does not refresh already-running containers; use `./scripts/rebuild-stack.sh` when you need the live stack to pick up new code.
 
